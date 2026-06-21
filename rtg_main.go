@@ -10,6 +10,8 @@ type file interface {
 	io.Reader
 	io.Writer
 	io.Closer
+
+	Chmod(mode os.FileMode) error
 }
 
 type offsetFile interface {
@@ -110,6 +112,20 @@ func write(fd int, buf []byte, off int64) int {
 		return -1
 	}
 	return n
+}
+
+func chmod(fd int, mode int) int {
+	file, ok := files[fd]
+	if !ok {
+		slog.Error("invalid file descriptor", "fd", fd)
+		return -1
+	}
+	err := file.Chmod(os.FileMode(mode))
+	if err != nil {
+		slog.Error("chmod error", "fd", fd, "error", err)
+		return -1
+	}
+	return 0
 }
 
 func print(s string) {

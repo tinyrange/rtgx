@@ -47,6 +47,10 @@ func appMain(args []string) int {
 		print("compilation failed\n")
 		return 1
 	}
+	if chmod(output, 0755) != 0 {
+		return 1
+	}
+	close(output)
 
 	return 0
 }

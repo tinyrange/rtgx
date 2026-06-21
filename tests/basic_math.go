@@ -26,5 +26,5 @@ func appMain(args []string) int {
 	}
 
 	print("PASS\n")
-	return 0
+	return 1 + 2 + 5 - 3 + 4*6 + 10/2
 }

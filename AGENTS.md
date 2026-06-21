@@ -8,9 +8,9 @@ The compiler will eventually target many operating systems and architectures. Th
 
 - The only files that can be modified are `./compiler_*_impl.go` and `./main_rtg.go`.
 - You can add new files in `./tests` but you should avoid modifying existing ones unless they are broken.
-- The only syscalls are `open`, `close`, `read`, `write`, and `print`.
+- The only syscalls are `open`, `close`, `read`, `write`, `chmod`, and `print`.
 - Performance requirements are strictly defined in `./main_test.go` and cannot be violated.
-- Do not hardcode test cases, emit prebuilt/self-copying binaries, or patch the test harness/runtime instead of implementing the compiler.
+- Do not hardcode test cases, emit prebuilt/self-copying binaries, copy the compiler executable or source as the compiled output, or patch the test harness/runtime instead of implementing the compiler from parsed source semantics.
 
 ## Workflow
 

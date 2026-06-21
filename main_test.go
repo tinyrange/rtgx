@@ -12,6 +12,12 @@ import (
 	"time"
 )
 
+type commandResult struct {
+	stdout   string
+	stderr   string
+	exitCode int
+}
+
 func resetRuntime() {
 	for k := range files {
 		if k >= 3 {
@@ -51,8 +57,114 @@ func compile(inputFiles []string, outputFile string) error {
 	if err != 0 {
 		return fmt.Errorf("compilation failed")
 	}
+	if chmod(outputFd, 0755) != 0 {
+		return fmt.Errorf("failed to set output file permissions")
+	}
+	close(outputFd)
 
 	return nil
+}
+
+func runCommand(path string, args ...string) (commandResult, error) {
+	return runCommandInDir("", path, args...)
+}
+
+func runCommandInDir(dir string, path string, args ...string) (commandResult, error) {
+	var result commandResult
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd := exec.Command(path, args...)
+	cmd.Dir = dir
+	cmd.Env = os.Environ()
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	result.stdout = stdout.String()
+	result.stderr = stderr.String()
+	if cmd.ProcessState != nil {
+		result.exitCode = cmd.ProcessState.ExitCode()
+		return result, nil
+	}
+	return result, err
+}
+
+func runCompilerBinary(path string, outputFile string, inputFiles []string) error {
+	args := append([]string{"-o", outputFile}, inputFiles...)
+	result, err := runCommand(path, args...)
+	if err != nil {
+		return err
+	}
+	if result.exitCode != 0 {
+		return fmt.Errorf("exit code %d\nstdout: %sstderr: %s", result.exitCode, result.stdout, result.stderr)
+	}
+	return nil
+}
+
+func buildStage2Compiler(t *testing.T, outDir string) string {
+	t.Helper()
+
+	inputFiles := getCompilerFiles()
+	stage0 := filepath.Join(outDir, "stage0")
+	if err := compile(inputFiles, stage0); err != nil {
+		t.Fatalf("stage0 compilation failed: %v", err)
+	}
+
+	stage1 := filepath.Join(outDir, "stage1")
+	if err := runCompilerBinary(stage0, stage1, inputFiles); err != nil {
+		t.Fatalf("stage1 compilation failed: %v", err)
+	}
+
+	stage2 := filepath.Join(outDir, "stage2")
+	if err := runCompilerBinary(stage1, stage2, inputFiles); err != nil {
+		t.Fatalf("stage2 compilation failed: %v", err)
+	}
+
+	return stage2
+}
+
+func runWithHostGo(t *testing.T, path string) commandResult {
+	t.Helper()
+
+	outDir := t.TempDir()
+	runtimeData, err := os.ReadFile("rtg_main.go")
+	if err != nil {
+		t.Fatalf("failed to read runtime: %v", err)
+	}
+	testData, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read test source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outDir, "rtg_main.go"), runtimeData, 0644); err != nil {
+		t.Fatalf("failed to write runtime copy: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outDir, "test.go"), testData, 0644); err != nil {
+		t.Fatalf("failed to write test copy: %v", err)
+	}
+
+	hostBinary := filepath.Join(outDir, "host-test")
+	buildResult, err := runCommandInDir(outDir, "go", "build", "-o", hostBinary, "rtg_main.go", "test.go")
+	if err != nil {
+		t.Fatalf("host go build failed: %v", err)
+	}
+	if buildResult.exitCode != 0 {
+		t.Fatalf("host go build failed with exit code %d\nstdout: %sstderr: %s", buildResult.exitCode, buildResult.stdout, buildResult.stderr)
+	}
+
+	result, err := runCommand(hostBinary)
+	if err != nil {
+		t.Fatalf("host-built execution failed: %v", err)
+	}
+	return result
+}
+
+func compareCommandResult(t *testing.T, expected commandResult, actual commandResult) {
+	t.Helper()
+	if actual.stdout != expected.stdout || actual.stderr != expected.stderr || actual.exitCode != expected.exitCode {
+		t.Fatalf("compiled output did not match host go\nstdout: got %q, want %q\nstderr: got %q, want %q\nexit code: got %d, want %d",
+			actual.stdout, expected.stdout,
+			actual.stderr, expected.stderr,
+			actual.exitCode, expected.exitCode)
+	}
 }
 
 // test that the compiler can compile and run a simple "hello, world!" program.
@@ -72,31 +184,25 @@ func TestCompileTests(t *testing.T) {
 		t.Fatalf("failed to discover test files: %v", err)
 	}
 
+	outDir := t.TempDir()
+	stage2 := buildStage2Compiler(t, outDir)
+
 	for _, path := range inputFiles {
 		t.Run(path, func(t *testing.T) {
-			// compile the test file
-			resetRuntime()
+			expected := runWithHostGo(t, path)
 
-			outDir := t.TempDir()
-			outputFile := filepath.Join(outDir, "hello")
+			testOutDir := t.TempDir()
+			outputFile := filepath.Join(testOutDir, "test")
 
-			err := compile([]string{path}, outputFile)
-			if err != nil {
+			if err := runCompilerBinary(stage2, outputFile, []string{path}); err != nil {
 				t.Fatalf("compilation failed: %v", err)
 			}
 
-			// Run the compiled binary and check its output
-			cmd := exec.Command(outputFile)
-			cmd.Env = os.Environ()
-			output, err := cmd.CombinedOutput()
+			actual, err := runCommand(outputFile)
 			if err != nil {
-				t.Fatalf("execution failed: %v\nOutput: %s", err, string(output))
+				t.Fatalf("execution failed: %v", err)
 			}
-
-			expectedOutput := "PASS\n"
-			if string(output) != expectedOutput {
-				t.Fatalf("unexpected output: got %q, want %q", string(output), expectedOutput)
-			}
+			compareCommandResult(t, expected, actual)
 		})
 	}
 }
