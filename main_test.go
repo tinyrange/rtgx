@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func resetRuntime() {
@@ -127,5 +129,64 @@ func TestCompilerCompiler(t *testing.T) {
 
 // Check the stage2 compiler compiles in under 25ms and produces a binary under 126KB which runs with under 1MB max RSS.
 func TestCompilerPerformance(t *testing.T) {
-	t.Fatal("not implemented")
+	inputFiles := getCompilerFiles()
+	outDir := t.TempDir()
+
+	stage0 := filepath.Join(outDir, "stage0")
+	if err := compile(inputFiles, stage0); err != nil {
+		t.Fatalf("stage0 compilation failed: %v", err)
+	}
+
+	stage1 := filepath.Join(outDir, "stage1")
+	cmd := exec.Command(stage0, append([]string{"-o", stage1}, inputFiles...)...)
+	cmd.Env = os.Environ()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("stage1 compilation failed: %v\nOutput: %s", err, string(output))
+	}
+
+	stage2 := filepath.Join(outDir, "stage2")
+	cmd = exec.Command(stage1, append([]string{"-o", stage2}, inputFiles...)...)
+	cmd.Env = os.Environ()
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("stage2 compilation failed: %v\nOutput: %s", err, string(output))
+	}
+
+	stage3 := filepath.Join(outDir, "stage3")
+	cmd = exec.Command(stage2, append([]string{"-o", stage3}, inputFiles...)...)
+	cmd.Env = os.Environ()
+	start := time.Now()
+	output, err = cmd.CombinedOutput()
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("stage2 performance compilation failed: %v\nOutput: %s", err, string(output))
+	}
+	if elapsed > 25*time.Millisecond {
+		t.Fatalf("stage2 compiler took %s, want <= 25ms", elapsed)
+	}
+
+	info, err := os.Stat(stage3)
+	if err != nil {
+		t.Fatalf("failed to stat stage3: %v", err)
+	}
+	const maxBinarySize = 126 * 1024
+	if info.Size() > maxBinarySize {
+		t.Fatalf("stage3 binary is %d bytes, want <= %d", info.Size(), maxBinarySize)
+	}
+
+	cmd = exec.Command(stage3)
+	cmd.Env = os.Environ()
+	output, err = cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("stage3 run without arguments succeeded unexpectedly\nOutput: %s", string(output))
+	}
+	rusage, ok := cmd.ProcessState.SysUsage().(*syscall.Rusage)
+	if !ok {
+		t.Fatalf("failed to read stage3 resource usage")
+	}
+	const maxRSSKB = 1024
+	if rusage.Maxrss > maxRSSKB {
+		t.Fatalf("stage3 max RSS is %dKB, want <= %dKB", rusage.Maxrss, maxRSSKB)
+	}
 }
