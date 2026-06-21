@@ -1,8 +1,42 @@
 package main
 
+func rtgEnv() []string {
+	var empty []string
+	return empty
+}
+
+func rtgOpenInput(path string, flags int, env []string) int {
+	fd := open(path, flags)
+	if fd >= 0 {
+		return fd
+	}
+	if len(path) == 0 || path[0] == '/' {
+		return fd
+	}
+	for e := 0; e < len(env); e++ {
+		pwd := env[e]
+		if len(pwd) > 4 {
+			if pwd[0] == 'P' && pwd[1] == 'W' && pwd[2] == 'D' && pwd[3] == '=' {
+				var full []byte
+				for i := 4; i < len(pwd); i++ {
+					full = append(full, pwd[i])
+				}
+				full = append(full, '/')
+				for i := 0; i < len(path); i++ {
+					full = append(full, path[i])
+				}
+				full = append(full, 0)
+				return open(string(full), flags)
+			}
+		}
+	}
+	return fd
+}
+
 func appMain(args []string) int {
 	var input []int
 	var output int = -1
+	env := rtgEnv()
 
 	if len(args) < 2 {
 		print("usage: rtgx6 [options] <input files>\n")
@@ -30,7 +64,7 @@ func appMain(args []string) int {
 			continue
 		}
 
-		fd := open(args[i], O_RDONLY)
+		fd := rtgOpenInput(args[i], O_RDONLY, env)
 		if fd < 0 {
 			return 1
 		}

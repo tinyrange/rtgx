@@ -6,18 +6,33 @@ The compiler will eventually target many operating systems and architectures. Th
 
 ## Restrictions
 
-- The only files that can be modified are `./compiler_*_impl.go` and `./main_rtg.go`.
-- You can add new files in `./tests` but you should avoid modifying existing ones unless they are broken.
+- The only compiler files that can be modified are `./compiler_*_impl.go` and `./compiler_main.go`.
+- You can add new regression programs in `./tests` but you should avoid modifying existing ones unless they are broken.
+- Do not modify `./main_test.go`.
 - The only syscalls are `open`, `close`, `read`, `write`, `chmod`, and `print`.
 - Performance requirements are strictly defined in `./main_test.go` and cannot be violated.
 - Do not hardcode test cases, emit prebuilt/self-copying binaries, copy the compiler executable or source as the compiled output, or patch the test harness/runtime instead of implementing the compiler from parsed source semantics.
-- Your allowed to write your own harnesses and unrestricted tests in `./sandbox` but this folder is not part of the repo and should only be used for local testing.
+- You are allowed to write one-off custom tests in `./sandbox`, but this folder is not part of the repo and should only be used for local compiler experiments. Do not use it to modify or replace the test harness.
 
 ## Workflow
 
 Every time you find a miscompilation bug you should write a test in `./tests` to confirm it. All tests should only output `PASS\n` if they pass and anything else is considered a failure.
 
-If you want to run tests only use `go test .` since the tests directory will contain conflicting symbols.
+There are no restrictions on the specific `go test` command you run.
+Do not run `go test` in module mode inside `./tests`; those files intentionally contain conflicting package-level symbols and are meant to be compiled individually by the compiler test harness.
+
+## Bugfixing Workflow
+
+Whenever a compiler bug is encountered:
+
+- Make a minimal reproducer for the bug.
+- Compile a stage0 compiler and debug the reproducer with that stage0 compiler until the generated output works there.
+- Use GDB freely to inspect compiler and output-binary failures.
+- Add compiler features that make debugging easier when useful, such as symbols or better diagnostics.
+- Once the minimal reproducer is understood and fixed, add it to `./tests` as a regression program.
+- Run the compiler tests again and repeat the loop until the compiler works end to end.
+
+Debug prints and debug helpers are allowed in the main repo while bugfixing. Keep or remove them later based on what is useful.
 
 ## Structure
 
