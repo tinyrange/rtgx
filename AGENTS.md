@@ -17,3 +17,12 @@ The compiler will eventually target many operating systems and architectures. Th
 Every time you find a miscompilation bug you should write a test in `./tests` to confirm it. All tests should only output `PASS\n` if they pass and anything else is considered a failure.
 
 If you want to run tests only use `go test .` since the tests directory will contain conflicting symbols.
+
+## Structure
+
+The compiler is going to be adding more architectures in the future. It's important to keep this in mind and split content between files.
+
+- `compiler_main.go` the compiler entrypoint. avoid putting any code not part of a user interface here.
+- `compiler_common.go` any platform independent code.
+- `compiler_<arch>_impl.go` any architecture specific code.
+- `compiler_<os>_<arch>_impl.go` any operating system specific code.
