@@ -66,6 +66,9 @@ func read(fd int, buf []byte, off int64) int {
 	if off < 0 {
 		n, err := file.Read(buf)
 		if err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				return n
+			}
 			slog.Error("read error", "fd", fd, "error", err)
 			return -1
 		}
@@ -79,6 +82,9 @@ func read(fd int, buf []byte, off int64) int {
 	}
 	n, err := oFile.ReadAt(buf, off)
 	if err != nil {
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			return n
+		}
 		slog.Error("read error", "fd", fd, "error", err)
 		return -1
 	}
