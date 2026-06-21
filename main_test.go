@@ -6,7 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -175,18 +176,27 @@ func TestCompilerPerformance(t *testing.T) {
 		t.Fatalf("stage3 binary is %d bytes, want <= %d", info.Size(), maxBinarySize)
 	}
 
-	cmd = exec.Command(stage3)
+	rssFile := filepath.Join(outDir, "stage3-rss")
+	cmd = exec.Command("/usr/bin/time", "-f", "%M", "-o", rssFile, stage3)
 	cmd.Env = os.Environ()
 	output, err = cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("stage3 run without arguments succeeded unexpectedly\nOutput: %s", string(output))
 	}
-	rusage, ok := cmd.ProcessState.SysUsage().(*syscall.Rusage)
-	if !ok {
+	rssData, err := os.ReadFile(rssFile)
+	if err != nil {
+		t.Fatalf("failed to read stage3 resource usage: %v", err)
+	}
+	rssLines := strings.Fields(string(rssData))
+	if len(rssLines) == 0 {
 		t.Fatalf("failed to read stage3 resource usage")
 	}
+	maxRSS, err := strconv.Atoi(rssLines[len(rssLines)-1])
+	if err != nil {
+		t.Fatalf("failed to parse stage3 resource usage %q: %v", string(rssData), err)
+	}
 	const maxRSSKB = 1024
-	if rusage.Maxrss > maxRSSKB {
-		t.Fatalf("stage3 max RSS is %dKB, want <= %dKB", rusage.Maxrss, maxRSSKB)
+	if maxRSS > maxRSSKB {
+		t.Fatalf("stage3 max RSS is %dKB, want <= %dKB", maxRSS, maxRSSKB)
 	}
 }
