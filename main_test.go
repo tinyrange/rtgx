@@ -33,7 +33,7 @@ func resetRuntime() {
 }
 
 func getCompilerFiles() []string {
-	return []string{"compiler_common.go", "compiler_amd64_impl.go", "compiler_linux_amd64_impl.go", "compiler_main.go"}
+	return []string{"compiler_common_impl.go", "compiler_amd64_impl.go", "compiler_linux_impl.go", "compiler_linux_amd64_impl.go", "compiler_main.go"}
 }
 
 func compile(inputFiles []string, outputFile string) error {
