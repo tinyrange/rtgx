@@ -318,7 +318,44 @@ const rtgIdentWrite = 12
 const rtgIdentChmod = 13
 const rtgIdentCopy = 14
 
+const rtgDiagParseMissingPackage = 1
+const rtgDiagParseMissingPackageName = 2
+const rtgDiagParsePackageName = 3
+const rtgDiagParseGroupedDecl = 4
+const rtgDiagParseTopDecl = 5
+const rtgDiagParseFuncDecl = 6
+const rtgDiagParseStatement = 7
+const rtgDiagParseExpression = 8
+const rtgDiagParseComposite = 9
+const rtgDiagParseCall = 10
+const rtgDiagParseIndex = 11
+const rtgDiagParseParen = 12
+const rtgDiagMetaConstDecl = 20
+const rtgDiagMetaTopDecl = 21
+const rtgDiagMetaFuncDecl = 22
+const rtgDiagMetaResultType = 23
+const rtgDiagMetaParamList = 24
+const rtgDiagAppMainRequired = 40
+const rtgDiagMainRequiresAppMain = 41
+const rtgDiagAppMainSignature = 42
+const rtgDiagGlobalCodegen = 50
+const rtgDiagFunctionCodegen = 51
+const rtgDiagCompileFailed = 52
+const rtgDiagFunctionParams = 53
+const rtgDiagStatementCodegen = 54
+const rtgDiagAssignmentCodegen = 55
+const rtgDiagReturnCodegen = 56
+const rtgDiagConditionCodegen = 57
+const rtgDiagSwitchCodegen = 58
+const rtgDiagCallCodegen = 59
+const rtgDiagBreakOutsideLoop = 60
+const rtgDiagContinueOutsideLoop = 61
+const rtgDiagUnsupportedStatement = 62
+
+var rtgCompilerDiag int
+
 func compileLinuxAmd64(input []int, output int) int {
+	rtgCompilerDiag = 0
 	var src []byte
 	for i := 0; i < len(input); i++ {
 		src = rtgReadAll(input[i], src)
@@ -327,11 +364,13 @@ func compileLinuxAmd64(input []int, output int) int {
 	var prog rtgProgram
 	prog = rtgParseProgram(src)
 	if !prog.ok {
+		rtgPrintCompilerDiagnostic(rtgCompilerDiag)
 		return 1
 	}
 	var meta rtgMeta
 	meta = rtgBuildMeta(&prog)
 	if !meta.ok {
+		rtgPrintCompilerDiagnostic(rtgCompilerDiag)
 		return 1
 	}
 	var result rtgCompileResult
@@ -340,7 +379,29 @@ func compileLinuxAmd64(input []int, output int) int {
 		write(output, result.data, 0)
 		return 0
 	}
+	rtgPrintCompilerDiagnostic(rtgCompilerDiag)
 	return 1
+}
+
+func rtgSetCompilerDiag(diag int) {
+	if rtgCompilerDiag == 0 {
+		rtgCompilerDiag = diag
+	}
+}
+
+func rtgProgramError(p *rtgProgram, diag int) {
+	p.ok = false
+	rtgSetCompilerDiag(diag)
+}
+
+func rtgMetaError(m *rtgMeta, diag int) {
+	m.ok = false
+	rtgSetCompilerDiag(diag)
+}
+
+func rtgExprError(ep *rtgExprParse, diag int) {
+	ep.ok = false
+	rtgSetCompilerDiag(diag)
 }
 
 func rtgReadAll(fd int, out []byte) []byte {
@@ -362,12 +423,12 @@ func rtgParseProgram(src []byte) rtgProgram {
 
 	i := 0
 	if !rtgTokIsKind(&p, i, rtgTokPackage) {
-		p.ok = false
+		rtgProgramError(&p, rtgDiagParseMissingPackage)
 		return p
 	}
 	i++
 	if !rtgTokIsKind(&p, i, rtgTokIdent) {
-		p.ok = false
+		rtgProgramError(&p, rtgDiagParseMissingPackageName)
 		return p
 	}
 	i++
@@ -376,7 +437,7 @@ func rtgParseProgram(src []byte) rtgProgram {
 		if rtgTokIsKind(&p, i, rtgTokPackage) {
 			i++
 			if !rtgTokIsKind(&p, i, rtgTokIdent) {
-				p.ok = false
+				rtgProgramError(&p, rtgDiagParsePackageName)
 				return p
 			}
 			i++
@@ -389,7 +450,7 @@ func rtgParseProgram(src []byte) rtgProgram {
 			if rtgTokCharIs(&p, i, '(') {
 				end := rtgSkipBalanced(&p, i, '(', ')')
 				if end <= i {
-					p.ok = false
+					rtgProgramError(&p, rtgDiagParseGroupedDecl)
 					return p
 				}
 				var decl rtgDecl
@@ -403,7 +464,7 @@ func rtgParseProgram(src []byte) rtgProgram {
 				continue
 			}
 			if !rtgTokIsKind(&p, i, rtgTokIdent) {
-				p.ok = false
+				rtgProgramError(&p, rtgDiagParseTopDecl)
 				return p
 			}
 			name := &p.toks[i]
@@ -423,7 +484,7 @@ func rtgParseProgram(src []byte) rtgProgram {
 			var fn rtgFuncDecl
 			rtgParseFuncDecl(&p, i, &fn)
 			if fn.endTok <= i {
-				p.ok = false
+				rtgProgramError(&p, rtgDiagParseFuncDecl)
 				return p
 			}
 			p.funcs = append(p.funcs, fn)
@@ -1014,12 +1075,21 @@ func rtgParseCharToken(p *rtgProgram, tokIndex int) int {
 
 func rtgTryCompileScalarProgram(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 	appIndex := -1
+	mainFound := false
 	for i := 0; i < len(meta.funcs); i++ {
 		if rtgBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
 			appIndex = i
 		}
+		if rtgBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "main") {
+			mainFound = true
+		}
 	}
 	if appIndex < 0 {
+		if mainFound {
+			rtgSetCompilerDiag(rtgDiagMainRequiresAppMain)
+		} else {
+			rtgSetCompilerDiag(rtgDiagAppMainRequired)
+		}
 		var result rtgCompileResult
 		return result
 	}
@@ -1032,10 +1102,12 @@ func rtgTryCompileScalarProgram(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 		g.funcLabels = append(g.funcLabels, rtgAsmNewLabel(a))
 	}
 	if !rtgLinearInitGlobals(&g) {
+		rtgSetCompilerDiag(rtgDiagGlobalCodegen)
 		var result rtgCompileResult
 		return result
 	}
 	if !rtgEmitProgramEntryArgs(&g, appIndex) {
+		rtgSetCompilerDiag(rtgDiagAppMainSignature)
 		var result rtgCompileResult
 		return result
 	}
@@ -1045,6 +1117,7 @@ func rtgTryCompileScalarProgram(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 	rtgAsmSyscall(a)
 	for i := 0; i < len(meta.funcs); i++ {
 		if !rtgEmitScalarFunction(&g, i) {
+			rtgSetCompilerDiag(rtgDiagFunctionCodegen)
 			var result rtgCompileResult
 			return result
 		}
@@ -1058,6 +1131,10 @@ func rtgTryCompileScalarProgram(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 
 func rtgEmitProgramEntryArgs(g *rtgLinearGen, appIndex int) bool {
 	app := &g.meta.funcs[appIndex]
+	if app.resultType != 0 && !rtgTypeIsInt(g.meta, app.resultType) {
+		rtgSetCompilerDiag(rtgDiagAppMainSignature)
+		return false
+	}
 	argsOff := g.asm.bssSize
 	g.asm.bssSize += 32768
 	envDataOff := g.asm.bssSize
@@ -1069,10 +1146,12 @@ func rtgEmitProgramEntryArgs(g *rtgLinearGen, appIndex int) bool {
 		return true
 	}
 	if app.paramCount > 2 {
+		rtgSetCompilerDiag(rtgDiagAppMainSignature)
 		return false
 	}
 	first := &g.meta.params[app.firstParam]
 	if !rtgTypeIsStringSlice(g.meta, first.typ) {
+		rtgSetCompilerDiag(rtgDiagAppMainSignature)
 		return false
 	}
 	if app.paramCount == 1 {
@@ -1080,6 +1159,7 @@ func rtgEmitProgramEntryArgs(g *rtgLinearGen, appIndex int) bool {
 	}
 	second := &g.meta.params[app.firstParam+1]
 	if !rtgTypeIsStringSlice(g.meta, second.typ) {
+		rtgSetCompilerDiag(rtgDiagAppMainSignature)
 		return false
 	}
 	return true
@@ -1113,6 +1193,7 @@ func rtgEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		rtgAsmStackMem(a, g.returnStruct, 35144, 0x7d, 0xbd)
 	}
 	if !rtgBindFunctionParams(g, fnInfoIndex) {
+		rtgSetCompilerDiag(rtgDiagFunctionParams)
 		return false
 	}
 	if !rtgEmitLinearRange(g, fn.bodyStart+1, fn.bodyEnd) {
@@ -1236,17 +1317,20 @@ func rtgEmitLinearRange(g *rtgLinearGen, start int, end int) bool {
 		before := len(bp.stmts)
 		next := rtgParseOneStatement(&bp, i, end)
 		if !bp.ok || next <= i || len(bp.stmts) <= before {
+			rtgSetCompilerDiag(rtgDiagParseStatement)
 			return false
 		}
 		stmt := bp.stmts[len(bp.stmts)-1]
 		lastKind = stmt.kind
 		i = next
 		if !rtgEmitLinearStmt(g, &stmt) {
+			rtgSetCompilerDiag(rtgDiagStatementCodegen)
 			return false
 		}
 	}
 	g.lastRangeReturns = lastKind == rtgStmtReturn
 	if !bp.ok {
+		rtgSetCompilerDiag(rtgDiagParseStatement)
 		return false
 	}
 	return true
@@ -1276,20 +1360,24 @@ func rtgEmitLinearStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 		}
 		ep := rtgParseExpression(p, stmt.exprStart, stmt.exprEnd)
 		if !ep.ok || len(ep.exprs) == 0 {
+			rtgSetCompilerDiag(rtgDiagParseExpression)
 			return false
 		}
 		rootIndex := len(ep.exprs) - 1
 		root := &ep.exprs[rootIndex]
 		if root.kind != rtgExprCall {
+			rtgSetCompilerDiag(rtgDiagUnsupportedStatement)
 			return false
 		}
 		if !rtgEmitIntExpr(g, &ep, rootIndex) {
+			rtgSetCompilerDiag(rtgDiagCallCodegen)
 			return false
 		}
 		return true
 	}
 	if stmt.kind == rtgStmtVar || stmt.kind == rtgStmtShort || stmt.kind == rtgStmtAssign {
 		if !rtgEmitLinearAssign(g, stmt) {
+			rtgSetCompilerDiag(rtgDiagAssignmentCodegen)
 			return false
 		}
 		return true
@@ -1304,6 +1392,7 @@ func rtgEmitLinearStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 		resultType := g.meta.funcs[g.currentFunc].resultType
 		if rtgTypeIsTuple(g.meta, resultType) {
 			if !rtgEmitTupleReturn(g, stmt.exprStart, stmt.exprEnd) {
+				rtgSetCompilerDiag(rtgDiagReturnCodegen)
 				return false
 			}
 			rtgAsmLeave(a)
@@ -1312,23 +1401,28 @@ func rtgEmitLinearStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 		}
 		ep := rtgParseExpression(p, stmt.exprStart, stmt.exprEnd)
 		if !ep.ok || len(ep.exprs) == 0 {
+			rtgSetCompilerDiag(rtgDiagParseExpression)
 			return false
 		}
 		rootIndex := len(ep.exprs) - 1
 		if rtgTypeIsStruct(g.meta, resultType) {
 			if !rtgEmitStructReturnExpr(g, &ep, rootIndex) {
+				rtgSetCompilerDiag(rtgDiagReturnCodegen)
 				return false
 			}
 		} else if rtgTypeIsSlice(g.meta, resultType) {
 			if !rtgEmitSliceValueRegs(g, &ep, rootIndex) {
+				rtgSetCompilerDiag(rtgDiagReturnCodegen)
 				return false
 			}
 		} else if rtgTypeIsString(g.meta, resultType) {
 			if !rtgEmitStringValueRegs(g, &ep, rootIndex) {
+				rtgSetCompilerDiag(rtgDiagReturnCodegen)
 				return false
 			}
 		} else {
 			if !rtgEmitIntExpr(g, &ep, rootIndex) {
+				rtgSetCompilerDiag(rtgDiagReturnCodegen)
 				return false
 			}
 		}
@@ -1363,6 +1457,7 @@ func rtgEmitLinearStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 	}
 	if stmt.kind == rtgStmtBreak {
 		if g.breakDepth == 0 {
+			rtgSetCompilerDiag(rtgDiagBreakOutsideLoop)
 			return false
 		}
 		rtgAsmJmpLabel(a, g.breakLabels[g.breakDepth-1])
@@ -1370,11 +1465,13 @@ func rtgEmitLinearStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 	}
 	if stmt.kind == rtgStmtContinue {
 		if g.continueDepth == 0 {
+			rtgSetCompilerDiag(rtgDiagContinueOutsideLoop)
 			return false
 		}
 		rtgAsmJmpLabel(a, g.continueLabels[g.continueDepth-1])
 		return true
 	}
+	rtgSetCompilerDiag(rtgDiagUnsupportedStatement)
 	return false
 }
 
@@ -1395,6 +1492,7 @@ func rtgEmitLinearIf(g *rtgLinearGen, stmt *rtgStmt) bool {
 	p := g.prog
 	ep := rtgParseExpression(p, stmt.exprStart, stmt.exprEnd)
 	if !ep.ok || len(ep.exprs) == 0 {
+		rtgSetCompilerDiag(rtgDiagParseExpression)
 		return false
 	}
 	rootIndex := len(ep.exprs) - 1
@@ -1404,6 +1502,7 @@ func rtgEmitLinearIf(g *rtgLinearGen, stmt *rtgStmt) bool {
 		elseLabel = rtgAsmNewLabel(a)
 	}
 	if !rtgEmitJumpIfFalse(g, &ep, rootIndex, elseLabel) {
+		rtgSetCompilerDiag(rtgDiagConditionCodegen)
 		return false
 	}
 	if !rtgEmitScopedRange(g, stmt.bodyStart, stmt.bodyEnd) {
@@ -1426,6 +1525,7 @@ func rtgEmitLinearIf(g *rtgLinearGen, stmt *rtgStmt) bool {
 		nested.ok = true
 		next := rtgParseOneStatement(&nested, stmt.elseStart, stmt.elseEnd)
 		if !nested.ok || next != stmt.elseEnd || len(nested.stmts) != 1 {
+			rtgSetCompilerDiag(rtgDiagParseStatement)
 			return false
 		}
 		nestedStmt := nested.stmts[0]
@@ -1458,10 +1558,12 @@ func rtgEmitLinearFor(g *rtgLinearGen, stmt *rtgStmt) bool {
 	if stmt.exprStart < stmt.exprEnd {
 		ep := rtgParseExpression(p, stmt.exprStart, stmt.exprEnd)
 		if !ep.ok || len(ep.exprs) == 0 {
+			rtgSetCompilerDiag(rtgDiagParseExpression)
 			return false
 		}
 		rootIndex := len(ep.exprs) - 1
 		if !rtgEmitJumpIfFalse(g, &ep, rootIndex, endLabel) {
+			rtgSetCompilerDiag(rtgDiagConditionCodegen)
 			return false
 		}
 	}
@@ -1479,10 +1581,12 @@ func rtgEmitLinearSwitch(g *rtgLinearGen, stmt *rtgStmt) bool {
 	a := &g.asm
 	p := g.prog
 	if stmt.exprStart >= stmt.exprEnd {
+		rtgSetCompilerDiag(rtgDiagSwitchCodegen)
 		return false
 	}
 	ep := rtgParseExpression(p, stmt.exprStart, stmt.exprEnd)
 	if !ep.ok || len(ep.exprs) == 0 {
+		rtgSetCompilerDiag(rtgDiagParseExpression)
 		return false
 	}
 	rootIndex := len(ep.exprs) - 1
@@ -1493,12 +1597,14 @@ func rtgEmitLinearSwitch(g *rtgLinearGen, stmt *rtgStmt) bool {
 	if stringSwitch {
 		lenOffset = rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 		if !rtgEmitStringValueRegs(g, &ep, rootIndex) {
+			rtgSetCompilerDiag(rtgDiagSwitchCodegen)
 			return false
 		}
 		rtgAsmStoreRaxStack(a, valueOffset)
 		rtgAsmStoreRdxStack(a, lenOffset)
 	} else {
 		if !rtgEmitIntExpr(g, &ep, rootIndex) {
+			rtgSetCompilerDiag(rtgDiagSwitchCodegen)
 			return false
 		}
 		rtgAsmStoreRaxStack(a, valueOffset)
@@ -1532,6 +1638,7 @@ func rtgEmitLinearSwitch(g *rtgLinearGen, stmt *rtgStmt) bool {
 		clause := clauseStarts[i]
 		if rtgTokIsKind(p, clause, rtgTokCase) {
 			if !rtgEmitSwitchCaseTests(g, stmt, clause, valueOffset, lenOffset, stringSwitch, clauseLabels[i]) {
+				rtgSetCompilerDiag(rtgDiagSwitchCodegen)
 				return false
 			}
 		}
@@ -1545,6 +1652,7 @@ func rtgEmitLinearSwitch(g *rtgLinearGen, stmt *rtgStmt) bool {
 		clause := clauseStarts[i]
 		colon := rtgFindSwitchClauseColon(p, clause+1, stmt.bodyEnd)
 		if colon <= clause {
+			rtgSetCompilerDiag(rtgDiagSwitchCodegen)
 			return false
 		}
 		bodyEnd := rtgFindNextSwitchClause(p, colon+1, stmt.bodyEnd)
@@ -1564,27 +1672,32 @@ func rtgEmitSwitchCaseTests(g *rtgLinearGen, stmt *rtgStmt, clause int, valueOff
 	p := g.prog
 	colon := rtgFindSwitchClauseColon(p, clause+1, stmt.bodyEnd)
 	if colon <= clause+1 {
+		rtgSetCompilerDiag(rtgDiagSwitchCodegen)
 		return false
 	}
 	i := clause + 1
 	for i < colon {
 		valueEnd := rtgFindExprBoundary(p, i, colon)
 		if valueEnd <= i {
+			rtgSetCompilerDiag(rtgDiagSwitchCodegen)
 			return false
 		}
 		ep := rtgParseExpression(p, i, valueEnd)
 		if !ep.ok || len(ep.exprs) == 0 {
+			rtgSetCompilerDiag(rtgDiagParseExpression)
 			return false
 		}
 		rootIndex := len(ep.exprs) - 1
 		if stringSwitch {
 			if !rtgEmitSwitchStringCaseTest(g, valueOffset, lenOffset, &ep, rootIndex, matchLabel) {
+				rtgSetCompilerDiag(rtgDiagSwitchCodegen)
 				return false
 			}
 		} else {
 			rtgAsmLoadRaxStack(a, valueOffset)
 			rtgAsmPushRax(a)
 			if !rtgEmitIntExpr(g, &ep, rootIndex) {
+				rtgSetCompilerDiag(rtgDiagSwitchCodegen)
 				return false
 			}
 			rtgAsmPopRcx(a)
@@ -1604,6 +1717,7 @@ func rtgEmitSwitchStringCaseTest(g *rtgLinearGen, valueOffset int, lenOffset int
 	a := &g.asm
 	label := rtgEnsureStringEqualHelper(g)
 	if !rtgEmitStringValueRegs(g, ep, idx) {
+		rtgSetCompilerDiag(rtgDiagSwitchCodegen)
 		return false
 	}
 	rtgAsmMovRcxRdx(a)
@@ -1672,9 +1786,11 @@ func rtgEmitLinearClassicFor(g *rtgLinearGen, stmt *rtgStmt, semi1 int) bool {
 	p := g.prog
 	semi2 := rtgFindTokenTextInRange(p, semi1+1, stmt.exprEnd, ';')
 	if semi2 <= semi1 {
+		rtgSetCompilerDiag(rtgDiagParseStatement)
 		return false
 	}
 	if !rtgEmitLinearSimpleRange(g, stmt.exprStart, semi1) {
+		rtgSetCompilerDiag(rtgDiagStatementCodegen)
 		return false
 	}
 	startLabel := rtgAsmNewLabel(a)
@@ -1690,10 +1806,12 @@ func rtgEmitLinearClassicFor(g *rtgLinearGen, stmt *rtgStmt, semi1 int) bool {
 	if semi1+1 < semi2 {
 		ep := rtgParseExpression(p, semi1+1, semi2)
 		if !ep.ok || len(ep.exprs) == 0 {
+			rtgSetCompilerDiag(rtgDiagParseExpression)
 			return false
 		}
 		rootIndex := len(ep.exprs) - 1
 		if !rtgEmitJumpIfFalse(g, &ep, rootIndex, endLabel) {
+			rtgSetCompilerDiag(rtgDiagConditionCodegen)
 			return false
 		}
 	}
@@ -1702,6 +1820,7 @@ func rtgEmitLinearClassicFor(g *rtgLinearGen, stmt *rtgStmt, semi1 int) bool {
 	}
 	rtgAsmMarkLabel(a, postLabel)
 	if !rtgEmitLinearSimpleRange(g, semi2+1, stmt.exprEnd) {
+		rtgSetCompilerDiag(rtgDiagStatementCodegen)
 		return false
 	}
 	rtgAsmJmpLabel(a, startLabel)
@@ -3326,11 +3445,53 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	a := &g.asm
 	e := &ep.exprs[idx]
 	if e.kind == rtgExprSlice {
-		if e.firstArg >= 0 {
-			return false
-		}
 		if !rtgEmitSliceValueRegs(g, ep, e.left) {
 			return false
+		}
+		if e.firstArg >= 0 {
+			baseType := rtgInferParsedExprType(g, ep, e.left)
+			baseResolved := rtgResolveType(meta, baseType)
+			if baseResolved.kind != rtgTypeSlice {
+				return false
+			}
+			elemSize := rtgTypeSize(meta, baseResolved.elem)
+			if elemSize < 1 {
+				elemSize = 8
+			}
+			baseOff := rtgAddTypedLocal(g, 0, 0, baseType)
+			lowOff := rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
+			highOff := rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
+			rtgAsmStoreSliceStack(a, baseOff)
+			if !rtgEmitIntExpr(g, ep, e.firstArg) {
+				return false
+			}
+			rtgAsmStoreRaxStack(a, lowOff)
+			if e.right >= 0 {
+				if !rtgEmitIntExpr(g, ep, e.right) {
+					return false
+				}
+				rtgAsmStoreRaxStack(a, highOff)
+			} else {
+				rtgAsmLoadRaxStack(a, baseOff-8)
+				rtgAsmStoreRaxStack(a, highOff)
+			}
+			rtgAsmLoadRaxStack(a, baseOff-16)
+			rtgAsmLoadRcxStack(a, lowOff)
+			rtgAsmSubRaxRcx(a)
+			rtgAsmPushRax(a)
+			rtgAsmLoadRaxStack(a, highOff)
+			rtgAsmLoadRcxStack(a, lowOff)
+			rtgAsmSubRaxRcx(a)
+			rtgAsmPushRax(a)
+			rtgAsmLoadRaxStack(a, baseOff)
+			rtgAsmLoadRcxStack(a, lowOff)
+			if elemSize != 1 {
+				rtgAsmImulRcxImm(a, elemSize)
+			}
+			rtgAsmAddRaxRcx(a)
+			rtgAsmPopRdx(a)
+			rtgAsmPopRcx(a)
+			return true
 		}
 		if e.right >= 0 {
 			rtgAsmPushRax(a)
@@ -5811,6 +5972,17 @@ func rtgEmitSlicePtrLen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rtgAsmMemDisp(a, 8, 35656, 0x4a, 0x8a)
 		return true
 	}
+	if e.kind == rtgExprCall {
+		valueType := rtgInferParsedExprType(g, ep, idx)
+		if !rtgTypeIsSlice(meta, valueType) {
+			return false
+		}
+		if !rtgEmitSliceValueRegs(g, ep, idx) {
+			return false
+		}
+		rtgAsmMovRcxRdx(a)
+		return true
+	}
 	return false
 }
 
@@ -7259,6 +7431,10 @@ func rtgAsmAddRaxRcx(a *rtgAsm) {
 	rtgAsmEmit24(a, 13107528)
 }
 
+func rtgAsmSubRaxRcx(a *rtgAsm) {
+	rtgAsmEmit3(a, 0x48, 0x29, 0xc8)
+}
+
 func rtgAsmShlRcxImm(a *rtgAsm, imm int) {
 	rtgAsmEmit4(a, 0x48, 0xc1, 0xe1, imm)
 }
@@ -7459,7 +7635,7 @@ func rtgParseExpression(p *rtgProgram, start int, end int) rtgExprParse {
 	ep.ok = true
 	rtgParseBinaryExpr(&ep, 1)
 	if ep.pos < ep.end {
-		ep.ok = false
+		rtgExprError(&ep, rtgDiagParseExpression)
 	}
 	return ep
 }
@@ -7481,7 +7657,7 @@ func rtgParseBinaryExpr(ep *rtgExprParse, minPrec int) int {
 
 func rtgParseUnaryExpr(ep *rtgExprParse) int {
 	if ep.pos >= ep.end {
-		ep.ok = false
+		rtgExprError(ep, rtgDiagParseExpression)
 		return 0
 	}
 	if rtgTokCharIs(ep.prog, ep.pos, '+') || rtgTokCharIs(ep.prog, ep.pos, '-') || rtgTokCharIs(ep.prog, ep.pos, '!') || rtgTokCharIs(ep.prog, ep.pos, '&') || rtgTokCharIs(ep.prog, ep.pos, '*') {
@@ -7499,7 +7675,7 @@ func rtgParsePostfixExpr(ep *rtgExprParse) int {
 		if rtgTokCharIs(ep.prog, ep.pos, '{') {
 			base := &ep.exprs[left]
 			if base.kind != rtgExprIdent {
-				ep.ok = false
+				rtgExprError(ep, rtgDiagParseComposite)
 				return left
 			}
 			var compositeFields []rtgCompositeField
@@ -7539,7 +7715,7 @@ func rtgParsePostfixExpr(ep *rtgExprParse) int {
 				}
 			}
 			if !rtgTokCharIs(ep.prog, ep.pos, '}') {
-				ep.ok = false
+				rtgExprError(ep, rtgDiagParseComposite)
 				return left
 			}
 			ep.pos++
@@ -7581,7 +7757,7 @@ func rtgParsePostfixExpr(ep *rtgExprParse) int {
 				}
 			}
 			if !rtgTokCharIs(ep.prog, ep.pos, ')') {
-				ep.ok = false
+				rtgExprError(ep, rtgDiagParseCall)
 				return left
 			}
 			ep.pos++
@@ -7603,7 +7779,7 @@ func rtgParsePostfixExpr(ep *rtgExprParse) int {
 			indexStart := ep.pos
 			indexEnd := rtgFindMatchingExprClose(ep.prog, ep.pos, ep.end, '[', ']')
 			if indexEnd <= ep.pos {
-				ep.ok = false
+				rtgExprError(ep, rtgDiagParseIndex)
 				return left
 			}
 			colon := rtgFindSliceColon(ep.prog, indexStart, indexEnd)
@@ -7674,14 +7850,14 @@ func rtgFindSliceColon(p *rtgProgram, start int, end int) int {
 func rtgParseImplicitCompositeExpr(ep *rtgExprParse) int {
 	openTok := ep.pos
 	if !rtgTokCharIs(ep.prog, ep.pos, '{') {
-		ep.ok = false
+		rtgExprError(ep, rtgDiagParseComposite)
 		return 0
 	}
 	var compositeFields []rtgCompositeField
 	ep.pos++
 	for ep.ok && ep.pos < ep.end && !rtgTokCharIs(ep.prog, ep.pos, '}') {
 		if !rtgTokIsKind(ep.prog, ep.pos, rtgTokIdent) || !rtgTokCharIs(ep.prog, ep.pos+1, ':') {
-			ep.ok = false
+			rtgExprError(ep, rtgDiagParseComposite)
 			return 0
 		}
 		nameTok := ep.prog.toks[ep.pos]
@@ -7698,7 +7874,7 @@ func rtgParseImplicitCompositeExpr(ep *rtgExprParse) int {
 		}
 	}
 	if !rtgTokCharIs(ep.prog, ep.pos, '}') {
-		ep.ok = false
+		rtgExprError(ep, rtgDiagParseComposite)
 		return 0
 	}
 	ep.pos++
@@ -7713,7 +7889,7 @@ func rtgParseImplicitCompositeExpr(ep *rtgExprParse) int {
 
 func rtgParsePrimaryExpr(ep *rtgExprParse) int {
 	if ep.pos >= ep.end {
-		ep.ok = false
+		rtgExprError(ep, rtgDiagParseExpression)
 		return 0
 	}
 	tok := &ep.prog.toks[ep.pos]
@@ -7754,13 +7930,13 @@ func rtgParsePrimaryExpr(ep *rtgExprParse) int {
 		ep.pos++
 		inner := rtgParseBinaryExpr(ep, 1)
 		if !rtgTokCharIs(ep.prog, ep.pos, ')') {
-			ep.ok = false
+			rtgExprError(ep, rtgDiagParseParen)
 			return inner
 		}
 		ep.pos++
 		return inner
 	}
-	ep.ok = false
+	rtgExprError(ep, rtgDiagParseExpression)
 	return 0
 }
 
@@ -7890,10 +8066,12 @@ func rtgParseOneStatement(bp *rtgBodyParse, start int, end int) int {
 	if rtgTokIsKind(p, start, rtgTokIf) {
 		bodyStart := rtgFindStatementBodyOpen(p, start+1, end)
 		if bodyStart <= start {
+			rtgSetCompilerDiag(rtgDiagParseStatement)
 			return start
 		}
 		bodyEnd := rtgFindMatchingBrace(p, bodyStart, end)
 		if bodyEnd <= bodyStart {
+			rtgSetCompilerDiag(rtgDiagParseStatement)
 			return start
 		}
 		stmt := rtgStmt{kind: rtgStmtIf, startTok: start, endTok: bodyEnd + 1, exprStart: start + 1, exprEnd: bodyStart, bodyStart: bodyStart + 1, bodyEnd: bodyEnd}
@@ -7902,6 +8080,7 @@ func rtgParseOneStatement(bp *rtgBodyParse, start int, end int) int {
 			if rtgTokIsKind(p, next+1, rtgTokIf) {
 				foundEnd := rtgFindIfStatementEnd(p, next+1, end)
 				if foundEnd <= next+1 {
+					rtgSetCompilerDiag(rtgDiagParseStatement)
 					return start
 				}
 				stmt.elseStart = next + 1
@@ -7911,6 +8090,7 @@ func rtgParseOneStatement(bp *rtgBodyParse, start int, end int) int {
 			} else if rtgTokCharIs(p, next+1, '{') {
 				elseBodyEnd := rtgFindMatchingBrace(p, next+1, end)
 				if elseBodyEnd <= next+1 {
+					rtgSetCompilerDiag(rtgDiagParseStatement)
 					return start
 				}
 				stmt.elseStart = next + 2
@@ -7925,10 +8105,12 @@ func rtgParseOneStatement(bp *rtgBodyParse, start int, end int) int {
 	if rtgTokIsKind(p, start, rtgTokSwitch) {
 		bodyStart := rtgFindStatementBodyOpen(p, start+1, end)
 		if bodyStart <= start {
+			rtgSetCompilerDiag(rtgDiagParseStatement)
 			return start
 		}
 		bodyEnd := rtgFindMatchingBrace(p, bodyStart, end)
 		if bodyEnd <= bodyStart {
+			rtgSetCompilerDiag(rtgDiagParseStatement)
 			return start
 		}
 		rtgAddStmt(bp, rtgStmtSwitch, start, bodyEnd+1, start+1, bodyStart, bodyStart+1, bodyEnd, 0, 0, 0, 0)
@@ -7937,10 +8119,12 @@ func rtgParseOneStatement(bp *rtgBodyParse, start int, end int) int {
 	if rtgTokIsKind(p, start, rtgTokFor) {
 		bodyStart := rtgFindStatementBodyOpen(p, start+1, end)
 		if bodyStart <= start {
+			rtgSetCompilerDiag(rtgDiagParseStatement)
 			return start
 		}
 		bodyEnd := rtgFindMatchingBrace(p, bodyStart, end)
 		if bodyEnd <= bodyStart {
+			rtgSetCompilerDiag(rtgDiagParseStatement)
 			return start
 		}
 		rtgAddStmt(bp, rtgStmtFor, start, bodyEnd+1, start+1, bodyStart, bodyStart+1, bodyEnd, 0, 0, 0, 0)
@@ -7949,6 +8133,7 @@ func rtgParseOneStatement(bp *rtgBodyParse, start int, end int) int {
 	if rtgTokCharIs(p, start, '{') {
 		bodyEnd := rtgFindMatchingBrace(p, start, end)
 		if bodyEnd <= start {
+			rtgSetCompilerDiag(rtgDiagParseStatement)
 			return start
 		}
 		rtgAddStmt(bp, rtgStmtBlock, start, bodyEnd+1, 0, 0, start+1, bodyEnd, 0, 0, 0, 0)
@@ -8308,7 +8493,7 @@ func rtgParseConstDecls(m *rtgMeta, p *rtgProgram, start int, end int) {
 		}
 		specEnd := rtgStatementLineEnd(p, j, end)
 		if specEnd <= j {
-			m.ok = false
+			rtgMetaError(m, rtgDiagMetaConstDecl)
 			return
 		}
 		eq := rtgFindConstSpecEqual(p, j, specEnd)
@@ -8331,7 +8516,7 @@ func rtgParseConstDecls(m *rtgMeta, p *rtgProgram, start int, end int) {
 			break
 		}
 		if len(names) == 0 {
-			m.ok = false
+			rtgMetaError(m, rtgDiagMetaConstDecl)
 			return
 		}
 		if eq > j {
@@ -8343,11 +8528,11 @@ func rtgParseConstDecls(m *rtgMeta, p *rtgProgram, start int, end int) {
 		}
 		valueCount := len(prevValues) / 2
 		if valueCount == 0 {
-			m.ok = false
+			rtgMetaError(m, rtgDiagMetaConstDecl)
 			return
 		}
 		if valueCount != len(names) {
-			m.ok = false
+			rtgMetaError(m, rtgDiagMetaConstDecl)
 			return
 		}
 		typ := 0
@@ -8515,7 +8700,7 @@ func rtgFindConstSpecEqual(p *rtgProgram, start int, end int) int {
 
 func rtgParseTopDeclEntry(m *rtgMeta, p *rtgProgram, kind int, start int, end int) {
 	if start >= end || !rtgTokIsKind(p, start, rtgTokIdent) {
-		m.ok = false
+		rtgMetaError(m, rtgDiagMetaTopDecl)
 		return
 	}
 	name := &p.toks[start]
@@ -8526,7 +8711,7 @@ func rtgParseTopDeclEntry(m *rtgMeta, p *rtgProgram, kind int, start int, end in
 		}
 		typeResult := rtgParseType(m, p, typeStart, end)
 		if typeResult.typ == 0 || typeResult.next > end {
-			m.ok = false
+			rtgMetaError(m, rtgDiagMetaTopDecl)
 			return
 		}
 		if m.types[typeResult.typ].kind == rtgTypeStruct || m.types[typeResult.typ].kind == rtgTypePointer || m.types[typeResult.typ].kind == rtgTypeSlice {
@@ -8606,17 +8791,17 @@ func rtgParseFuncInfo(m *rtgMeta, fnIndex int) {
 	nameEnd := fn.nameEnd
 	nameTok := fn.nameTok
 	if nameTok <= fn.startTok {
-		m.ok = false
+		rtgMetaError(m, rtgDiagMetaFuncDecl)
 		return
 	}
 	lparen := rtgFindNextTokenText(p, nameTok+1, fn.bodyStart, '(')
 	if lparen <= nameTok {
-		m.ok = false
+		rtgMetaError(m, rtgDiagMetaFuncDecl)
 		return
 	}
 	rparen := rtgFindMatchingExprClose(p, lparen+1, fn.bodyStart, '(', ')')
 	if rparen <= lparen {
-		m.ok = false
+		rtgMetaError(m, rtgDiagMetaFuncDecl)
 		return
 	}
 	firstParam := len(m.params)
@@ -8626,7 +8811,7 @@ func rtgParseFuncInfo(m *rtgMeta, fnIndex int) {
 		beforeReceiver := len(m.params)
 		rtgParseParamList(m, p, fn.receiverStart, fn.receiverEnd, &paramCount)
 		if len(m.params) <= beforeReceiver {
-			m.ok = false
+			rtgMetaError(m, rtgDiagMetaFuncDecl)
 			return
 		}
 		receiverType = m.params[beforeReceiver].typ
@@ -8668,7 +8853,7 @@ func rtgBuildTupleType(m *rtgMeta, p *rtgProgram, parts []int) int {
 		typeEnd := parts[i*2+1]
 		typeResult := rtgParseType(m, p, typeStart, typeEnd)
 		if typeResult.typ == 0 {
-			m.ok = false
+			rtgMetaError(m, rtgDiagMetaResultType)
 			return 0
 		}
 		offset = rtgAlignTo8(offset)
@@ -8693,7 +8878,7 @@ func rtgParseParamList(m *rtgMeta, p *rtgProgram, start int, end int, count *int
 			return
 		}
 		if !rtgTokIsKind(p, i, rtgTokIdent) {
-			m.ok = false
+			rtgMetaError(m, rtgDiagMetaParamList)
 			return
 		}
 		name := &p.toks[i]
@@ -8717,7 +8902,7 @@ func rtgParseParamList(m *rtgMeta, p *rtgProgram, start int, end int, count *int
 		}
 		typeResult := rtgParseType(m, p, typeStart, entryEnd)
 		if typeResult.typ == 0 {
-			m.ok = false
+			rtgMetaError(m, rtgDiagMetaParamList)
 			return
 		}
 		m.params = append(m.params, rtgSymbolInfo{nameStart: name.start, nameEnd: name.end, typ: typeResult.typ, initStart: variadic})
@@ -8882,6 +9067,11 @@ func rtgTypeIsStringSlice(m *rtgMeta, typ int) bool {
 func rtgTypeIsString(m *rtgMeta, typ int) bool {
 	t := rtgResolveType(m, typ)
 	return t.kind == rtgTypeString
+}
+
+func rtgTypeIsInt(m *rtgMeta, typ int) bool {
+	t := rtgResolveType(m, typ)
+	return t.kind == rtgTypeInt
 }
 
 func rtgTypeIsStruct(m *rtgMeta, typ int) bool {
