@@ -1,5 +1,189 @@
 package main
 
+const rtgRel32 = 1
+const rtgAbsDataReloc = 3
+const rtgAbsBssReloc = 4
+
+type rtgLabelRef struct {
+	at    int
+	label int
+	kind  int
+}
+
+type rtgDataRef struct {
+	at  int
+	off int
+}
+
+type rtgAbsRef struct {
+	at   int
+	off  int
+	kind int
+}
+
+type rtgAsm struct {
+	code       []byte
+	labelPos   []int
+	labelSet   []bool
+	relocs     []rtgLabelRef
+	dataRelocs []rtgDataRef
+	absRelocs  []rtgAbsRef
+	data       []byte
+	bssSize    int
+	codeOffset int
+	dataOffset int
+}
+
+func rtgAsmInit(a *rtgAsm) {
+	var code []byte
+	var labelPos []int
+	var labelSet []bool
+	var relocs []rtgLabelRef
+	var dataRelocs []rtgDataRef
+	var absRelocs []rtgAbsRef
+	var data []byte
+	a.code = code
+	a.labelPos = labelPos
+	a.labelSet = labelSet
+	a.relocs = relocs
+	a.dataRelocs = dataRelocs
+	a.absRelocs = absRelocs
+	a.data = data
+	a.bssSize = 0
+	a.codeOffset = 0
+	a.dataOffset = 0
+}
+
+func rtgAsmNewLabel(a *rtgAsm) int {
+	a.labelPos = append(a.labelPos, 0)
+	a.labelSet = append(a.labelSet, false)
+	label := len(a.labelPos) - 1
+	return label
+}
+
+func rtgAsmMarkLabel(a *rtgAsm, label int) {
+	if label >= 0 && label < len(a.labelPos) {
+		codeLen := len(a.code)
+		a.labelPos[label] = codeLen
+		a.labelSet[label] = true
+	}
+}
+
+func rtgAsmEmit8(a *rtgAsm, v int) {
+	a.code = append(a.code, byte(v))
+}
+
+func rtgAsmEmit2(a *rtgAsm, v0 int, v1 int) {
+	a.code = append(a.code, byte(v0))
+	a.code = append(a.code, byte(v1))
+}
+
+func rtgAsmEmit3(a *rtgAsm, v0 int, v1 int, v2 int) {
+	a.code = append(a.code, byte(v0))
+	a.code = append(a.code, byte(v1))
+	a.code = append(a.code, byte(v2))
+}
+
+func rtgAsmEmit4(a *rtgAsm, v0 int, v1 int, v2 int, v3 int) {
+	a.code = append(a.code, byte(v0))
+	a.code = append(a.code, byte(v1))
+	a.code = append(a.code, byte(v2))
+	a.code = append(a.code, byte(v3))
+}
+
+func rtgAsmAddAbsReloc(a *rtgAsm, at int, off int, kind int) {
+	a.absRelocs = append(a.absRelocs, rtgAbsRef{at: at, off: off, kind: kind})
+}
+
+func rtgAsmAddReloc(a *rtgAsm, at int, label int, kind int) {
+	a.relocs = append(a.relocs, rtgLabelRef{at: at, label: label, kind: kind})
+}
+
+func rtgAsmEmit32(a *rtgAsm, v int) {
+	a.code = rtgAppend32(a.code, v)
+}
+
+func rtgAsmEmit64(a *rtgAsm, v int) {
+	a.code = rtgAppend64(a.code, v)
+}
+
+func rtgAsmEmit16(a *rtgAsm, v int) {
+	rtgAsmEmit8(a, v)
+	rtgAsmEmit8(a, v>>8)
+}
+
+func rtgAsmEmit24(a *rtgAsm, v int) {
+	rtgAsmEmit8(a, v)
+	rtgAsmEmit8(a, v>>8)
+	rtgAsmEmit8(a, v>>16)
+}
+
+func rtgAsmPatch(a *rtgAsm) {
+	for i := 0; i < len(a.relocs); i++ {
+		r := a.relocs[i]
+		if r.label >= 0 && r.label < len(a.labelPos) && a.labelSet[r.label] {
+			target := a.labelPos[r.label]
+			disp := target - (r.at + 4)
+			rtgPut32At(a.code, r.at, disp)
+		}
+	}
+	a.dataOffset = a.codeOffset + len(a.code)
+	for i := 0; i < len(a.dataRelocs); i++ {
+		r := a.dataRelocs[i]
+		target := a.dataOffset + r.off
+		next := a.codeOffset + r.at + 4
+		disp := target - next
+		rtgPut32At(a.code, r.at, disp)
+	}
+	for i := 0; i < len(a.absRelocs); i++ {
+		r := a.absRelocs[i]
+		target := a.dataOffset + r.off
+		if r.kind == rtgAbsBssReloc {
+			target = a.dataOffset + len(a.data) + r.off
+		}
+		next := a.codeOffset + r.at + 4
+		disp := target - next
+		rtgPut32At(a.code, r.at, disp)
+	}
+}
+
+func rtgPut32At(out []byte, at int, v int) {
+	b0 := byte(v)
+	b1 := byte(v >> 8)
+	b2 := byte(v >> 16)
+	b3 := byte(v >> 24)
+	out[at] = b0
+	out[at+1] = b1
+	out[at+2] = b2
+	out[at+3] = b3
+}
+
+func rtgAppend16(out []byte, v int) []byte {
+	out = append(out, byte(v))
+	out = append(out, byte(v>>8))
+	return out
+}
+
+func rtgAppend32(out []byte, v int) []byte {
+	out = append(out, byte(v))
+	out = append(out, byte(v>>8))
+	out = append(out, byte(v>>16))
+	out = append(out, byte(v>>24))
+	return out
+}
+
+func rtgAppend64(out []byte, v int) []byte {
+	out = append(out, byte(v))
+	out = append(out, byte(v>>8))
+	out = append(out, byte(v>>16))
+	out = append(out, byte(v>>24))
+	out = append(out, byte(v>>32))
+	out = append(out, byte(v>>40))
+	out = append(out, byte(v>>48))
+	out = append(out, byte(v>>56))
+	return out
+}
+
 const rtgTokEOF = 0
 const rtgTokIdent = 1
 const rtgTokNumber = 2

@@ -1,102 +1,5 @@
 package main
 
-const rtgRel32 = 1
-
-type rtgLabelRef struct {
-	at    int
-	label int
-	kind  int
-}
-
-type rtgDataRef struct {
-	at  int
-	off int
-}
-
-type rtgAbsRef struct {
-	at   int
-	off  int
-	kind int
-}
-
-type rtgAsm struct {
-	code       []byte
-	labelPos   []int
-	labelSet   []bool
-	relocs     []rtgLabelRef
-	dataRelocs []rtgDataRef
-	absRelocs  []rtgAbsRef
-	data       []byte
-	bssSize    int
-	codeOffset int
-	dataOffset int
-}
-
-type rtgLocalInfo struct {
-	nameStart int
-	nameEnd   int
-	offset    int
-	typ       int
-	size      int
-}
-
-type rtgGlobalInfo struct {
-	nameStart int
-	nameEnd   int
-	offset    int
-}
-
-type rtgSliceLocation struct {
-	offset int
-	typ    int
-	expr   int
-	mem    bool
-	global bool
-	ok     bool
-}
-
-type rtgLinearGen struct {
-	prog               *rtgProgram
-	meta               *rtgMeta
-	asm                rtgAsm
-	funcLabels         []int
-	currentFunc        int
-	returnStruct       int
-	locals             []rtgLocalInfo
-	stackUsed          int
-	globals            []rtgGlobalInfo
-	gotoLabels         []rtgGlobalInfo
-	breakLabels        []int
-	continueLabels     []int
-	breakDepth         int
-	continueDepth      int
-	streqLabel         int
-	streqEmitted       bool
-	append8Label       int
-	append8Emitted     bool
-	append64Label      int
-	append64Emitted    bool
-	appendAddrLabel    int
-	appendAddrEmitted  bool
-	appendBytesLabel   int
-	appendBytesEmitted bool
-	copyWordsLabel     int
-	copyWordsEmitted   bool
-	lastRangeReturns   bool
-	scopeBase          int
-	constEvalIota      int
-	constEvalIotaValid int
-}
-
-func rtgAddStringData(g *rtgLinearGen, msg []byte) int {
-	msgOff := len(g.asm.data)
-	for i := 0; i < len(msg); i++ {
-		g.asm.data = append(g.asm.data, msg[i])
-	}
-	g.asm.data = append(g.asm.data, 0)
-	return msgOff
-}
-
 func rtgEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	a := &g.asm
 	metaFn := &g.meta.funcs[fnInfoIndex]
@@ -119,10 +22,10 @@ func rtgEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.returnStruct = 0
 	g.stackUsed = 0
 	rtgAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-	rtgAsmEmit32(a, 8388808)
+	rtgAsmEmit32(a, 0x008000c8)
 	if rtgTypeIsStruct(g.meta, metaFn.resultType) {
 		g.returnStruct = rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
-		rtgAsmStackMem(a, g.returnStruct, 35144, 0x7d, 0xbd)
+		rtgAsmStackMem(a, g.returnStruct, 0x8948, 0x7d, 0xbd)
 	}
 	if !rtgBindFunctionParams(g, fnInfoIndex) {
 		rtgSetCompilerDiag(rtgDiagFunctionParams)
@@ -192,11 +95,11 @@ func rtgBindFunctionParams(g *rtgLinearGen, fnIndex int) bool {
 func rtgStoreParamWord(g *rtgLinearGen, reg int, offset int) bool {
 	a := &g.asm
 	if reg == 0 {
-		rtgAsmStackMem(a, offset, 35144, 0x7d, 0xbd)
+		rtgAsmStackMem(a, offset, 0x8948, 0x7d, 0xbd)
 		return true
 	}
 	if reg == 1 {
-		rtgAsmStackMem(a, offset, 35144, 0x75, 0xb5)
+		rtgAsmStackMem(a, offset, 0x8948, 0x75, 0xb5)
 		return true
 	}
 	if reg == 2 {
@@ -204,21 +107,542 @@ func rtgStoreParamWord(g *rtgLinearGen, reg int, offset int) bool {
 		return true
 	}
 	if reg == 3 {
-		rtgAsmStackMem(a, offset, 35144, 0x4d, 0x8d)
+		rtgAsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
 		return true
 	}
 	if reg == 4 {
-		rtgAsmStackMem(a, offset, 35148, 0x45, 0x85)
+		rtgAsmStackMem(a, offset, 0x894c, 0x45, 0x85)
 		return true
 	}
 	if reg == 5 {
-		rtgAsmStackMem(a, offset, 35148, 0x4d, 0x8d)
+		rtgAsmStackMem(a, offset, 0x894c, 0x4d, 0x8d)
 		return true
 	}
-	rtgAsmEmit24(a, 8751944)
-	rtgAsmEmit32(a, 16+(reg-6)*8)
+	rtgAsmEmit24(a, 0x858b48)
+	rtgAsmEmit32(a, 0x10+(reg-6)*8)
 	rtgAsmStoreRaxStack(a, offset)
 	return true
+}
+
+func rtgAsmImmFits8Signed(imm int) bool {
+	return imm >= -128 && imm <= 127
+}
+
+func rtgAsmMovRaxImm(a *rtgAsm, imm int) {
+	if imm == 0 {
+		rtgAsmEmit16(a, 0xc031)
+		return
+	}
+	if rtgAsmImmFits8Signed(imm) {
+		rtgAsmEmit2(a, 0x6a, imm)
+		rtgAsmPopRax(a)
+		return
+	}
+	if imm >= -2147483647 && imm <= 2147483647 {
+		rtgAsmEmit8(a, 0x68)
+		rtgAsmEmit32(a, imm)
+		rtgAsmPopRax(a)
+		return
+	}
+	rtgAsmEmit16(a, 0xb848)
+	rtgAsmEmit64(a, imm)
+}
+
+func rtgAsmMovRaxIntToken(a *rtgAsm, p *rtgProgram, tokIndex int) {
+	value := rtgParseIntToken(p, tokIndex)
+	if rtgIntTokenNeedsMovabs(p, tokIndex) {
+		rtgAsmMovRaxImm64(a, value)
+		return
+	}
+	rtgAsmMovRaxImm(a, value)
+}
+
+func rtgAsmMovRaxImm64(a *rtgAsm, imm int) {
+	rtgAsmEmit16(a, 0xb848)
+	rtgAsmEmit64(a, imm)
+}
+
+func rtgIntTokenNeedsMovabs(p *rtgProgram, tokIndex int) bool {
+	tok := &p.toks[tokIndex]
+	start := tok.start
+	if tok.end-start > 2 && p.src[start] == '0' {
+		return false
+	}
+	digits := tok.end - start
+	if digits > 10 {
+		return true
+	}
+	if digits < 10 {
+		return false
+	}
+	limit := "2147483647"
+	for i := 0; i < 10; i++ {
+		c := p.src[start+i]
+		if c > limit[i] {
+			return true
+		}
+		if c < limit[i] {
+			return false
+		}
+	}
+	return false
+}
+
+func rtgAsmMovRdxImm(a *rtgAsm, imm int) {
+	if imm == 0 {
+		rtgAsmEmit16(a, 0xd231)
+		return
+	}
+	if rtgAsmImmFits8Signed(imm) {
+		rtgAsmEmit2(a, 0x6a, imm)
+		rtgAsmPopRdx(a)
+		return
+	}
+	if imm >= 0 {
+		if imm <= 2147483647 {
+			rtgAsmEmit8(a, 0xba)
+			rtgAsmEmit32(a, imm)
+			return
+		}
+	} else {
+		if imm >= -2147483647 {
+			rtgAsmEmit24(a, 0xc2c748)
+			rtgAsmEmit32(a, imm)
+			return
+		}
+	}
+	rtgAsmEmit16(a, 0xba48)
+	rtgAsmEmit64(a, imm)
+}
+
+func rtgAsmMovRaxDataAddr(a *rtgAsm, dataOff int) {
+	rtgAsmEmit24(a, 0x058d48)
+	at := len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddAbsReloc(a, at, dataOff, rtgAbsDataReloc)
+}
+
+func rtgAsmMovRaxBssAddr(a *rtgAsm, bssOff int) {
+	rtgAsmEmit24(a, 0x058d48)
+	at := len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddAbsReloc(a, at, bssOff, rtgAbsBssReloc)
+}
+
+func rtgAsmMovR10BssAddr(a *rtgAsm, bssOff int) {
+	rtgAsmEmit24(a, 0x158d4c)
+	at := len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddAbsReloc(a, at, bssOff, rtgAbsBssReloc)
+}
+
+func rtgAsmLoadRaxBss(a *rtgAsm, bssOff int) {
+	rtgAsmEmit24(a, 0x058b48)
+	at := len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddAbsReloc(a, at, bssOff, rtgAbsBssReloc)
+}
+
+func rtgAsmStoreRaxBss(a *rtgAsm, bssOff int) {
+	rtgAsmEmit24(a, 0x058948)
+	at := len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddAbsReloc(a, at, bssOff, rtgAbsBssReloc)
+}
+
+func rtgAsmMovRdiRax(a *rtgAsm) {
+	rtgAsmEmit16(a, 0x5f50)
+}
+
+func rtgAsmMovRdxRax(a *rtgAsm) {
+	rtgAsmEmit16(a, 0x5a50)
+}
+
+func rtgAsmMovRaxRdx(a *rtgAsm) {
+	rtgAsmEmit24(a, 0xd08948)
+}
+
+func rtgAsmMovRsiRax(a *rtgAsm) {
+	rtgAsmEmit16(a, 0x5e50)
+}
+
+func rtgAsmMovRcxRax(a *rtgAsm) {
+	rtgAsmEmit16(a, 0x5950)
+}
+
+func rtgAsmMovR8Rax(a *rtgAsm) {
+	rtgAsmEmit24(a, 0xc08949)
+}
+
+func rtgAsmMovR9Rax(a *rtgAsm) {
+	rtgAsmEmit24(a, 0xc18949)
+}
+
+func rtgAsmMovRcxRdx(a *rtgAsm) {
+	rtgAsmEmit16(a, 0x5952)
+}
+
+func rtgAsmAddRdxRcx(a *rtgAsm) {
+	rtgAsmEmit24(a, 0xca0148)
+}
+
+func rtgAsmSyscall(a *rtgAsm) {
+	rtgAsmEmit16(a, 0x050f)
+}
+
+func rtgAsmPushRax(a *rtgAsm) {
+	rtgAsmEmit8(a, 0x50)
+}
+
+func rtgAsmPushRcx(a *rtgAsm) {
+	rtgAsmEmit8(a, 0x51)
+}
+
+func rtgAsmPushRdx(a *rtgAsm) {
+	rtgAsmEmit8(a, 0x52)
+}
+
+func rtgAsmPushImm(a *rtgAsm, imm int) {
+	if rtgAsmImmFits8Signed(imm) {
+		rtgAsmEmit2(a, 0x6a, imm)
+		return
+	}
+	if imm >= -2147483647 && imm <= 2147483647 {
+		rtgAsmEmit8(a, 0x68)
+		rtgAsmEmit32(a, imm)
+		return
+	}
+	rtgAsmMovRaxImm(a, imm)
+	rtgAsmPushRax(a)
+}
+
+func rtgAsmPushSliceRegs(a *rtgAsm) {
+	rtgAsmPushRcx(a)
+	rtgAsmPushRdx(a)
+	rtgAsmPushRax(a)
+}
+
+func rtgAsmPushStringRegs(a *rtgAsm) {
+	rtgAsmPushRdx(a)
+	rtgAsmPushRax(a)
+}
+
+func rtgAsmPopRax(a *rtgAsm) {
+	rtgAsmEmit8(a, 0x58)
+}
+
+func rtgAsmPopRcx(a *rtgAsm) {
+	rtgAsmEmit8(a, 0x59)
+}
+
+func rtgAsmPopRdx(a *rtgAsm) {
+	rtgAsmEmit8(a, 0x5a)
+}
+
+func rtgAsmPopRdi(a *rtgAsm) {
+	rtgAsmEmit8(a, 0x5f)
+}
+
+func rtgAsmStackMem(a *rtgAsm, offset int, base int, disp8 int, disp32 int) {
+	rtgAsmEmit16(a, base)
+	if offset >= 0 && offset <= 128 {
+		rtgAsmEmit8(a, disp8)
+		rtgAsmEmit8(a, -offset)
+		return
+	}
+	rtgAsmEmit8(a, disp32)
+	rtgAsmEmit32(a, -offset)
+}
+
+func rtgAsmStoreRaxStack(a *rtgAsm, offset int) {
+	rtgAsmStackMem(a, offset, 0x8948, 0x45, 0x85)
+}
+
+func rtgAsmStoreRdxStack(a *rtgAsm, offset int) {
+	rtgAsmStackMem(a, offset, 0x8948, 0x55, 0x95)
+}
+
+func rtgAsmLoadRaxStack(a *rtgAsm, offset int) {
+	rtgAsmStackMem(a, offset, 0x8b48, 0x45, 0x85)
+}
+
+func rtgAsmLeaRaxStack(a *rtgAsm, offset int) {
+	rtgAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
+}
+
+func rtgAsmLeaRdiStack(a *rtgAsm, offset int) {
+	rtgAsmStackMem(a, offset, 0x8d48, 0x7d, 0xbd)
+}
+
+func rtgAsmLeaRsiStack(a *rtgAsm, offset int) {
+	rtgAsmStackMem(a, offset, 0x8d48, 0x75, 0xb5)
+}
+
+func rtgAsmLoadRdxStack(a *rtgAsm, offset int) {
+	rtgAsmStackMem(a, offset, 0x8b48, 0x55, 0x95)
+}
+
+func rtgAsmAddRdxImm(a *rtgAsm, imm int) {
+	if rtgAsmImmFits8Signed(imm) {
+		rtgAsmEmit4(a, 0x48, 0x83, 0xc2, imm)
+		return
+	}
+	rtgAsmEmit24(a, 0xc28148)
+	rtgAsmEmit32(a, imm)
+}
+
+func rtgAsmMemDisp(a *rtgAsm, disp int, op int, disp8 int, disp32 int) {
+	rtgAsmEmit16(a, op)
+	if rtgAsmImmFits8Signed(disp) {
+		rtgAsmEmit2(a, disp8, disp)
+		return
+	}
+	rtgAsmEmit8(a, disp32)
+	rtgAsmEmit32(a, disp)
+}
+
+func rtgAsmLoadRcxStack(a *rtgAsm, offset int) {
+	rtgAsmStackMem(a, offset, 0x8b48, 0x4d, 0x8d)
+}
+
+func rtgAsmStoreSliceStack(a *rtgAsm, offset int) {
+	rtgAsmStoreRaxStack(a, offset)
+	rtgAsmStoreRdxStack(a, offset-8)
+	rtgAsmStackMem(a, offset-16, 0x8948, 0x4d, 0x8d)
+}
+
+func rtgAsmPopStoreStringMemRdx(a *rtgAsm, disp int) {
+	rtgAsmPopRax(a)
+	rtgAsmStoreRaxMemRdxDisp(a, disp)
+	rtgAsmPopRax(a)
+	rtgAsmStoreRaxMemRdxDisp(a, disp+8)
+}
+
+func rtgAsmPopStoreSliceMemRdx(a *rtgAsm, disp int) {
+	rtgAsmPopRax(a)
+	rtgAsmStoreRaxMemRdxDisp(a, disp)
+	rtgAsmPopRax(a)
+	rtgAsmStoreRaxMemRdxDisp(a, disp+8)
+	rtgAsmPopRax(a)
+	rtgAsmStoreRaxMemRdxDisp(a, disp+16)
+}
+
+func rtgAsmLoadQwordRaxIndexRcx8(a *rtgAsm) {
+	rtgAsmEmit32(a, 0xc8048b48)
+}
+
+func rtgAsmLoadQwordRaxIndexRcxDisp(a *rtgAsm, disp int) {
+	rtgAsmEmit16(a, 0x8b48)
+	if rtgAsmImmFits8Signed(disp) {
+		rtgAsmEmit3(a, 0x44, 0x8, disp)
+		return
+	}
+	rtgAsmEmit16(a, 0x0884)
+	rtgAsmEmit32(a, disp)
+}
+
+func rtgAsmLoadRaxMemRdxDisp(a *rtgAsm, disp int) {
+	if disp == 0 {
+		rtgAsmEmit24(a, 0x028b48)
+		return
+	}
+	rtgAsmMemDisp(a, disp, 0x8b48, 0x42, 0x82)
+}
+
+func rtgAsmLoadByteRaxIndexRcx(a *rtgAsm) {
+	rtgAsmEmit32(a, 0x04b60f48)
+	rtgAsmEmit8(a, 0x8)
+}
+
+func rtgAsmStoreRaxMemRdxRcx8(a *rtgAsm) {
+	rtgAsmEmit32(a, 0xca048948)
+}
+
+func rtgAsmStoreRaxMemRdxDisp(a *rtgAsm, disp int) {
+	if disp == 0 {
+		rtgAsmEmit24(a, 0x028948)
+		return
+	}
+	rtgAsmMemDisp(a, disp, 0x8948, 0x42, 0x82)
+}
+
+func rtgAsmStoreAlMemRdxRcx1(a *rtgAsm) {
+	rtgAsmEmit24(a, 0x0a0488)
+}
+
+func rtgAsmIncMemRdx(a *rtgAsm) {
+	rtgAsmEmit24(a, 0x02ff48)
+}
+
+func rtgAsmDecMemRdx(a *rtgAsm) {
+	rtgAsmEmit24(a, 0x0aff48)
+}
+
+func rtgAsmIncRcx(a *rtgAsm) {
+	rtgAsmEmit16(a, 0xc1ff)
+}
+
+func rtgAsmIncRax(a *rtgAsm) {
+	rtgAsmEmit16(a, 0xc0ff)
+}
+
+func rtgAsmBoolNotRax(a *rtgAsm) {
+	rtgAsmEmit24(a, 0xc08548)
+	rtgAsmEmit24(a, 0xc0940f)
+	rtgAsmEmit24(a, 0xc0b60f)
+}
+
+func rtgAsmCmpRaxImm8(a *rtgAsm, imm int) {
+	if imm == 0 {
+		rtgAsmEmit16(a, 0xc085)
+		return
+	}
+	rtgAsmEmit4(a, 0x48, 0x83, 0xf8, imm)
+}
+
+func rtgAsmAddRaxRcx(a *rtgAsm) {
+	rtgAsmEmit24(a, 0xc80148)
+}
+
+func rtgAsmSubRaxRcx(a *rtgAsm) {
+	rtgAsmEmit24(a, 0xc82948)
+}
+
+func rtgAsmShlRcxImm(a *rtgAsm, imm int) {
+	rtgAsmEmit4(a, 0x48, 0xc1, 0xe1, imm)
+}
+
+func rtgAsmShlRaxImm(a *rtgAsm, imm int) {
+	rtgAsmEmit4(a, 0x48, 0xc1, 0xe0, imm)
+}
+
+func rtgAsmSarRaxImm(a *rtgAsm, imm int) {
+	rtgAsmEmit4(a, 0x48, 0xc1, 0xf8, imm)
+}
+
+func rtgAsmImulRcxImm(a *rtgAsm, imm int) {
+	if rtgAsmImmFits8Signed(imm) {
+		rtgAsmEmit3(a, 0x6b, 0xc9, imm)
+		return
+	}
+	rtgAsmEmit16(a, 0xc969)
+	rtgAsmEmit32(a, imm)
+}
+
+func rtgAsmDivLeftRcxRightRax(a *rtgAsm, mod bool) {
+	rtgAsmEmit32(a, 0x48c38948)
+	rtgAsmEmit32(a, 0x9948c889)
+	rtgAsmEmit24(a, 0xfbf748)
+	if mod {
+		rtgAsmEmit24(a, 0xd08948)
+	}
+}
+
+func rtgAsmCmpRcxRaxSet(a *rtgAsm, setcc int) {
+	rtgAsmEmit32(a, 0x0fc13948)
+	rtgAsmEmit3(a, setcc, 0xc0, 0xf)
+	rtgAsmEmit16(a, 0xc0b6)
+}
+
+func rtgAsmRet(a *rtgAsm) {
+	rtgAsmEmit8(a, 0xc3)
+}
+
+func rtgAsmLeave(a *rtgAsm) {
+	rtgAsmEmit8(a, 0xc9)
+}
+
+func rtgAsmCallLabel(a *rtgAsm, label int) {
+	rtgAsmEmit8(a, 0xe8)
+	at := len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddReloc(a, at, label, rtgRel32)
+}
+
+func rtgAsmJmpLabel(a *rtgAsm, label int) {
+	rtgAsmEmit8(a, 0xe9)
+	at := len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddReloc(a, at, label, rtgRel32)
+}
+
+func rtgAsmJzLabel(a *rtgAsm, label int) {
+	rtgAsmEmit16(a, 0x840f)
+	at := len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddReloc(a, at, label, rtgRel32)
+}
+
+func rtgAsmJnzLabel(a *rtgAsm, label int) {
+	rtgAsmEmit16(a, 0x850f)
+	at := len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddReloc(a, at, label, rtgRel32)
+}
+
+type rtgLocalInfo struct {
+	nameStart int
+	nameEnd   int
+	offset    int
+	typ       int
+	size      int
+}
+
+type rtgGlobalInfo struct {
+	nameStart int
+	nameEnd   int
+	offset    int
+}
+
+type rtgSliceLocation struct {
+	offset int
+	typ    int
+	expr   int
+	mem    bool
+	global bool
+	ok     bool
+}
+
+type rtgLinearGen struct {
+	prog               *rtgProgram
+	meta               *rtgMeta
+	asm                rtgAsm
+	funcLabels         []int
+	currentFunc        int
+	returnStruct       int
+	locals             []rtgLocalInfo
+	stackUsed          int
+	globals            []rtgGlobalInfo
+	gotoLabels         []rtgGlobalInfo
+	breakLabels        []int
+	continueLabels     []int
+	breakDepth         int
+	continueDepth      int
+	streqLabel         int
+	streqEmitted       bool
+	append8Label       int
+	append8Emitted     bool
+	append64Label      int
+	append64Emitted    bool
+	appendAddrLabel    int
+	appendAddrEmitted  bool
+	appendBytesLabel   int
+	appendBytesEmitted bool
+	copyWordsLabel     int
+	copyWordsEmitted   bool
+	lastRangeReturns   bool
+	scopeBase          int
+	constEvalIota      int
+	constEvalIotaValid int
+}
+
+func rtgAddStringData(g *rtgLinearGen, msg []byte) int {
+	msgOff := len(g.asm.data)
+	for i := 0; i < len(msg); i++ {
+		g.asm.data = append(g.asm.data, msg[i])
+	}
+	g.asm.data = append(g.asm.data, 0)
+	return msgOff
 }
 
 func rtgEmitLinearRange(g *rtgLinearGen, start int, end int) bool {
@@ -808,7 +1232,7 @@ func rtgEmitLinearIncDec(g *rtgLinearGen, start int, end int) bool {
 	if root.kind == rtgExprIdent {
 		localOffset := rtgFindLocalOffset(g, root.nameStart, root.nameEnd)
 		if localOffset >= 0 {
-			rtgAsmEmit16(a, 65352)
+			rtgAsmEmit16(a, 0xff48)
 			if localOffset >= 0 && localOffset <= 128 {
 				if inc {
 					rtgAsmEmit8(a, 0x45)
@@ -831,13 +1255,13 @@ func rtgEmitLinearIncDec(g *rtgLinearGen, start int, end int) bool {
 			return false
 		}
 		if inc {
-			rtgAsmEmit24(a, 393032)
+			rtgAsmEmit24(a, 0x05ff48)
 		} else {
-			rtgAsmEmit24(a, 917320)
+			rtgAsmEmit24(a, 0x0dff48)
 		}
 		at := len(a.code)
 		rtgAsmEmit32(a, 0)
-		rtgAsmAddAbsReloc(a, at, globalOffset, 4)
+		rtgAsmAddAbsReloc(a, at, globalOffset, rtgAbsBssReloc)
 		return true
 	}
 	if root.kind == rtgExprSelector {
@@ -899,12 +1323,12 @@ func rtgEmitRaxRcxOp(g *rtgLinearGen, tok int) bool {
 		return true
 	}
 	if c0 == '-' {
-		rtgAsmEmit32(a, 1220618568)
-		rtgAsmEmit16(a, 51337)
+		rtgAsmEmit32(a, 0x48c12948)
+		rtgAsmEmit16(a, 0xc889)
 		return true
 	}
 	if c0 == '*' {
-		rtgAsmEmit32(a, -1045491896)
+		rtgAsmEmit32(a, 0xc1af0f48)
 		return true
 	}
 	if c0 == '/' {
@@ -917,26 +1341,26 @@ func rtgEmitRaxRcxOp(g *rtgLinearGen, tok int) bool {
 	}
 	if c0 == '&' {
 		if c1 == '^' {
-			rtgAsmEmit32(a, 1221654344)
-			rtgAsmEmit16(a, 51233)
+			rtgAsmEmit32(a, 0x48d0f748)
+			rtgAsmEmit16(a, 0xc821)
 		} else {
-			rtgAsmEmit24(a, 13115720)
+			rtgAsmEmit24(a, 0xc82148)
 		}
 		return true
 	}
 	if c0 == '|' {
-		rtgAsmEmit24(a, 13109576)
+		rtgAsmEmit24(a, 0xc80948)
 		return true
 	}
 	if c0 == '^' {
-		rtgAsmEmit24(a, 13119816)
+		rtgAsmEmit24(a, 0xc83148)
 		return true
 	}
 	if c0 == '<' {
 		if c1 == '<' {
-			rtgAsmEmit32(a, 1221232968)
-			rtgAsmEmit32(a, -1991720567)
-			rtgAsmEmit32(a, -523024176)
+			rtgAsmEmit32(a, 0x48ca8948)
+			rtgAsmEmit32(a, 0x8948c189)
+			rtgAsmEmit32(a, 0xe0d348d0)
 		} else if c1 == '=' {
 			rtgAsmCmpRcxRaxSet(a, 0x9e)
 		} else {
@@ -946,9 +1370,9 @@ func rtgEmitRaxRcxOp(g *rtgLinearGen, tok int) bool {
 	}
 	if c0 == '>' {
 		if c1 == '>' {
-			rtgAsmEmit32(a, 1221232968)
-			rtgAsmEmit32(a, -1991720567)
-			rtgAsmEmit32(a, -120370992)
+			rtgAsmEmit32(a, 0x48ca8948)
+			rtgAsmEmit32(a, 0x8948c189)
+			rtgAsmEmit32(a, 0xf8d348d0)
 		} else if c1 == '=' {
 			rtgAsmCmpRcxRaxSet(a, 0x9d)
 		} else {
@@ -1116,7 +1540,7 @@ func rtgEmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, label int
 		return false
 	}
 	rtgAsmPopRcx(&g.asm)
-	rtgAsmEmit24(&g.asm, 12663112)
+	rtgAsmEmit24(&g.asm, 0xc13948)
 	if c0 == '<' {
 		c0 = '>'
 	} else if c0 == '>' {
@@ -1467,7 +1891,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 							return false
 						}
 						rtgAsmEmit8(a, 0x25)
-						rtgAsmEmit32(a, 255)
+						rtgAsmEmit32(a, 0xff)
 					} else {
 						if !rtgEmitIntExpr(g, &rhs, rhsIndex) {
 							return false
@@ -2578,11 +3002,11 @@ func rtgEmitSliceLiteralBacking(g *rtgLinearGen, ep *rtgExprParse, idx int, slic
 		rtgAsmPopRax(a)
 		if elemSize == 1 {
 			if disp == 0 {
-				rtgAsmEmit2(a, 0x88, 0x02)
+				rtgAsmEmit16(a, 0x0288)
 			} else if rtgAsmImmFits8Signed(disp) {
 				rtgAsmEmit3(a, 0x88, 0x42, disp)
 			} else {
-				rtgAsmEmit16(a, 33416)
+				rtgAsmEmit16(a, 0x8288)
 				rtgAsmEmit32(a, disp)
 			}
 		} else {
@@ -2753,9 +3177,9 @@ func rtgEmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rtgAsmPopRcx(a)
 		rtgAsmShlRcxImm(a, 4)
 		rtgAsmMovRdxRax(a)
-		rtgAsmEmit32(a, 134515528)
+		rtgAsmEmit32(a, 0x08048b48)
 		rtgAsmAddRdxRcx(a)
-		rtgAsmMemDisp(a, 8, 35656, 0x52, 0x92)
+		rtgAsmMemDisp(a, 8, 0x8b48, 0x52, 0x92)
 		return true
 	}
 	if e.kind == rtgExprSelector {
@@ -2882,7 +3306,7 @@ func rtgEmitCopyStackToMemRdx(g *rtgLinearGen, srcOffset int, destDisp int, size
 		if destDisp != 0 {
 			rtgAsmAddRdxImm(a, destDisp)
 		}
-		rtgAsmEmit16(a, 24402)
+		rtgAsmEmit16(a, 0x5f52)
 		rtgAsmLeaRsiStack(a, srcOffset)
 		rtgAsmMovRdxImm(a, size/8)
 		rtgAsmCallLabel(a, label)
@@ -2899,7 +3323,7 @@ func rtgEmitCopyMemRdxToStack(g *rtgLinearGen, destOffset int, size int) {
 	if size > 16 {
 		label := rtgEnsureCopyWordsHelper(g)
 		rtgAsmLeaRdiStack(a, destOffset)
-		rtgAsmEmit16(a, 24146)
+		rtgAsmEmit16(a, 0x5e52)
 		rtgAsmMovRdxImm(a, size/8)
 		rtgAsmCallLabel(a, label)
 		return
@@ -2974,7 +3398,7 @@ func rtgEmitStructCallToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, destTy
 		}
 		wordCount += words
 	}
-	rtgAsmStackMem(&g.asm, offset, 36168, 0x45, 0x85)
+	rtgAsmStackMem(&g.asm, offset, 0x8d48, 0x45, 0x85)
 	rtgAsmPushRax(&g.asm)
 	rtgEmitCallWithWordCount(g, fnIndex, wordCount)
 	return true
@@ -3020,9 +3444,9 @@ func rtgEmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		for at := 0; at < size; at += 8 {
 			rtgAsmLoadRaxMemRdxDisp(a, at)
 			if at == 0 {
-				rtgAsmEmit3(a, 0x48, 0x89, 0x01)
+				rtgAsmEmit24(a, 0x018948)
 			} else {
-				rtgAsmMemDisp(a, at, 35144, 0x41, 0x81)
+				rtgAsmMemDisp(a, at, 0x8948, 0x41, 0x81)
 			}
 		}
 		return true
@@ -3245,7 +3669,7 @@ func rtgEmitNamedConversionCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool
 			return false
 		}
 		rtgAsmEmit8(&g.asm, 0x25)
-		rtgAsmEmit32(&g.asm, 255)
+		rtgAsmEmit32(&g.asm, 0xff)
 		return true
 	}
 	return false
@@ -3327,11 +3751,11 @@ func rtgEmitVariadicArgSliceFromCallReverse(g *rtgLinearGen, ep *rtgExprParse, c
 			rtgAsmPopRax(a)
 			if elemSize == 1 {
 				if disp == 0 {
-					rtgAsmEmit2(a, 0x88, 0x02)
+					rtgAsmEmit16(a, 0x0288)
 				} else if rtgAsmImmFits8Signed(disp) {
 					rtgAsmEmit3(a, 0x88, 0x42, disp)
 				} else {
-					rtgAsmEmit16(a, 33416)
+					rtgAsmEmit16(a, 0x8288)
 					rtgAsmEmit32(a, disp)
 				}
 			} else {
@@ -3373,10 +3797,10 @@ func rtgEmitCallWithWordCount(g *rtgLinearGen, fnIndex int, wordCount int) {
 		rtgAsmPopRcx(a)
 	}
 	if wordCount > 4 {
-		rtgAsmEmit16(a, 22593)
+		rtgAsmEmit16(a, 0x5841)
 	}
 	if wordCount > 5 {
-		rtgAsmEmit16(a, 22849)
+		rtgAsmEmit16(a, 0x5941)
 	}
 	rtgAsmCallLabel(a, g.funcLabels[fnIndex])
 	if wordCount > 6 {
@@ -3384,7 +3808,7 @@ func rtgEmitCallWithWordCount(g *rtgLinearGen, fnIndex int, wordCount int) {
 		if rtgAsmImmFits8Signed(imm) {
 			rtgAsmEmit4(a, 0x48, 0x83, 0xc4, imm)
 		} else {
-			rtgAsmEmit24(a, 12878152)
+			rtgAsmEmit24(a, 0xc48148)
 			rtgAsmEmit32(a, imm)
 		}
 	}
@@ -3602,7 +4026,7 @@ func rtgEmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				return false
 			}
 			rtgAsmEmit8(a, 0x25)
-			rtgAsmEmit32(a, 255)
+			rtgAsmEmit32(a, 0xff)
 			return true
 		}
 		if e.argCount == 1 && callee == rtgIdentLen {
@@ -3637,7 +4061,7 @@ func rtgEmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				if !rtgEmitSlicePtrLen(g, ep, ep.args[e.firstArg]) {
 					return false
 				}
-				rtgAsmEmit16(a, 22609)
+				rtgAsmEmit16(a, 0x5851)
 				return true
 			}
 			if arg.kind == rtgExprUnary && rtgTokCharIs(p, arg.tok, '*') {
@@ -3742,7 +4166,7 @@ func rtgEmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			if inner.kind == rtgExprIdent {
 				localIndex := rtgFindLocalIndex(g, inner.nameStart, inner.nameEnd)
 				if localIndex >= 0 {
-					rtgAsmStackMem(a, g.locals[localIndex].offset, 36168, 0x45, 0x85)
+					rtgAsmStackMem(a, g.locals[localIndex].offset, 0x8d48, 0x45, 0x85)
 					return true
 				}
 				globalOffset := rtgFindGlobalOffset(g, inner.nameStart, inner.nameEnd)
@@ -3756,7 +4180,7 @@ func rtgEmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				if !rtgEmitSelectorAddressRdx(g, ep, e.left) {
 					return false
 				}
-				rtgAsmEmit16(a, 22610)
+				rtgAsmEmit16(a, 0x5852)
 				return true
 			}
 			if inner.kind == rtgExprIndex {
@@ -3772,7 +4196,7 @@ func rtgEmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			rtgAsmMovRdxRax(a)
 			derefType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, idx))
 			if leftType.kind != rtgTypePointer || derefType.kind == rtgTypeByte || derefType.kind == rtgTypeBool {
-				rtgAsmEmit4(a, 0x48, 0x0f, 0xb6, 0x02)
+				rtgAsmEmit32(a, 0x02b60f48)
 			} else {
 				rtgAsmLoadRaxMemRdxDisp(a, 0)
 			}
@@ -3782,7 +4206,7 @@ func rtgEmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			return false
 		}
 		if rtgTokCharIs(p, e.tok, '-') {
-			rtgAsmEmit24(a, 14219080)
+			rtgAsmEmit24(a, 0xd8f748)
 			return true
 		}
 		if rtgTokCharIs(p, e.tok, '+') {
@@ -3995,7 +4419,7 @@ func rtgEmitFloatBinaryExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			return false
 		}
 		rtgAsmPopRcx(a)
-		rtgAsmEmit32(a, -1045491896)
+		rtgAsmEmit32(a, 0xc1af0f48)
 		rtgAsmSarRaxImm(a, 2)
 		return true
 	}
@@ -4276,20 +4700,20 @@ func rtgEmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSliceLo
 			return false
 		}
 		rtgEmitEnsureMemSlice(g, elemSize)
-		rtgAsmEmit16(a, 24402)
-		rtgAsmEmit24(a, 7507272)
+		rtgAsmEmit16(a, 0x5f52)
+		rtgAsmEmit24(a, 0x728d48)
 		rtgAsmEmit8(a, 8)
 		return true
 	}
 	if loc.global {
-		rtgAsmEmit24(a, 4033864)
+		rtgAsmEmit24(a, 0x3d8d48)
 		at := len(a.code)
 		rtgAsmEmit32(a, 0)
-		rtgAsmAddAbsReloc(a, at, loc.offset, 4)
-		rtgAsmEmit24(a, 3509576)
+		rtgAsmAddAbsReloc(a, at, loc.offset, rtgAbsBssReloc)
+		rtgAsmEmit24(a, 0x358d48)
 		at = len(a.code)
 		rtgAsmEmit32(a, 0)
-		rtgAsmAddAbsReloc(a, at, loc.offset+8, 4)
+		rtgAsmAddAbsReloc(a, at, loc.offset+8, rtgAbsBssReloc)
 		return true
 	}
 	rtgAsmLeaRdiStack(a, loc.offset)
@@ -4324,13 +4748,13 @@ func rtgEnsureAppendAddrHelper(g *rtgLinearGen) int {
 	afterLabel := rtgAsmNewLabel(a)
 	rtgAsmJmpLabel(a, afterLabel)
 	rtgAsmMarkLabel(a, g.appendAddrLabel)
-	rtgAsmEmit24(a, 953160)
-	rtgAsmEmit24(a, 494408)
-	rtgAsmEmit32(a, -894496952)
+	rtgAsmEmit24(a, 0x0e8b48)
+	rtgAsmEmit24(a, 0x078b48)
+	rtgAsmEmit32(a, 0xcaaf0f48)
 	rtgAsmAddRaxRcx(a)
-	rtgAsmEmit24(a, 953160)
+	rtgAsmEmit24(a, 0x0e8b48)
 	rtgAsmIncRcx(a)
-	rtgAsmEmit24(a, 952648)
+	rtgAsmEmit24(a, 0x0e8948)
 	rtgAsmRet(a)
 	rtgAsmMarkLabel(a, afterLabel)
 	return g.appendAddrLabel
@@ -4346,11 +4770,11 @@ func rtgEnsureAppend8Helper(g *rtgLinearGen) int {
 	afterLabel := rtgAsmNewLabel(a)
 	rtgAsmJmpLabel(a, afterLabel)
 	rtgAsmMarkLabel(a, g.append8Label)
-	rtgAsmEmit24(a, 953160)
-	rtgAsmEmit24(a, 494412)
-	rtgAsmEmit32(a, 135563329)
+	rtgAsmEmit24(a, 0x0e8b48)
+	rtgAsmEmit24(a, 0x078b4c)
+	rtgAsmEmit32(a, 0x08148841)
 	rtgAsmIncRcx(a)
-	rtgAsmEmit24(a, 952648)
+	rtgAsmEmit24(a, 0x0e8948)
 	rtgAsmRet(a)
 	rtgAsmMarkLabel(a, afterLabel)
 	return g.append8Label
@@ -4366,11 +4790,11 @@ func rtgEnsureAppend64Helper(g *rtgLinearGen) int {
 	afterLabel := rtgAsmNewLabel(a)
 	rtgAsmJmpLabel(a, afterLabel)
 	rtgAsmMarkLabel(a, g.append64Label)
-	rtgAsmEmit24(a, 953160)
-	rtgAsmEmit24(a, 494412)
-	rtgAsmEmit32(a, -938178231)
+	rtgAsmEmit24(a, 0x0e8b48)
+	rtgAsmEmit24(a, 0x078b4c)
+	rtgAsmEmit32(a, 0xc8148949)
 	rtgAsmIncRcx(a)
-	rtgAsmEmit24(a, 952648)
+	rtgAsmEmit24(a, 0x0e8948)
 	rtgAsmRet(a)
 	rtgAsmMarkLabel(a, afterLabel)
 	return g.append64Label
@@ -4386,13 +4810,13 @@ func rtgEnsureAppendBytesHelper(g *rtgLinearGen) int {
 	afterLabel := rtgAsmNewLabel(a)
 	rtgAsmJmpLabel(a, afterLabel)
 	rtgAsmMarkLabel(a, g.appendBytesLabel)
-	rtgAsmEmit3(a, 0x48, 0x8b, 0x0e)
-	rtgAsmEmit3(a, 0x48, 0x8b, 0x3f)
-	rtgAsmEmit3(a, 0x48, 0x01, 0xcf)
-	rtgAsmEmit3(a, 0x48, 0x01, 0x16)
-	rtgAsmEmit3(a, 0x48, 0x89, 0xc6)
-	rtgAsmEmit3(a, 0x48, 0x89, 0xd1)
-	rtgAsmEmit2(a, 0xf3, 0xa4)
+	rtgAsmEmit24(a, 0x0e8b48)
+	rtgAsmEmit24(a, 0x3f8b48)
+	rtgAsmEmit24(a, 0xcf0148)
+	rtgAsmEmit24(a, 0x160148)
+	rtgAsmEmit24(a, 0xc68948)
+	rtgAsmEmit24(a, 0xd18948)
+	rtgAsmEmit16(a, 0xa4f3)
 	rtgAsmRet(a)
 	rtgAsmMarkLabel(a, afterLabel)
 	return g.appendBytesLabel
@@ -4410,14 +4834,14 @@ func rtgEnsureCopyWordsHelper(g *rtgLinearGen) int {
 	rtgAsmMarkLabel(a, g.copyWordsLabel)
 	loopLabel := rtgAsmNewLabel(a)
 	doneLabel := rtgAsmNewLabel(a)
-	rtgAsmEmit3(a, 0x48, 0x85, 0xd2)
+	rtgAsmEmit24(a, 0xd28548)
 	rtgAsmJzLabel(a, doneLabel)
 	rtgAsmMarkLabel(a, loopLabel)
-	rtgAsmEmit3(a, 0x48, 0x8b, 0x06)
-	rtgAsmEmit3(a, 0x48, 0x89, 0x07)
+	rtgAsmEmit24(a, 0x068b48)
+	rtgAsmEmit24(a, 0x078948)
 	rtgAsmEmit4(a, 0x48, 0x83, 0xc6, 8)
 	rtgAsmEmit4(a, 0x48, 0x83, 0xc7, 8)
-	rtgAsmEmit3(a, 0x48, 0xff, 0xca)
+	rtgAsmEmit24(a, 0xcaff48)
 	rtgAsmJnzLabel(a, loopLabel)
 	rtgAsmMarkLabel(a, doneLabel)
 	rtgAsmRet(a)
@@ -4486,7 +4910,7 @@ func rtgEmitEnsureMemSlice(g *rtgLinearGen, elemSize int) {
 	rtgAsmLoadRaxMemRdxDisp(a, 0)
 	rtgAsmCmpRaxImm8(a, 0)
 	rtgAsmJnzLabel(a, okLabel)
-	backingSize := 8388608
+	backingSize := 2097152
 	backingOff := g.asm.bssSize
 	g.asm.bssSize += backingSize
 	rtgAsmMovRaxBssAddr(a, backingOff)
@@ -4630,17 +5054,17 @@ func rtgEnsureStringEqualHelper(g *rtgLinearGen) int {
 	equalLabel := rtgAsmNewLabel(a)
 	loopLabel := rtgAsmNewLabel(a)
 	rtgAsmMovRaxImm(a, 0)
-	rtgAsmEmit24(a, 13515080)
+	rtgAsmEmit24(a, 0xce3948)
 	rtgAsmJnzLabel(a, notEqualLabel)
-	rtgAsmEmit24(a, 16155976)
+	rtgAsmEmit24(a, 0xf68548)
 	rtgAsmJzLabel(a, equalLabel)
 	rtgAsmMarkLabel(a, loopLabel)
-	rtgAsmEmit24(a, 494148)
-	rtgAsmEmit24(a, 145476)
+	rtgAsmEmit24(a, 0x078a44)
+	rtgAsmEmit24(a, 0x023844)
 	rtgAsmJnzLabel(a, notEqualLabel)
-	rtgAsmEmit24(a, 13107016)
-	rtgAsmEmit24(a, 12779336)
-	rtgAsmEmit24(a, 13565768)
+	rtgAsmEmit24(a, 0xc7ff48)
+	rtgAsmEmit24(a, 0xc2ff48)
+	rtgAsmEmit24(a, 0xceff48)
 	rtgAsmJnzLabel(a, loopLabel)
 	rtgAsmMarkLabel(a, equalLabel)
 	rtgAsmMovRaxImm(a, 1)
@@ -4762,10 +5186,10 @@ func rtgEmitSliceBasePtrLenTokens(g *rtgLinearGen, p *rtgProgram, start int, end
 				rtgAsmAddRdxImm(a, fieldOffset)
 			}
 		} else {
-			rtgAsmStackMem(a, g.locals[localIndex].offset-fieldOffset, 36168, 0x55, 0x95)
+			rtgAsmStackMem(a, g.locals[localIndex].offset-fieldOffset, 0x8d48, 0x55, 0x95)
 		}
 		rtgAsmLoadRaxMemRdxDisp(a, 0)
-		rtgAsmMemDisp(a, 8, 35656, 0x4a, 0x8a)
+		rtgAsmMemDisp(a, 8, 0x8b48, 0x4a, 0x8a)
 		return true
 	}
 	return rtgEmitSlicePtrLen(g, ep, idx)
@@ -4822,7 +5246,7 @@ func rtgEmitSlicePtrLen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			return false
 		}
 		rtgAsmLoadRaxMemRdxDisp(a, 0)
-		rtgAsmMemDisp(a, 8, 35656, 0x4a, 0x8a)
+		rtgAsmMemDisp(a, 8, 0x8b48, 0x4a, 0x8a)
 		return true
 	}
 	if e.kind == rtgExprCall {
@@ -5149,7 +5573,7 @@ func rtgEmitStringPtrExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rtgAsmLoadRaxStack(a, g.locals[localIndex].offset)
 		rtgAsmPopRcx(a)
 		rtgAsmShlRcxImm(a, 4)
-		rtgAsmEmit32(a, 134515528)
+		rtgAsmEmit32(a, 0x08048b48)
 		return true
 	}
 	return false
@@ -5241,7 +5665,7 @@ func rtgEmitSelectorAddressRdx(g *rtgLinearGen, ep *rtgExprParse, idx int) bool 
 			}
 			return true
 		}
-		rtgAsmStackMem(a, g.locals[localIndex].offset-fieldOffset, 36168, 0x55, 0x95)
+		rtgAsmStackMem(a, g.locals[localIndex].offset-fieldOffset, 0x8d48, 0x55, 0x95)
 		return true
 	}
 	if base.kind == rtgExprSelector {
@@ -5250,7 +5674,7 @@ func rtgEmitSelectorAddressRdx(g *rtgLinearGen, ep *rtgExprParse, idx int) bool 
 		}
 		t := rtgResolveType(meta, baseType)
 		if t.kind == rtgTypePointer {
-			rtgAsmEmit3(a, 0x48, 0x8b, 0x12)
+			rtgAsmEmit24(a, 0x128b48)
 		}
 		if fieldOffset != 0 {
 			rtgAsmAddRdxImm(a, fieldOffset)
@@ -5397,7 +5821,7 @@ func rtgZeroLocalAtOffset(g *rtgLinearGen, offset int) {
 		if elemSize < 1 {
 			elemSize = 8
 		}
-		backingSize := 8388608
+		backingSize := 2097152
 		backingOff := g.asm.bssSize
 		g.asm.bssSize += backingSize
 		rtgAsmMovRaxBssAddr(a, backingOff)
@@ -5432,604 +5856,4 @@ func rtgFuncInfoFromCall(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 		}
 	}
 	return -1
-}
-
-func rtgAsmInit(a *rtgAsm) {
-	var code []byte
-	var labelPos []int
-	var labelSet []bool
-	var relocs []rtgLabelRef
-	var dataRelocs []rtgDataRef
-	var absRelocs []rtgAbsRef
-	var data []byte
-	a.code = code
-	a.labelPos = labelPos
-	a.labelSet = labelSet
-	a.relocs = relocs
-	a.dataRelocs = dataRelocs
-	a.absRelocs = absRelocs
-	a.data = data
-	a.bssSize = 0
-	a.codeOffset = 120
-	a.dataOffset = 0
-}
-
-func rtgAsmNewLabel(a *rtgAsm) int {
-	a.labelPos = append(a.labelPos, 0)
-	a.labelSet = append(a.labelSet, false)
-	label := len(a.labelPos) - 1
-	return label
-}
-
-func rtgAsmMarkLabel(a *rtgAsm, label int) {
-	if label >= 0 && label < len(a.labelPos) {
-		codeLen := len(a.code)
-		a.labelPos[label] = codeLen
-		a.labelSet[label] = true
-	}
-}
-
-func rtgAsmEmit8(a *rtgAsm, v int) {
-	a.code = append(a.code, byte(v))
-}
-
-func rtgAsmEmit2(a *rtgAsm, v0 int, v1 int) {
-	a.code = append(a.code, byte(v0))
-	a.code = append(a.code, byte(v1))
-}
-
-func rtgAsmEmit3(a *rtgAsm, v0 int, v1 int, v2 int) {
-	a.code = append(a.code, byte(v0))
-	a.code = append(a.code, byte(v1))
-	a.code = append(a.code, byte(v2))
-}
-
-func rtgAsmEmit4(a *rtgAsm, v0 int, v1 int, v2 int, v3 int) {
-	a.code = append(a.code, byte(v0))
-	a.code = append(a.code, byte(v1))
-	a.code = append(a.code, byte(v2))
-	a.code = append(a.code, byte(v3))
-}
-
-func rtgAsmAddAbsReloc(a *rtgAsm, at int, off int, kind int) {
-	a.absRelocs = append(a.absRelocs, rtgAbsRef{at: at, off: off, kind: kind})
-}
-
-func rtgAsmAddReloc(a *rtgAsm, at int, label int, kind int) {
-	a.relocs = append(a.relocs, rtgLabelRef{at: at, label: label, kind: kind})
-}
-
-func rtgAsmEmit32(a *rtgAsm, v int) {
-	a.code = rtgAppend32(a.code, v)
-}
-
-func rtgAsmEmit64(a *rtgAsm, v int) {
-	a.code = rtgAppend64(a.code, v)
-}
-
-func rtgAsmEmit16(a *rtgAsm, v int) {
-	rtgAsmEmit8(a, v)
-	rtgAsmEmit8(a, v>>8)
-}
-
-func rtgAsmEmit24(a *rtgAsm, v int) {
-	rtgAsmEmit8(a, v)
-	rtgAsmEmit8(a, v>>8)
-	rtgAsmEmit8(a, v>>16)
-}
-
-func rtgAsmImmFits8Signed(imm int) bool {
-	return imm >= -128 && imm <= 127
-}
-
-func rtgAsmMovRaxImm(a *rtgAsm, imm int) {
-	if imm == 0 {
-		rtgAsmEmit16(a, 49201)
-		return
-	}
-	if rtgAsmImmFits8Signed(imm) {
-		rtgAsmEmit2(a, 0x6a, imm)
-		rtgAsmPopRax(a)
-		return
-	}
-	rtgAsmEmit16(a, 0xb848)
-	rtgAsmEmit64(a, imm)
-}
-
-func rtgAsmMovRaxIntToken(a *rtgAsm, p *rtgProgram, tokIndex int) {
-	value := rtgParseIntToken(p, tokIndex)
-	if rtgIntTokenNeedsMovabs(p, tokIndex) {
-		rtgAsmMovRaxImm64(a, value)
-		return
-	}
-	rtgAsmMovRaxImm(a, value)
-}
-
-func rtgAsmMovRaxImm64(a *rtgAsm, imm int) {
-	rtgAsmEmit16(a, 0xb848)
-	rtgAsmEmit64(a, imm)
-}
-
-func rtgIntTokenNeedsMovabs(p *rtgProgram, tokIndex int) bool {
-	tok := &p.toks[tokIndex]
-	start := tok.start
-	if tok.end-start > 2 && p.src[start] == '0' {
-		return false
-	}
-	digits := tok.end - start
-	if digits > 10 {
-		return true
-	}
-	if digits < 10 {
-		return false
-	}
-	limit := "2147483647"
-	for i := 0; i < 10; i++ {
-		c := p.src[start+i]
-		if c > limit[i] {
-			return true
-		}
-		if c < limit[i] {
-			return false
-		}
-	}
-	return false
-}
-
-func rtgAsmMovRdxImm(a *rtgAsm, imm int) {
-	if imm == 0 {
-		rtgAsmEmit16(a, 53809)
-		return
-	}
-	if rtgAsmImmFits8Signed(imm) {
-		rtgAsmEmit2(a, 0x6a, imm)
-		rtgAsmPopRdx(a)
-		return
-	}
-	if imm >= 0 {
-		if imm <= 2147483647 {
-			rtgAsmEmit8(a, 0xba)
-			rtgAsmEmit32(a, imm)
-			return
-		}
-	} else {
-		if imm >= -2147483647 {
-			rtgAsmEmit24(a, 12765000)
-			rtgAsmEmit32(a, imm)
-			return
-		}
-	}
-	rtgAsmEmit16(a, 0xba48)
-	rtgAsmEmit64(a, imm)
-}
-
-func rtgAsmMovRaxDataAddr(a *rtgAsm, dataOff int) {
-	rtgAsmEmit24(a, 363848)
-	at := len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddAbsReloc(a, at, dataOff, 3)
-}
-
-func rtgAsmMovRaxBssAddr(a *rtgAsm, bssOff int) {
-	rtgAsmEmit24(a, 363848)
-	at := len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddAbsReloc(a, at, bssOff, 4)
-}
-
-func rtgAsmMovR10BssAddr(a *rtgAsm, bssOff int) {
-	rtgAsmEmit24(a, 1412428)
-	at := len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddAbsReloc(a, at, bssOff, 4)
-}
-
-func rtgAsmLoadRaxBss(a *rtgAsm, bssOff int) {
-	rtgAsmEmit24(a, 363336)
-	at := len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddAbsReloc(a, at, bssOff, 4)
-}
-
-func rtgAsmStoreRaxBss(a *rtgAsm, bssOff int) {
-	rtgAsmEmit24(a, 362824)
-	at := len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddAbsReloc(a, at, bssOff, 4)
-}
-
-func rtgAsmMovRdiRax(a *rtgAsm) {
-	rtgAsmEmit16(a, 24400)
-}
-
-func rtgAsmMovRdxRax(a *rtgAsm) {
-	rtgAsmEmit16(a, 23120)
-}
-
-func rtgAsmMovRaxRdx(a *rtgAsm) {
-	rtgAsmEmit3(a, 0x48, 0x89, 0xd0)
-}
-
-func rtgAsmMovRsiRax(a *rtgAsm) {
-	rtgAsmEmit16(a, 24144)
-}
-
-func rtgAsmMovRcxRax(a *rtgAsm) {
-	rtgAsmEmit16(a, 22864)
-}
-
-func rtgAsmMovR8Rax(a *rtgAsm) {
-	rtgAsmEmit24(a, 12618057)
-}
-
-func rtgAsmMovR9Rax(a *rtgAsm) {
-	rtgAsmEmit24(a, 12683593)
-}
-
-func rtgAsmMovRcxRdx(a *rtgAsm) {
-	rtgAsmEmit16(a, 22866)
-}
-
-func rtgAsmAddRdxRcx(a *rtgAsm) {
-	rtgAsmEmit24(a, 13238600)
-}
-
-func rtgAsmSyscall(a *rtgAsm) {
-	rtgAsmEmit16(a, 1295)
-}
-
-func rtgAsmPushRax(a *rtgAsm) {
-	rtgAsmEmit8(a, 0x50)
-}
-
-func rtgAsmPushRcx(a *rtgAsm) {
-	rtgAsmEmit8(a, 0x51)
-}
-
-func rtgAsmPushRdx(a *rtgAsm) {
-	rtgAsmEmit8(a, 0x52)
-}
-
-func rtgAsmPushImm(a *rtgAsm, imm int) {
-	if rtgAsmImmFits8Signed(imm) {
-		rtgAsmEmit2(a, 0x6a, imm)
-		return
-	}
-	if imm >= -2147483647 && imm <= 2147483647 {
-		rtgAsmEmit8(a, 0x68)
-		rtgAsmEmit32(a, imm)
-		return
-	}
-	rtgAsmMovRaxImm(a, imm)
-	rtgAsmPushRax(a)
-}
-
-func rtgAsmPushSliceRegs(a *rtgAsm) {
-	rtgAsmPushRcx(a)
-	rtgAsmPushRdx(a)
-	rtgAsmPushRax(a)
-}
-
-func rtgAsmPushStringRegs(a *rtgAsm) {
-	rtgAsmPushRdx(a)
-	rtgAsmPushRax(a)
-}
-
-func rtgAsmPopRax(a *rtgAsm) {
-	rtgAsmEmit8(a, 0x58)
-}
-
-func rtgAsmPopRcx(a *rtgAsm) {
-	rtgAsmEmit8(a, 0x59)
-}
-
-func rtgAsmPopRdx(a *rtgAsm) {
-	rtgAsmEmit8(a, 0x5a)
-}
-
-func rtgAsmPopRdi(a *rtgAsm) {
-	rtgAsmEmit8(a, 0x5f)
-}
-
-func rtgAsmStackMem(a *rtgAsm, offset int, base int, disp8 int, disp32 int) {
-	rtgAsmEmit16(a, base)
-	if offset >= 0 && offset <= 128 {
-		rtgAsmEmit8(a, disp8)
-		rtgAsmEmit8(a, -offset)
-		return
-	}
-	rtgAsmEmit8(a, disp32)
-	rtgAsmEmit32(a, -offset)
-}
-
-func rtgAsmStoreRaxStack(a *rtgAsm, offset int) {
-	rtgAsmStackMem(a, offset, 35144, 0x45, 0x85)
-}
-
-func rtgAsmStoreRdxStack(a *rtgAsm, offset int) {
-	rtgAsmStackMem(a, offset, 35144, 0x55, 0x95)
-}
-
-func rtgAsmLoadRaxStack(a *rtgAsm, offset int) {
-	rtgAsmStackMem(a, offset, 35656, 0x45, 0x85)
-}
-
-func rtgAsmLeaRaxStack(a *rtgAsm, offset int) {
-	rtgAsmStackMem(a, offset, 36168, 0x45, 0x85)
-}
-
-func rtgAsmLeaRdiStack(a *rtgAsm, offset int) {
-	rtgAsmStackMem(a, offset, 36168, 0x7d, 0xbd)
-}
-
-func rtgAsmLeaRsiStack(a *rtgAsm, offset int) {
-	rtgAsmStackMem(a, offset, 36168, 0x75, 0xb5)
-}
-
-func rtgAsmLoadRdxStack(a *rtgAsm, offset int) {
-	rtgAsmStackMem(a, offset, 35656, 0x55, 0x95)
-}
-
-func rtgAsmAddRdxImm(a *rtgAsm, imm int) {
-	if rtgAsmImmFits8Signed(imm) {
-		rtgAsmEmit4(a, 0x48, 0x83, 0xc2, imm)
-		return
-	}
-	rtgAsmEmit24(a, 12747080)
-	rtgAsmEmit32(a, imm)
-}
-
-func rtgAsmMemDisp(a *rtgAsm, disp int, op int, disp8 int, disp32 int) {
-	rtgAsmEmit16(a, op)
-	if rtgAsmImmFits8Signed(disp) {
-		rtgAsmEmit2(a, disp8, disp)
-		return
-	}
-	rtgAsmEmit8(a, disp32)
-	rtgAsmEmit32(a, disp)
-}
-
-func rtgAsmLoadRcxStack(a *rtgAsm, offset int) {
-	rtgAsmStackMem(a, offset, 35656, 0x4d, 0x8d)
-}
-
-func rtgAsmStoreSliceStack(a *rtgAsm, offset int) {
-	rtgAsmStoreRaxStack(a, offset)
-	rtgAsmStoreRdxStack(a, offset-8)
-	rtgAsmStackMem(a, offset-16, 35144, 0x4d, 0x8d)
-}
-
-func rtgAsmPopStoreStringMemRdx(a *rtgAsm, disp int) {
-	rtgAsmPopRax(a)
-	rtgAsmStoreRaxMemRdxDisp(a, disp)
-	rtgAsmPopRax(a)
-	rtgAsmStoreRaxMemRdxDisp(a, disp+8)
-}
-
-func rtgAsmPopStoreSliceMemRdx(a *rtgAsm, disp int) {
-	rtgAsmPopRax(a)
-	rtgAsmStoreRaxMemRdxDisp(a, disp)
-	rtgAsmPopRax(a)
-	rtgAsmStoreRaxMemRdxDisp(a, disp+8)
-	rtgAsmPopRax(a)
-	rtgAsmStoreRaxMemRdxDisp(a, disp+16)
-}
-
-func rtgAsmLoadQwordRaxIndexRcx8(a *rtgAsm) {
-	rtgAsmEmit32(a, -939226296)
-}
-
-func rtgAsmLoadQwordRaxIndexRcxDisp(a *rtgAsm, disp int) {
-	rtgAsmEmit16(a, 35656)
-	if rtgAsmImmFits8Signed(disp) {
-		rtgAsmEmit3(a, 0x44, 0x08, disp)
-		return
-	}
-	rtgAsmEmit16(a, 2180)
-	rtgAsmEmit32(a, disp)
-}
-
-func rtgAsmLoadRaxMemRdxDisp(a *rtgAsm, disp int) {
-	if disp == 0 {
-		rtgAsmEmit3(a, 0x48, 0x8b, 0x02)
-		return
-	}
-	rtgAsmMemDisp(a, disp, 35656, 0x42, 0x82)
-}
-
-func rtgAsmLoadByteRaxIndexRcx(a *rtgAsm) {
-	rtgAsmEmit32(a, 79040328)
-	rtgAsmEmit8(a, 0x08)
-}
-
-func rtgAsmStoreRaxMemRdxRcx8(a *rtgAsm) {
-	rtgAsmEmit32(a, -905672376)
-}
-
-func rtgAsmStoreRaxMemRdxDisp(a *rtgAsm, disp int) {
-	if disp == 0 {
-		rtgAsmEmit3(a, 0x48, 0x89, 0x02)
-		return
-	}
-	rtgAsmMemDisp(a, disp, 35144, 0x42, 0x82)
-}
-
-func rtgAsmStoreAlMemRdxRcx1(a *rtgAsm) {
-	rtgAsmEmit24(a, 656520)
-}
-
-func rtgAsmIncMemRdx(a *rtgAsm) {
-	rtgAsmEmit24(a, 196424)
-}
-
-func rtgAsmDecMemRdx(a *rtgAsm) {
-	rtgAsmEmit24(a, 720712)
-}
-
-func rtgAsmIncRcx(a *rtgAsm) {
-	rtgAsmEmit16(a, 49663)
-}
-
-func rtgAsmIncRax(a *rtgAsm) {
-	rtgAsmEmit16(a, 49407)
-}
-
-func rtgAsmBoolNotRax(a *rtgAsm) {
-	rtgAsmEmit24(a, 12617032)
-	rtgAsmEmit24(a, 12620815)
-	rtgAsmEmit24(a, 12629519)
-}
-
-func rtgAsmCmpRaxImm8(a *rtgAsm, imm int) {
-	if imm == 0 {
-		rtgAsmEmit16(a, 49285)
-		return
-	}
-	rtgAsmEmit4(a, 0x48, 0x83, 0xf8, imm)
-}
-
-func rtgAsmAddRaxRcx(a *rtgAsm) {
-	rtgAsmEmit24(a, 13107528)
-}
-
-func rtgAsmSubRaxRcx(a *rtgAsm) {
-	rtgAsmEmit3(a, 0x48, 0x29, 0xc8)
-}
-
-func rtgAsmShlRcxImm(a *rtgAsm, imm int) {
-	rtgAsmEmit4(a, 0x48, 0xc1, 0xe1, imm)
-}
-
-func rtgAsmShlRaxImm(a *rtgAsm, imm int) {
-	rtgAsmEmit4(a, 0x48, 0xc1, 0xe0, imm)
-}
-
-func rtgAsmSarRaxImm(a *rtgAsm, imm int) {
-	rtgAsmEmit4(a, 0x48, 0xc1, 0xf8, imm)
-}
-
-func rtgAsmImulRcxImm(a *rtgAsm, imm int) {
-	if rtgAsmImmFits8Signed(imm) {
-		rtgAsmEmit3(a, 0x6b, 0xc9, imm)
-		return
-	}
-	rtgAsmEmit16(a, 51561)
-	rtgAsmEmit32(a, imm)
-}
-
-func rtgAsmDivLeftRcxRightRax(a *rtgAsm, mod bool) {
-	rtgAsmEmit32(a, 1220774216)
-	rtgAsmEmit32(a, -1723283319)
-	rtgAsmEmit24(a, 16512840)
-	if mod {
-		rtgAsmEmit24(a, 13666632)
-	}
-}
-
-func rtgAsmCmpRcxRaxSet(a *rtgAsm, setcc int) {
-	rtgAsmEmit32(a, 264321352)
-	rtgAsmEmit3(a, setcc, 0xc0, 0x0f)
-	rtgAsmEmit16(a, 49334)
-}
-
-func rtgAsmRet(a *rtgAsm) {
-	rtgAsmEmit8(a, 0xc3)
-}
-
-func rtgAsmLeave(a *rtgAsm) {
-	rtgAsmEmit8(a, 0xc9)
-}
-
-func rtgAsmCallLabel(a *rtgAsm, label int) {
-	rtgAsmEmit8(a, 0xe8)
-	at := len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddReloc(a, at, label, rtgRel32)
-}
-
-func rtgAsmJmpLabel(a *rtgAsm, label int) {
-	rtgAsmEmit8(a, 0xe9)
-	at := len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddReloc(a, at, label, rtgRel32)
-}
-
-func rtgAsmJzLabel(a *rtgAsm, label int) {
-	rtgAsmEmit16(a, 33807)
-	at := len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddReloc(a, at, label, rtgRel32)
-}
-
-func rtgAsmJnzLabel(a *rtgAsm, label int) {
-	rtgAsmEmit16(a, 34063)
-	at := len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddReloc(a, at, label, rtgRel32)
-}
-
-func rtgAsmPatch(a *rtgAsm) {
-	for i := 0; i < len(a.relocs); i++ {
-		r := a.relocs[i]
-		if r.label >= 0 && r.label < len(a.labelPos) && a.labelSet[r.label] {
-			target := a.labelPos[r.label]
-			disp := target - (r.at + 4)
-			rtgPut32At(a.code, r.at, disp)
-		}
-	}
-	a.dataOffset = a.codeOffset + len(a.code)
-	for i := 0; i < len(a.dataRelocs); i++ {
-		r := a.dataRelocs[i]
-		target := a.dataOffset + r.off
-		next := a.codeOffset + r.at + 4
-		disp := target - next
-		rtgPut32At(a.code, r.at, disp)
-	}
-	for i := 0; i < len(a.absRelocs); i++ {
-		r := a.absRelocs[i]
-		target := a.dataOffset + r.off
-		if r.kind == 4 {
-			target = a.dataOffset + len(a.data) + r.off
-		}
-		next := a.codeOffset + r.at + 4
-		disp := target - next
-		rtgPut32At(a.code, r.at, disp)
-	}
-}
-
-func rtgPut32At(out []byte, at int, v int) {
-	b0 := byte(v)
-	b1 := byte(v >> 8)
-	b2 := byte(v >> 16)
-	b3 := byte(v >> 24)
-	out[at] = b0
-	out[at+1] = b1
-	out[at+2] = b2
-	out[at+3] = b3
-}
-
-func rtgAppend16(out []byte, v int) []byte {
-	out = append(out, byte(v))
-	out = append(out, byte(v>>8))
-	return out
-}
-
-func rtgAppend32(out []byte, v int) []byte {
-	out = append(out, byte(v))
-	out = append(out, byte(v>>8))
-	out = append(out, byte(v>>16))
-	out = append(out, byte(v>>24))
-	return out
-}
-
-func rtgAppend64(out []byte, v int) []byte {
-	out = append(out, byte(v))
-	out = append(out, byte(v>>8))
-	out = append(out, byte(v>>16))
-	out = append(out, byte(v>>24))
-	out = append(out, byte(v>>32))
-	out = append(out, byte(v>>40))
-	out = append(out, byte(v>>48))
-	out = append(out, byte(v>>56))
-	return out
 }

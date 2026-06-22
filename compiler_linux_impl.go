@@ -1,7 +1,7 @@
 package main
 
 func rtgReadAll(fd int, out []byte) []byte {
-	buf := make([]byte, 32768)
+	buf := make([]byte, 1024)
 	for {
 		n := read(fd, buf, -1)
 		if n <= 0 {
@@ -75,10 +75,10 @@ func rtgEmitBuiltinReadWrite(g *rtgLinearGen, ep *rtgExprParse, idx int, seqSysc
 		return false
 	}
 	rtgAsmMovRsiRax(a)
-	rtgAsmEmit16(a, 23121)
+	rtgAsmEmit16(a, 0x5a51)
 	if offsetRead {
 		rtgAsmPopRax(a)
-		rtgAsmEmit3(a, 0x49, 0x89, 0xc2)
+		rtgAsmEmit24(a, 0xc28949)
 	}
 	rtgAsmPopRdi(a)
 	if offsetRead {
