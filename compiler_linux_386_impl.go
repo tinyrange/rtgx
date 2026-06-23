@@ -50,6 +50,33 @@ func compileLinux386(input []int, output int) int {
 	return 1
 }
 
+func compileWindows386(input []int, output int) int {
+	rtgSetTarget(rtgTargetWindows386)
+	var src []byte
+	for i := 0; i < len(input); i++ {
+		src = rtgReadAll(input[i], src)
+		src = append(src, '\n')
+	}
+	var prog rtgProgram
+	prog = rtgParseProgram(src)
+	if !prog.ok {
+		return 1
+	}
+	var meta rtgMeta
+	meta = rtgBuildMeta(&prog)
+	if !meta.ok {
+		return 1
+	}
+	var result rtgCompileResult
+	result = rtgTryCompileScalarProgram386(&prog, &meta)
+	if result.ok {
+		write(output, result.data, -1)
+		return 0
+	}
+	rtgPrintErr("rtg: compilation failed\n")
+	return 1
+}
+
 func rtgTryCompileScalarProgram386(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 	appIndex := -1
 	for i := 0; i < len(meta.funcs); i++ {
@@ -67,6 +94,9 @@ func rtgTryCompileScalarProgram386(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 	a := &g.asm
 	rtgAsmInit(a)
 	a.codeOffset = rtgLinux386CodeOffset
+	if rtgTargetIsWindows() {
+		a.codeOffset = rtgWinSectionRVA
+	}
 	for i := 0; i < len(meta.funcs); i++ {
 		label := rtgAsmNewLabel(a)
 		g.funcLabels = append(g.funcLabels, label)
@@ -84,9 +114,13 @@ func rtgTryCompileScalarProgram386(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 		return result
 	}
 	rtgAsmCallLabel(a, g.funcLabels[appIndex])
-	rtgAsmMovRdiRax(a)
-	rtgAsmMovRaxImm(a, 1)
-	rtgAsmSyscall(a)
+	if rtgTargetIsWindows() {
+		rtgAsmRet(a)
+	} else {
+		rtgAsmMovRdiRax(a)
+		rtgAsmMovRaxImm(a, 1)
+		rtgAsmSyscall(a)
+	}
 	for i := 0; i < len(meta.funcs); i++ {
 		if !rtgEmitScalarFunction(&g, i) {
 			var result rtgCompileResult
@@ -94,6 +128,9 @@ func rtgTryCompileScalarProgram386(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 		}
 	}
 	data := rtgAsmImage386(a)
+	if rtgTargetIsWindows() {
+		data = rtgAsmImageWindows386(a)
+	}
 	var result rtgCompileResult
 	result.data = data
 	result.ok = true
@@ -105,13 +142,6 @@ func rtgEmitProgramEntryArgs386(g *rtgLinearGen, appIndex int) bool {
 	if app.resultType != 0 && !rtgTypeIsInt(g.meta, app.resultType) {
 		return false
 	}
-	argsOff := g.asm.bssSize
-	g.asm.bssSize += 32768
-	envDataOff := g.asm.bssSize
-	g.asm.bssSize += 32768
-	envLenOff := g.asm.bssSize
-	g.asm.bssSize += 8
-	rtgAsmBuildArgvEnvSlices386(&g.asm, argsOff, envDataOff, envLenOff)
 	if app.paramCount == 0 {
 		return true
 	}
@@ -122,6 +152,25 @@ func rtgEmitProgramEntryArgs386(g *rtgLinearGen, appIndex int) bool {
 	if !rtgTypeIsStringSlice(g.meta, first.typ) {
 		return false
 	}
+	argsOff := g.asm.bssSize
+	g.asm.bssSize += 32768
+	if rtgTargetIsWindows() {
+		argsTextOff := g.asm.bssSize
+		g.asm.bssSize += 32768
+		argsLenOff := g.asm.bssSize
+		g.asm.bssSize += 8
+		envDataOff := g.asm.bssSize
+		g.asm.bssSize += 32768
+		envLenOff := g.asm.bssSize
+		g.asm.bssSize += 8
+		rtgAsmBuildWindowsArgvEnvSlices386(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
+	} else {
+		envDataOff := g.asm.bssSize
+		g.asm.bssSize += 32768
+		envLenOff := g.asm.bssSize
+		g.asm.bssSize += 8
+		rtgAsmBuildArgvEnvSlices386(&g.asm, argsOff, envDataOff, envLenOff)
+	}
 	if app.paramCount == 1 {
 		return true
 	}
@@ -130,6 +179,99 @@ func rtgEmitProgramEntryArgs386(g *rtgLinearGen, appIndex int) bool {
 		return false
 	}
 	return true
+}
+
+func rtgAsmBuildWindowsArgvEnvSlices386(a *rtgAsm, bssOff int, argsTextOff int, argsLenOff int, envOff int, envLenOff int) {
+	pathNameOff := len(a.data)
+	a.data = append(a.data, 'P')
+	a.data = append(a.data, 'A')
+	a.data = append(a.data, 'T')
+	a.data = append(a.data, 'H')
+	a.data = append(a.data, '=')
+	a.data = append(a.data, 0)
+	skipLabel := rtgAsmNewLabel(a)
+	startLabel := rtgAsmNewLabel(a)
+	skipCharLabel := rtgAsmNewLabel(a)
+	copyLabel := rtgAsmNewLabel(a)
+	notQuoteLabel := rtgAsmNewLabel(a)
+	copyCharLabel := rtgAsmNewLabel(a)
+	argDoneLabel := rtgAsmNewLabel(a)
+	finishLabel := rtgAsmNewLabel(a)
+
+	rtgWin386CallImport(a, rtgWinImportGetCommandLineA)
+	rtgAsmEmit16(a, 0xc689)
+	rtgWin386MovEdiBssAddr(a, bssOff)
+	rtgAsmMovRaxBssAddr(a, argsTextOff)
+	rtgAsmEmit16(a, 0xc289)
+	rtgAsmEmit16(a, 0xdb31)
+
+	rtgAsmMarkLabel(a, skipLabel)
+	rtgAsmEmit3(a, 0x80, 0x3e, 0)
+	rtgAsmJzLabel(a, finishLabel)
+	rtgAsmEmit3(a, 0x80, 0x3e, ' ')
+	rtgAsmJzLabel(a, skipCharLabel)
+	rtgAsmEmit3(a, 0x80, 0x3e, 9)
+	rtgAsmJnzLabel(a, startLabel)
+	rtgAsmMarkLabel(a, skipCharLabel)
+	rtgAsmEmit8(a, 0x46)
+	rtgAsmJmpLabel(a, skipLabel)
+
+	rtgAsmMarkLabel(a, startLabel)
+	rtgAsmEmit16(a, 0x1789)
+	rtgAsmEmit16(a, 0xc931)
+	rtgAsmEmit16(a, 0xed31)
+	rtgAsmMarkLabel(a, copyLabel)
+	rtgAsmEmit16(a, 0x068a)
+	rtgAsmEmit2(a, 0x3c, 0)
+	rtgAsmJzLabel(a, argDoneLabel)
+	rtgAsmEmit2(a, 0x3c, '"')
+	rtgAsmJnzLabel(a, notQuoteLabel)
+	rtgAsmEmit3(a, 0x83, 0xf5, 1)
+	rtgAsmEmit8(a, 0x46)
+	rtgAsmJmpLabel(a, copyLabel)
+	rtgAsmMarkLabel(a, notQuoteLabel)
+	rtgAsmEmit3(a, 0x83, 0xfd, 0)
+	rtgAsmJnzLabel(a, copyCharLabel)
+	rtgAsmEmit2(a, 0x3c, ' ')
+	rtgAsmJzLabel(a, argDoneLabel)
+	rtgAsmEmit2(a, 0x3c, 9)
+	rtgAsmJzLabel(a, argDoneLabel)
+	rtgAsmMarkLabel(a, copyCharLabel)
+	rtgAsmEmit16(a, 0x0288)
+	rtgAsmEmit8(a, 0x46)
+	rtgAsmEmit8(a, 0x42)
+	rtgAsmEmit8(a, 0x41)
+	rtgAsmJmpLabel(a, copyLabel)
+
+	rtgAsmMarkLabel(a, argDoneLabel)
+	rtgAsmEmit3(a, 0xc6, 0x02, 0)
+	rtgAsmEmit8(a, 0x42)
+	rtgAsmEmit3(a, 0x89, 0x4f, 8)
+	rtgAsmEmit3(a, 0x83, 0xc7, 16)
+	rtgAsmEmit8(a, 0x43)
+	rtgAsmEmit2(a, 0x3c, 0)
+	rtgAsmJzLabel(a, finishLabel)
+	rtgAsmEmit8(a, 0x46)
+	rtgAsmJmpLabel(a, skipLabel)
+
+	rtgAsmMarkLabel(a, finishLabel)
+	rtgAsmEmit16(a, 0xd889)
+	rtgAsmStoreRaxBss(a, argsLenOff)
+
+	rtgWin386MovEdiBssAddr(a, envOff)
+	rtgAsmMovRaxDataAddr(a, pathNameOff)
+	rtgAsmEmit16(a, 0x0789)
+	rtgAsmMovRaxImm(a, 5)
+	rtgAsmEmit3(a, 0x89, 0x47, 8)
+	rtgAsmMovRaxImm(a, 1)
+	rtgAsmStoreRaxBss(a, envLenOff)
+
+	rtgWin386MovEbxBssAddr(a, bssOff)
+	rtgWin386LoadEsiBss(a, argsLenOff)
+	rtgAsmEmit16(a, 0xf289)
+	rtgWin386MovEcxBssAddr(a, envOff)
+	rtgWin386LoadEaxBss(a, envLenOff)
+	rtgAsmEmit16(a, 0xc789)
 }
 
 func rtgAsmBuildArgvEnvSlices386(a *rtgAsm, bssOff int, envOff int, envLenOff int) {
@@ -294,5 +436,29 @@ func rtgAppendElfHeader386(out []byte, entryOff int, fileSize int, memSize int, 
 	out = rtgAppend32(out, memSize)
 	out = rtgAppend32(out, 7)
 	out = rtgAppend32(out, 0x1000)
+	return out
+}
+
+func rtgAsmImageWindows386(a *rtgAsm) []byte {
+	for (a.codeOffset+len(a.code))%4 != 0 {
+		a.code = append(a.code, 0)
+	}
+	var imports rtgWinImportLayout
+	if rtgAsmHasWinImportRelocs(a) {
+		imports = rtgAppendWinImports(a, false)
+	}
+	rtgAsmPatchWindows(a, imports, rtgWinImageBase, false)
+	payloadSize := len(a.code) + len(a.data)
+	rawSize := rtgAlignValue(payloadSize, rtgWinFileAlign)
+	virtualSize := payloadSize + a.bssSize
+	var out []byte
+	out = rtgAppendPEHeader32(out, a.codeOffset, rawSize, virtualSize, imports.importRVA, imports.importSize)
+	for i := 0; i < len(a.code); i++ {
+		out = append(out, a.code[i])
+	}
+	for i := 0; i < len(a.data); i++ {
+		out = append(out, a.data[i])
+	}
+	out = rtgAppendUntil(out, rtgWinHeadersSize+rawSize)
 	return out
 }

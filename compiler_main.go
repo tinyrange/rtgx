@@ -1,6 +1,10 @@
 package main
 
 func rtgOpenArg(path string, env []string) int {
+	directFd := open(path, O_RDONLY)
+	if directFd >= 0 {
+		return directFd
+	}
 	for e := 0; e < len(env); e++ {
 		pwd := env[e]
 		if pwd[0] == 'P' && pwd[1] == 'W' && pwd[2] == 'D' && pwd[3] == '=' {
@@ -36,6 +40,12 @@ func rtgParseTargetArg(target string) int {
 	if target == "linux/arm" {
 		return rtgTargetLinuxArm
 	}
+	if target == "windows/amd64" {
+		return rtgTargetWindowsAmd64
+	}
+	if target == "windows/386" {
+		return rtgTargetWindows386
+	}
 	return 0
 }
 
@@ -63,14 +73,14 @@ func rtgPrintIntErr(v int) {
 }
 
 func rtgPrintUsage() {
-	rtgPrintErr("usage: rtg [-t linux/amd64|linux/386|linux/aarch64|linux/arm] -o <output> <input.go>...\n")
+	rtgPrintErr("usage: rtg [-t linux/amd64|linux/386|linux/aarch64|linux/arm|windows/amd64|windows/386] -o <output> <input.go>...\n")
 }
 
 func rtgPrintUnsupportedTarget(target string) {
 	rtgPrintErr("rtg: unsupported target: ")
 	rtgPrintErr(target)
 	rtgPrintErr("\n")
-	rtgPrintErr("rtg: supported targets: linux/amd64, linux/386, linux/aarch64, linux/arm\n")
+	rtgPrintErr("rtg: supported targets: linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386\n")
 }
 
 func appMain(args []string, env []string) int {
@@ -144,5 +154,5 @@ func appMain(args []string, env []string) int {
 		rtgPrintErr("\n")
 		return 1
 	}
-	return compileLinuxTarget(input, output, target)
+	return compileTarget(input, output, target)
 }

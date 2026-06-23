@@ -983,6 +983,9 @@ func rtg386EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			return true
 		}
 		if callee == rtgIdentOpen {
+			if rtgTargetIsWindows() {
+				return rtgEmitWindowsOpen(g, ep, idx)
+			}
 			if e.argCount != 2 {
 				return false
 			}
@@ -1001,6 +1004,9 @@ func rtg386EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			return true
 		}
 		if callee == rtgIdentClose {
+			if rtgTargetIsWindows() {
+				return rtgEmitWindowsClose(g, ep, idx)
+			}
 			if e.argCount != 1 {
 				return false
 			}
@@ -1013,6 +1019,9 @@ func rtg386EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			return true
 		}
 		if callee == rtgIdentChmod {
+			if rtgTargetIsWindows() {
+				return rtgEmitWindowsChmod(g, ep, idx)
+			}
 			if e.argCount != 2 {
 				return false
 			}
@@ -1030,9 +1039,15 @@ func rtg386EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			return true
 		}
 		if callee == rtgIdentRead {
+			if rtgTargetIsWindows() {
+				return rtgEmitWindowsReadWrite(g, ep, idx, false)
+			}
 			return rtgEmitBuiltinReadWrite(g, ep, idx, rtgLinuxSysReadSeq(), rtgLinuxSysReadAt())
 		}
 		if callee == rtgIdentWrite {
+			if rtgTargetIsWindows() {
+				return rtgEmitWindowsReadWrite(g, ep, idx, true)
+			}
 			return rtgEmitBuiltinReadWrite(g, ep, idx, rtgLinuxSysWriteSeq(), rtgLinuxSysWriteAt())
 		}
 		if callee == rtgIdentCopy {

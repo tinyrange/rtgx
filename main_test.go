@@ -276,6 +276,11 @@ func TestStage1CompilerCanEmitSmokeTargets(t *testing.T) {
 	for _, target := range supportedCompilerTargets(t) {
 		target := target
 		t.Run(target.name, func(t *testing.T) {
+			if len(target.runner) > 0 {
+				if _, err := exec.LookPath(target.runner[0]); err != nil {
+					t.Skipf("runner %s is not installed", target.runner[0])
+				}
+			}
 			outDir := t.TempDir()
 			if target.name == "linux/aarch64" || target.name == "linux/amd64" {
 				var err error
