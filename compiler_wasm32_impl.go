@@ -74,6 +74,29 @@ func rtgWasmAppendCall(out []byte, index int) []byte {
 	return out
 }
 
+func rtgWasmAppendU32Fixed5(out []byte, v int) []byte {
+	for i := 0; i < 5; i++ {
+		b := byte(v & 0x7f)
+		v = v >> 7
+		if i < 4 {
+			b = b | 0x80
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
+func rtgWasmPatchU32Fixed5(out []byte, at int, v int) {
+	for i := 0; i < 5; i++ {
+		b := byte(v & 0x7f)
+		v = v >> 7
+		if i < 4 {
+			b = b | 0x80
+		}
+		out[at+i] = b
+	}
+}
+
 func rtgWasmAppendI32Store(out []byte) []byte {
 	out = append(out, 0x36)
 	out = rtgWasmAppendU32(out, 2)
@@ -172,58 +195,58 @@ const rtgWasm32CondGt = 4
 const rtgWasm32CondGe = 5
 
 func rtgWasm32EmitRegImm(a *rtgAsm, op int, reg int, imm int) {
-	rtgAsmEmit8(a, op)
-	rtgAsmEmit8(a, reg)
-	rtgAsmEmit32(a, imm)
+	a.code = append(a.code, byte(op))
+	a.code = append(a.code, byte(reg))
+	a.code = rtgAppend32(a.code, imm)
 }
 
 func rtgWasm32EmitRegReg(a *rtgAsm, op int, dst int, src int) {
-	rtgAsmEmit8(a, op)
-	rtgAsmEmit8(a, dst)
-	rtgAsmEmit8(a, src)
+	a.code = append(a.code, byte(op))
+	a.code = append(a.code, byte(dst))
+	a.code = append(a.code, byte(src))
 }
 
 func rtgWasm32EmitReg(a *rtgAsm, op int, reg int) {
-	rtgAsmEmit8(a, op)
-	rtgAsmEmit8(a, reg)
+	a.code = append(a.code, byte(op))
+	a.code = append(a.code, byte(reg))
 }
 
 func rtgWasm32EmitStack(a *rtgAsm, op int, reg int, offset int) {
-	rtgAsmEmit8(a, op)
-	rtgAsmEmit8(a, reg)
-	rtgAsmEmit32(a, offset)
+	a.code = append(a.code, byte(op))
+	a.code = append(a.code, byte(reg))
+	a.code = rtgAppend32(a.code, offset)
 }
 
 func rtgWasm32EmitMem(a *rtgAsm, op int, reg int, base int, disp int, size int) {
-	rtgAsmEmit8(a, op)
-	rtgAsmEmit8(a, reg)
-	rtgAsmEmit8(a, base)
-	rtgAsmEmit32(a, disp)
-	rtgAsmEmit8(a, size)
+	a.code = append(a.code, byte(op))
+	a.code = append(a.code, byte(reg))
+	a.code = append(a.code, byte(base))
+	a.code = rtgAppend32(a.code, disp)
+	a.code = append(a.code, byte(size))
 }
 
 func rtgWasm32EmitIndex(a *rtgAsm, op int, reg int, base int, index int, scale int, disp int, size int) {
-	rtgAsmEmit8(a, op)
-	rtgAsmEmit8(a, reg)
-	rtgAsmEmit8(a, base)
-	rtgAsmEmit8(a, index)
-	rtgAsmEmit8(a, scale)
-	rtgAsmEmit32(a, disp)
-	rtgAsmEmit8(a, size)
+	a.code = append(a.code, byte(op))
+	a.code = append(a.code, byte(reg))
+	a.code = append(a.code, byte(base))
+	a.code = append(a.code, byte(index))
+	a.code = append(a.code, byte(scale))
+	a.code = rtgAppend32(a.code, disp)
+	a.code = append(a.code, byte(size))
 }
 
 func rtgWasm32EmitBranch(a *rtgAsm, op int, label int) {
-	rtgAsmEmit8(a, op)
+	a.code = append(a.code, byte(op))
 	at := len(a.code)
-	rtgAsmEmit32(a, 0)
+	a.code = rtgAppend32(a.code, 0)
 	rtgAsmAddReloc(a, at, label)
 }
 
 func rtgWasm32EmitCondBranch(a *rtgAsm, cond int, label int) {
-	rtgAsmEmit8(a, rtgWasm32OpJCond)
-	rtgAsmEmit8(a, cond)
+	a.code = append(a.code, byte(rtgWasm32OpJCond))
+	a.code = append(a.code, byte(cond))
 	at := len(a.code)
-	rtgAsmEmit32(a, 0)
+	a.code = rtgAppend32(a.code, 0)
 	rtgAsmAddReloc(a, at, label)
 }
 
@@ -561,7 +584,6 @@ func rtgWasm32AsmImulRcxImm(a *rtgAsm, imm int) {
 }
 
 func rtgWasm32AsmLeave(a *rtgAsm) {
-	rtgAsmEmit8(a, rtgWasm32OpNop)
 }
 
 func rtgWasm32AsmRet(a *rtgAsm) {
@@ -617,7 +639,11 @@ type rtgWasm32Instr struct {
 	f    int
 }
 
-const rtgWasm32ProgramBase = 1048576
+const rtgWasm32ProgramBase = 262144
+const rtgWasm32StackGuardSize = 16384
+const rtgWasm32ExprStackSize = 16384
+const rtgWasm32CallStackSize = 8192
+const rtgWasm32FrameStackSize = 393216
 const rtgWasm32ScratchIov = 0
 const rtgWasm32ScratchN = 8
 const rtgWasm32ScratchFd = 12
@@ -644,18 +670,20 @@ const rtgWasm32ImportEnvironSizesGet = 9
 const rtgWasm32ImportEnvironGet = 10
 const rtgWasm32ImportProcExit = 11
 const rtgWasm32StartFuncIndex = 12
+const rtgWasm32VmFuncType = 7
+const rtgWasm32VmFuncBase = 13
 
-const rtgWasm32LocalPc = 0
-const rtgWasm32LocalSp = 1
-const rtgWasm32LocalFp = 2
-const rtgWasm32LocalCsp = 3
-const rtgWasm32LocalRax = 4
-const rtgWasm32LocalRdx = 5
-const rtgWasm32LocalRcx = 6
-const rtgWasm32LocalRdi = 7
-const rtgWasm32LocalRsi = 8
-const rtgWasm32LocalR8 = 9
-const rtgWasm32LocalR9 = 10
+const rtgWasm32LocalSp = 0
+const rtgWasm32LocalFp = 1
+const rtgWasm32LocalRax = 2
+const rtgWasm32LocalRdx = 3
+const rtgWasm32LocalRcx = 4
+const rtgWasm32LocalRdi = 5
+const rtgWasm32LocalRsi = 6
+const rtgWasm32LocalR8 = 7
+const rtgWasm32LocalR9 = 8
+const rtgWasm32LocalPc = 9
+const rtgWasm32LocalCsp = 10
 const rtgWasm32LocalR10 = 11
 const rtgWasm32LocalFlag = 12
 const rtgWasm32LocalTmp = 13
@@ -773,7 +801,7 @@ func rtgWasm32DecodeOne(code []byte, pc int) rtgWasm32Instr {
 }
 
 func rtgWasm32Decode(code []byte) []rtgWasm32Instr {
-	out := make([]rtgWasm32Instr, 0, 262144)
+	out := make([]rtgWasm32Instr, 0, 131072)
 	pc := 0
 	for pc < len(code) {
 		ins := rtgWasm32DecodeOne(code, pc)
@@ -786,13 +814,35 @@ func rtgWasm32Decode(code []byte) []rtgWasm32Instr {
 	return out
 }
 
-func rtgWasm32BuildPcIndex(instrs []rtgWasm32Instr, codeLen int) []int {
-	pcIndex := make([]int, codeLen+1, 2097152)
+func rtgWasm32InstrLowerBound(instrs []rtgWasm32Instr, pc int) int {
+	lo := 0
+	hi := len(instrs)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if instrs[mid].pc < pc {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return lo
+}
+
+func rtgWasm32BuildLocalPcIndex(instrs []rtgWasm32Instr) []int {
+	if len(instrs) == 0 {
+		return make([]int, 0, 1)
+	}
+	basePc := instrs[0].pc
+	limitPc := instrs[len(instrs)-1].next
+	if limitPc < basePc {
+		limitPc = basePc
+	}
+	pcIndex := make([]int, limitPc-basePc+1, 65536)
 	for i := 0; i < len(pcIndex); i++ {
 		pcIndex[i] = -1
 	}
 	for i := 0; i < len(instrs); i++ {
-		pc := instrs[i].pc
+		pc := instrs[i].pc - basePc
 		if pc >= 0 && pc < len(pcIndex) {
 			pcIndex[pc] = i
 		}
@@ -800,7 +850,8 @@ func rtgWasm32BuildPcIndex(instrs []rtgWasm32Instr, codeLen int) []int {
 	return pcIndex
 }
 
-func rtgWasm32InstrIndexForPcFast(pcIndex []int, instrCount int, pc int) int {
+func rtgWasm32InstrIndexForPcLocal(pcIndex []int, basePc int, instrCount int, pc int) int {
+	pc -= basePc
 	if pc >= 0 && pc < len(pcIndex) {
 		idx := pcIndex[pc]
 		if idx >= 0 {
@@ -817,7 +868,7 @@ func rtgWasm32IsControlOp(op int) bool {
 	if op == rtgWasm32OpJmp || op == rtgWasm32OpJz || op == rtgWasm32OpJnz || op == rtgWasm32OpJCond {
 		return true
 	}
-	if op == rtgWasm32OpCall || op == rtgWasm32OpRet {
+	if op == rtgWasm32OpRet {
 		return true
 	}
 	return false
@@ -839,10 +890,10 @@ func rtgWasm32OpHasTarget(op int) bool {
 	return false
 }
 
-func rtgWasm32BuildBlockStarts(instrs []rtgWasm32Instr, pcIndex []int) []int {
-	starts := make([]int, 0, 65536)
+func rtgWasm32BuildBlockStartsLocal(instrs []rtgWasm32Instr, pcIndex []int, basePc int) []int {
+	starts := make([]int, 0, 512)
 	instrCount := len(instrs)
-	marks := make([]int, instrCount+1, 262144)
+	marks := make([]int, instrCount+1, 4096)
 	for i := 0; i < len(marks); i++ {
 		marks[i] = 0
 	}
@@ -857,13 +908,13 @@ func rtgWasm32BuildBlockStarts(instrs []rtgWasm32Instr, pcIndex []int) []int {
 			}
 		}
 		if rtgWasm32OpHasTarget(ins.op) {
-			targetIndex := rtgWasm32InstrIndexForPcFast(pcIndex, instrCount, ins.a)
+			targetIndex := rtgWasm32InstrIndexForPcLocal(pcIndex, basePc, instrCount, ins.a)
 			if targetIndex < instrCount {
 				marks[targetIndex] = 1
 			}
 		}
 		if ins.op == rtgWasm32OpJCond {
-			targetIndex := rtgWasm32InstrIndexForPcFast(pcIndex, instrCount, ins.b)
+			targetIndex := rtgWasm32InstrIndexForPcLocal(pcIndex, basePc, instrCount, ins.b)
 			if targetIndex < instrCount {
 				marks[targetIndex] = 1
 			}
@@ -885,7 +936,7 @@ func rtgWasm32BlockEnd(starts []int, blockIndex int, instrCount int) int {
 }
 
 func rtgWasm32BuildInstrBlockIndex(starts []int, instrCount int) []int {
-	blockIndex := make([]int, instrCount+1, 262144)
+	blockIndex := make([]int, instrCount+1, 4096)
 	block := 0
 	for i := 0; i < instrCount; i++ {
 		if block+1 < len(starts) && i >= starts[block+1] {
@@ -1583,27 +1634,278 @@ func rtgWasm32AppendInstr(out []byte, ins rtgWasm32Instr, nextIndex int, targetI
 	return rtgWasmBr(out, loopDepth)
 }
 
-func rtgWasm32CodeBody(a *rtgAsm, dataBase int, bssBase int) []byte {
-	instrs := rtgWasm32Decode(a.code)
-	pcIndex := rtgWasm32BuildPcIndex(instrs, len(a.code))
-	blockStarts := rtgWasm32BuildBlockStarts(instrs, pcIndex)
+func rtgWasm32AppendDirectArgs(out []byte) []byte {
+	out = rtgWasmLocalGet(out, rtgWasm32LocalSp)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalFp)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalRax)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalRdx)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalRcx)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalRdi)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalRsi)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalR8)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalR9)
+	return out
+}
+
+func rtgWasm32AppendStateResults(out []byte) []byte {
+	out = rtgWasmLocalGet(out, rtgWasm32LocalRax)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalRdx)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalRcx)
+	return out
+}
+
+func rtgWasm32AppendStateReturn(out []byte) []byte {
+	out = rtgWasm32AppendStateResults(out)
+	out = append(out, 0x0f)
+	return out
+}
+
+func rtgWasm32FindRoutineIndex(routinePcs []int, pc int) int {
+	lo := 0
+	hi := len(routinePcs)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		value := routinePcs[mid]
+		if value == pc {
+			return mid
+		}
+		if value < pc {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return -1
+}
+
+func rtgWasm32MarkFunc(g *rtgLinearGen, fnIndex int) {
+	if fnIndex < 0 || fnIndex >= len(g.funcReachable) {
+		return
+	}
+	if g.funcReachable[fnIndex] {
+		return
+	}
+	g.funcReachable[fnIndex] = true
+	g.funcQueue = append(g.funcQueue, fnIndex)
+	src := g.meta.prog.src
+	nameStart := g.meta.funcs[fnIndex].nameStart
+	nameEnd := g.meta.funcs[fnIndex].nameEnd
+	rtgAsmAddFuncSymbol(&g.asm, src, nameStart, nameEnd, g.funcLabels[fnIndex])
+}
+
+func rtgWasm32AppendDirectCall(out []byte, funcIndex int, frameSize int) []byte {
+	out = rtgWasm32AppendDirectArgs(out)
+	out = rtgWasmAppendCall(out, funcIndex)
+	out = rtgWasmLocalSet(out, rtgWasm32LocalRcx)
+	out = rtgWasmLocalSet(out, rtgWasm32LocalRdx)
+	out = rtgWasmLocalSet(out, rtgWasm32LocalRax)
+	return out
+}
+
+func rtgWasm32AppendInstrDirect(out []byte, ins rtgWasm32Instr, nextIndex int, targetIndex int, loopDepth int, callStackBase int, frameSize int, routinePcs []int) []byte {
+	if ins.op == rtgWasm32OpExit {
+		out = rtgWasmLocalGet(out, rtgWasm32LocalRax)
+		out = rtgWasmAppendCall(out, rtgWasm32ImportProcExit)
+		out = append(out, 0x00)
+		return out
+	}
+	if ins.op == rtgWasm32OpCall {
+		routineIndex := rtgWasm32FindRoutineIndex(routinePcs, ins.a)
+		if routineIndex < 0 {
+			return rtgWasm32AppendInstr(out, ins, nextIndex, targetIndex, loopDepth, loopDepth+1, callStackBase, frameSize)
+		}
+		out = rtgWasm32AppendDirectCall(out, rtgWasm32VmFuncBase+routineIndex, frameSize)
+		if loopDepth < 0 {
+			return out
+		}
+		out = rtgWasm32SetPc(out, nextIndex)
+		return rtgWasmBr(out, loopDepth)
+	}
+	if ins.op == rtgWasm32OpRet {
+		return rtgWasm32AppendStateReturn(out)
+	}
+	return rtgWasm32AppendInstr(out, ins, nextIndex, targetIndex, loopDepth, loopDepth+1, callStackBase, frameSize)
+}
+
+func rtgWasm32CanFusePair(first rtgWasm32Instr, second rtgWasm32Instr) bool {
+	if second.op == rtgWasm32OpPopReg {
+		if first.op == rtgWasm32OpPushReg {
+			return true
+		}
+		if first.op == rtgWasm32OpPushImm {
+			return true
+		}
+	}
+	if first.op == rtgWasm32OpStoreStack && second.op == rtgWasm32OpLoadStack && first.b == second.b {
+		return true
+	}
+	return false
+}
+
+func rtgWasm32AppendFusedPair(out []byte, first rtgWasm32Instr, second rtgWasm32Instr) []byte {
+	if second.op == rtgWasm32OpPopReg {
+		if first.op == rtgWasm32OpPushReg {
+			if first.a == second.a {
+				return out
+			}
+			out = rtgWasm32RegGet(out, first.a)
+			return rtgWasm32RegSet(out, second.a)
+		}
+		out = rtgWasmAppendI32Const(out, first.a)
+		return rtgWasm32RegSet(out, second.a)
+	}
+	out = rtgWasm32StackAddr(out, first.b)
+	out = rtgWasm32RegGet(out, first.a)
+	out = rtgWasmI32Store(out, 2, 0)
+	if first.a == second.a {
+		return out
+	}
+	out = rtgWasm32RegGet(out, first.a)
+	return rtgWasm32RegSet(out, second.a)
+}
+
+func rtgWasm32PcInList(pcs []int, pc int) bool {
+	for i := 0; i < len(pcs); i++ {
+		if pcs[i] == pc {
+			return true
+		}
+	}
+	return false
+}
+
+func rtgWasm32AppendUniquePc(pcs []int, pc int) []int {
+	if pc < 0 {
+		return pcs
+	}
+	if rtgWasm32PcInList(pcs, pc) {
+		return pcs
+	}
+	return append(pcs, pc)
+}
+
+func rtgWasm32SortPcs(pcs []int) []int {
+	for i := 1; i < len(pcs); i++ {
+		value := pcs[i]
+		j := i - 1
+		for j >= 0 && pcs[j] > value {
+			pcs[j+1] = pcs[j]
+			j--
+		}
+		pcs[j+1] = value
+	}
+	return pcs
+}
+
+func rtgWasm32SymbolPcs(a *rtgAsm) []int {
+	pcs := make([]int, 0, 2048)
+	for i := 0; i < len(a.symbols); i++ {
+		label := a.symbols[i].label
+		if label >= 0 && label < len(a.labelPos) && a.labelSet[label] {
+			pcs = rtgWasm32AppendUniquePc(pcs, a.labelPos[label])
+		}
+	}
+	return rtgWasm32SortPcs(pcs)
+}
+
+func rtgWasm32RoutinePcs(a *rtgAsm, instrs []rtgWasm32Instr) []int {
+	pcs := make([]int, 0, 1024)
+	pcs = append(pcs, 0)
+	for i := 0; i < len(a.symbols); i++ {
+		label := a.symbols[i].label
+		if label >= 0 && label < len(a.labelPos) && a.labelSet[label] {
+			pcs = rtgWasm32AppendUniquePc(pcs, a.labelPos[label])
+		}
+	}
+	for i := 0; i < len(instrs); i++ {
+		ins := instrs[i]
+		if ins.op == rtgWasm32OpCall {
+			pcs = rtgWasm32AppendUniquePc(pcs, ins.a)
+		}
+	}
+	return rtgWasm32SortPcs(pcs)
+}
+
+func rtgWasm32NextPcAfter(pcs []int, pc int, limit int) int {
+	lo := 0
+	hi := len(pcs)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if pcs[mid] <= pc {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	if lo < len(pcs) && pcs[lo] < limit {
+		return pcs[lo]
+	}
+	return limit
+}
+
+func rtgWasm32SortedPcContains(pcs []int, pc int) bool {
+	lo := 0
+	hi := len(pcs)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if pcs[mid] < pc {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return lo < len(pcs) && pcs[lo] == pc
+}
+
+func rtgWasm32FirstRetAfter(instrs []rtgWasm32Instr, startPc int, limit int) int {
+	i := rtgWasm32InstrLowerBound(instrs, startPc)
+	for i < len(instrs) {
+		ins := instrs[i]
+		if ins.pc >= limit {
+			break
+		}
+		if ins.op == rtgWasm32OpRet {
+			return ins.next
+		}
+		i++
+	}
+	return limit
+}
+
+func rtgWasm32RoutineEndPc(startPc int, codeLen int, symbolPcs []int, instrs []rtgWasm32Instr) int {
+	nextSymbol := rtgWasm32NextPcAfter(symbolPcs, startPc, codeLen)
+	if startPc == 0 || rtgWasm32SortedPcContains(symbolPcs, startPc) {
+		return nextSymbol
+	}
+	return rtgWasm32FirstRetAfter(instrs, startPc, nextSymbol)
+}
+
+func rtgWasm32DirectRoutineBody(instrs []rtgWasm32Instr, codeLen int, routinePcs []int, callStackBase int, frameSize int, hasFrame bool) []byte {
+	basePc := 0
+	if len(instrs) > 0 {
+		basePc = instrs[0].pc
+	}
+	pcIndex := rtgWasm32BuildLocalPcIndex(instrs)
+	blockStarts := rtgWasm32BuildBlockStartsLocal(instrs, pcIndex, basePc)
 	instrBlockIndex := rtgWasm32BuildInstrBlockIndex(blockStarts, len(instrs))
-	frameSize := 32768
-	exprStackBase := bssBase + a.bssSize + 65536
-	callStackBase := exprStackBase + 16777216
-	frameTop := callStackBase + 1048576 + 67108864
-	body := make([]byte, 0, 4194304)
+	body := make([]byte, 0, 65536)
 	body = rtgWasmAppendU32(body, 1)
-	body = rtgWasmAppendU32(body, 16)
+	body = rtgWasmAppendU32(body, 7)
 	body = append(body, 0x7f)
 	body = rtgWasmAppendI32Const(body, 0)
 	body = rtgWasmLocalSet(body, rtgWasm32LocalPc)
-	body = rtgWasmAppendI32Const(body, exprStackBase)
-	body = rtgWasmLocalSet(body, rtgWasm32LocalSp)
-	body = rtgWasmAppendI32Const(body, frameTop)
-	body = rtgWasmLocalSet(body, rtgWasm32LocalFp)
 	body = rtgWasmAppendI32Const(body, callStackBase)
 	body = rtgWasmLocalSet(body, rtgWasm32LocalCsp)
+	if hasFrame {
+		body = rtgWasmLocalGet(body, rtgWasm32LocalFp)
+		body = rtgWasmAppendI32Const(body, frameSize)
+		body = append(body, 0x6b)
+		body = rtgWasmLocalSet(body, rtgWasm32LocalFp)
+	}
+	if len(blockStarts) == 0 {
+		body = rtgWasm32AppendStateResults(body)
+		body = append(body, 0x0b)
+		return body
+	}
 	body = rtgWasmAppend2(body, 0x02, 0x40)
 	body = rtgWasmAppend2(body, 0x03, 0x40)
 	for i := 0; i < len(blockStarts); i++ {
@@ -1615,17 +1917,30 @@ func rtgWasm32CodeBody(a *rtgAsm, dataBase int, bssBase int) []byte {
 	for i := 0; i < len(blockStarts); i++ {
 		body = rtgWasmAppendU32(body, len(blockStarts)-1-i)
 	}
-	body = rtgWasmAppendU32(body, len(blockStarts))
+	defaultDepth := len(blockStarts) - 1
+	body = rtgWasmAppendU32(body, defaultDepth)
 	for blockIndex := len(blockStarts) - 1; blockIndex >= 0; blockIndex-- {
 		body = append(body, 0x0b)
 		start := blockStarts[blockIndex]
 		end := rtgWasm32BlockEnd(blockStarts, blockIndex, len(instrs))
-		for i := start; i < end; i++ {
+		i := start
+		for i < end {
 			ins := instrs[i]
+			if i+1 < end && rtgWasm32CanFusePair(ins, instrs[i+1]) {
+				body = rtgWasm32AppendFusedPair(body, ins, instrs[i+1])
+				if i+2 >= end {
+					nextIndex := rtgWasm32InstrIndexForPcLocal(pcIndex, basePc, len(instrs), instrs[i+1].next)
+					nextBlock := rtgWasm32BlockForInstrFast(instrBlockIndex, nextIndex)
+					body = rtgWasm32SetPc(body, nextBlock)
+					body = rtgWasmBr(body, blockIndex)
+				}
+				i += 2
+				continue
+			}
 			if i+1 < end {
-				body = rtgWasm32AppendInstr(body, ins, 0, 0, -1, 0, callStackBase, frameSize)
+				body = rtgWasm32AppendInstrDirect(body, ins, 0, 0, -1, callStackBase, frameSize, routinePcs)
 			} else {
-				nextIndex := rtgWasm32InstrIndexForPcFast(pcIndex, len(instrs), ins.next)
+				nextIndex := rtgWasm32InstrIndexForPcLocal(pcIndex, basePc, len(instrs), ins.next)
 				nextBlock := rtgWasm32BlockForInstrFast(instrBlockIndex, nextIndex)
 				targetBlock := 0
 				if rtgWasm32OpHasTarget(ins.op) || ins.op == rtgWasm32OpJCond {
@@ -1633,23 +1948,49 @@ func rtgWasm32CodeBody(a *rtgAsm, dataBase int, bssBase int) []byte {
 					if ins.op == rtgWasm32OpJCond {
 						targetPc = ins.b
 					}
-					targetIndex := rtgWasm32InstrIndexForPcFast(pcIndex, len(instrs), targetPc)
+					targetIndex := rtgWasm32InstrIndexForPcLocal(pcIndex, basePc, len(instrs), targetPc)
 					targetBlock = rtgWasm32BlockForInstrFast(instrBlockIndex, targetIndex)
 				}
-				body = rtgWasm32AppendInstr(body, ins, nextBlock, targetBlock, blockIndex, blockIndex+1, callStackBase, frameSize)
+				body = rtgWasm32AppendInstrDirect(body, ins, nextBlock, targetBlock, blockIndex, callStackBase, frameSize, routinePcs)
 			}
+			i++
 		}
 	}
 	body = rtgWasmBr(body, 1)
 	body = append(body, 0x0b)
 	body = append(body, 0x0b)
+	body = rtgWasm32AppendStateResults(body)
+	body = append(body, 0x0b)
+	return body
+}
+
+func rtgWasm32DirectStartBody(topFunc int, exprStackBase int, callStackBase int, frameTop int) []byte {
+	body := make([]byte, 0, 256)
+	body = rtgWasmAppendU32(body, 1)
+	body = rtgWasmAppendU32(body, 16)
+	body = append(body, 0x7f)
+	body = rtgWasmAppendI32Const(body, 0)
+	body = rtgWasmLocalSet(body, rtgWasm32LocalPc)
+	body = rtgWasmAppendI32Const(body, exprStackBase)
+	body = rtgWasmLocalSet(body, rtgWasm32LocalSp)
+	body = rtgWasmAppendI32Const(body, frameTop)
+	body = rtgWasmLocalSet(body, rtgWasm32LocalFp)
+	body = rtgWasmAppendI32Const(body, callStackBase)
+	body = rtgWasmLocalSet(body, rtgWasm32LocalCsp)
+	body = rtgWasm32AppendDirectArgs(body)
+	body = rtgWasmAppendCall(body, topFunc)
+	body = rtgWasmLocalSet(body, rtgWasm32LocalRcx)
+	body = rtgWasmLocalSet(body, rtgWasm32LocalRdx)
+	body = rtgWasmLocalSet(body, rtgWasm32LocalRax)
+	body = rtgWasmLocalGet(body, rtgWasm32LocalRax)
+	body = rtgWasmAppendCall(body, rtgWasm32ImportProcExit)
 	body = append(body, 0x0b)
 	return body
 }
 
 func rtgWasm32TypeSectionFull() []byte {
 	var out []byte
-	out = rtgWasmAppendU32(out, 7)
+	out = rtgWasmAppendU32(out, 8)
 	out = append(out, 0x60)
 	out = rtgWasmAppendU32(out, 4)
 	out = rtgWasmAppend4(out, 0x7f, 0x7f, 0x7f, 0x7f)
@@ -1683,6 +2024,15 @@ func rtgWasm32TypeSectionFull() []byte {
 	out = rtgWasmAppend2(out, 0x7f, 0x7f)
 	out = rtgWasmAppendU32(out, 1)
 	out = append(out, 0x7f)
+	out = append(out, 0x60)
+	out = rtgWasmAppendU32(out, 9)
+	for i := 0; i < 9; i++ {
+		out = append(out, 0x7f)
+	}
+	out = rtgWasmAppendU32(out, 3)
+	for i := 0; i < 3; i++ {
+		out = append(out, 0x7f)
+	}
 	return out
 }
 
@@ -1711,10 +2061,13 @@ func rtgWasm32ImportSectionFull() []byte {
 	return out
 }
 
-func rtgWasm32FunctionSectionFull() []byte {
+func rtgWasm32FunctionSectionDirect(routineCount int) []byte {
 	var out []byte
-	out = rtgWasmAppendU32(out, 1)
+	out = rtgWasmAppendU32(out, routineCount+1)
 	out = rtgWasmAppendU32(out, 5)
+	for i := 0; i < routineCount; i++ {
+		out = rtgWasmAppendU32(out, rtgWasm32VmFuncType)
+	}
 	return out
 }
 
@@ -1742,10 +2095,24 @@ func rtgWasm32ExportSectionFull() []byte {
 	return out
 }
 
-func rtgWasm32CodeSectionFull(body []byte) []byte {
-	out := make([]byte, 0, 4194304)
-	out = rtgWasmAppendU32(out, 1)
-	out = rtgWasmAppendByteVec(out, body)
+func rtgWasm32AppendCodeSectionDirect(out []byte, a *rtgAsm, instrs []rtgWasm32Instr, routinePcs []int, symbolPcs []int, codeLen int, callStackBase int, frameTop int, exprStackBase int) []byte {
+	frameSize := 6144
+	out = append(out, 10)
+	lenAt := len(out)
+	out = rtgWasmAppendU32Fixed5(out, 0)
+	payloadStart := len(out)
+	out = rtgWasmAppendU32(out, len(routinePcs)+1)
+	out = rtgWasmAppendByteVec(out, rtgWasm32DirectStartBody(rtgWasm32VmFuncBase, exprStackBase, callStackBase, frameTop))
+	for i := 0; i < len(routinePcs); i++ {
+		startPc := routinePcs[i]
+		endPc := rtgWasm32RoutineEndPc(startPc, codeLen, symbolPcs, instrs)
+		startIndex := rtgWasm32InstrLowerBound(instrs, startPc)
+		endIndex := rtgWasm32InstrLowerBound(instrs, endPc)
+		routineInstrs := instrs[startIndex:endIndex]
+		hasFrame := startPc != 0 && rtgWasm32PcInList(symbolPcs, startPc)
+		out = rtgWasmAppendByteVec(out, rtgWasm32DirectRoutineBody(routineInstrs, codeLen, routinePcs, callStackBase, frameSize, hasFrame))
+	}
+	rtgWasmPatchU32Fixed5(out, lenAt, len(out)-payloadStart)
 	return out
 }
 
@@ -1763,9 +2130,14 @@ func rtgWasm32Image(a *rtgAsm) []byte {
 	dataBase := rtgWasm32ProgramBase
 	bssBase := rtgAlignTo8(dataBase + len(a.data))
 	rtgWasm32Patch(a, dataBase, bssBase)
-	body := rtgWasm32CodeBody(a, dataBase, bssBase)
-	memSize := bssBase + a.bssSize + 65536 + 16777216 + 1048576 + 67108864 + 65536
-	out := make([]byte, 0, 4194304)
+	instrs := rtgWasm32Decode(a.code)
+	symbolPcs := rtgWasm32SymbolPcs(a)
+	routinePcs := rtgWasm32RoutinePcs(a, instrs)
+	exprStackBase := bssBase + a.bssSize + rtgWasm32StackGuardSize
+	callStackBase := exprStackBase + rtgWasm32ExprStackSize
+	frameTop := callStackBase + rtgWasm32CallStackSize + rtgWasm32FrameStackSize
+	memSize := bssBase + a.bssSize + rtgWasm32StackGuardSize + rtgWasm32ExprStackSize + rtgWasm32CallStackSize + rtgWasm32FrameStackSize + rtgWasm32StackGuardSize
+	out := make([]byte, 0, 1572864)
 	out = append(out, 0x00)
 	out = append(out, 0x61)
 	out = append(out, 0x73)
@@ -1776,10 +2148,10 @@ func rtgWasm32Image(a *rtgAsm) []byte {
 	out = append(out, 0x00)
 	out = rtgWasmAppendSection(out, 1, rtgWasm32TypeSectionFull())
 	out = rtgWasmAppendSection(out, 2, rtgWasm32ImportSectionFull())
-	out = rtgWasmAppendSection(out, 3, rtgWasm32FunctionSectionFull())
+	out = rtgWasmAppendSection(out, 3, rtgWasm32FunctionSectionDirect(len(routinePcs)))
 	out = rtgWasmAppendSection(out, 5, rtgWasm32MemorySectionFull(memSize))
 	out = rtgWasmAppendSection(out, 7, rtgWasm32ExportSectionFull())
-	out = rtgWasmAppendSection(out, 10, rtgWasm32CodeSectionFull(body))
+	out = rtgWasm32AppendCodeSectionDirect(out, a, instrs, routinePcs, symbolPcs, len(a.code), callStackBase, frameTop, exprStackBase)
 	if len(a.data) > 0 {
 		out = rtgWasmAppendSection(out, 11, rtgWasm32DataSectionFull(dataBase, a.data))
 	}
@@ -1836,6 +2208,7 @@ func rtgWasm32EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 
 func rtgWasm32EmitCallWithWordCount(g *rtgLinearGen, fnIndex int, wordCount int) {
 	a := &g.asm
+	rtgWasm32MarkFunc(g, fnIndex)
 	if wordCount > 0 {
 		rtgWasm32AsmPopRdi(a)
 	}

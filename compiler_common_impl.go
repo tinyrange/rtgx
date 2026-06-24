@@ -95,6 +95,8 @@ type rtgAsm struct {
 	dataOffset int
 }
 
+const rtgWasm32FallbackSliceBackingSize = 4096
+
 func rtgAsmInit(a *rtgAsm) {
 	var code []byte
 	var labelPos []int
@@ -103,13 +105,22 @@ func rtgAsmInit(a *rtgAsm) {
 	var absRelocs []rtgAbsRef
 	var symbols []rtgAsmSymbol
 	var data []byte
-	code = make([]byte, 0, 1048576)
-	labelPos = make([]int, 0, 65536)
-	labelSet = make([]bool, 0, 65536)
-	relocs = make([]rtgLabelRef, 0, 65536)
-	absRelocs = make([]rtgAbsRef, 0, 65536)
-	symbols = make([]rtgAsmSymbol, 0, 8192)
-	data = make([]byte, 0, 131072)
+	if rtgTargetArch == rtgArchWasm32 {
+		code = make([]byte, 0, 655360)
+		labelPos = make([]int, 0, 6144)
+		labelSet = make([]bool, 0, 6144)
+		relocs = make([]rtgLabelRef, 0, 12288)
+		absRelocs = make([]rtgAbsRef, 0, 2048)
+		symbols = make([]rtgAsmSymbol, 0, 2048)
+	} else {
+		code = make([]byte, 0, 786432)
+		labelPos = make([]int, 0, 8192)
+		labelSet = make([]bool, 0, 8192)
+		relocs = make([]rtgLabelRef, 0, 24576)
+		absRelocs = make([]rtgAbsRef, 0, 4096)
+		symbols = make([]rtgAsmSymbol, 0, 4096)
+	}
+	data = make([]byte, 0, 16384)
 	a.code = code
 	a.labelPos = labelPos
 	a.labelSet = labelSet
@@ -1150,13 +1161,17 @@ type rtgFuncInfo struct {
 }
 
 type rtgMeta struct {
-	prog    *rtgProgram
-	types   []rtgTypeInfo
-	fields  []rtgFieldInfo
-	globals []rtgSymbolInfo
-	params  []rtgSymbolInfo
-	funcs   []rtgFuncInfo
-	ok      bool
+	prog          *rtgProgram
+	types         []rtgTypeInfo
+	fields        []rtgFieldInfo
+	globals       []rtgSymbolInfo
+	params        []rtgSymbolInfo
+	funcs         []rtgFuncInfo
+	globalBuckets []int
+	globalNext    []int
+	funcBuckets   []int
+	funcNext      []int
+	ok            bool
 }
 
 type rtgCompileResult struct {
@@ -1240,6 +1255,8 @@ func rtgParseProgram(src []byte) rtgProgram {
 	var p rtgProgram
 	p.src = src
 	p.toks = rtgScan(src)
+	p.decls = make([]rtgDecl, 0, 512)
+	p.funcs = make([]rtgFuncDecl, 0, 1280)
 	p.ok = true
 
 	i := 0
@@ -1410,7 +1427,7 @@ func rtgSkipTopLevelLine(p *rtgProgram, start int) int {
 }
 
 func rtgScan(src []byte) []rtgToken {
-	toks := make([]rtgToken, 0, 65536)
+	toks := make([]rtgToken, 0, 122880)
 	i := 0
 	line := 1
 	for i < len(src) {
@@ -1623,7 +1640,13 @@ func rtgKeywordKind(src []byte, start int, end int) int {
 }
 
 func rtgTokIsKind(p *rtgProgram, i int, kind int) bool {
-	return i >= 0 && i < len(p.toks) && p.toks[i].kind == kind
+	if i < 0 {
+		return false
+	}
+	if i >= len(p.toks) {
+		return false
+	}
+	return p.toks[i].kind == kind
 }
 
 func rtgTokCharIs(p *rtgProgram, i int, c byte) bool {
@@ -1652,68 +1675,71 @@ func rtgBoolTokenValue(p *rtgProgram, tok int) int {
 	return 0
 }
 
-func rtgTokIsCompoundAssign(p *rtgProgram, i int) bool {
-	if i < 0 || i >= len(p.toks) {
-		return false
-	}
-	start := p.toks[i].start
-	end := p.toks[i].end
-	if end-start != 2 || p.src[start+1] != '=' {
-		return false
-	}
-	c := p.src[start]
-	return c == '+' || c == '-' || c == '*' || c == '/' || c == '%'
-}
-
 func rtgExprIdentCode(p *rtgProgram, ep *rtgExprParse, idx int) int {
 	e := ep.exprs[idx]
 	if e.kind != rtgExprIdent {
 		return 0
 	}
-	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "append") {
-		return rtgIdentAppend
+	src := p.src
+	start := e.nameStart
+	n := e.nameEnd - e.nameStart
+	if start < 0 || e.nameEnd > len(src) || n <= 0 {
+		return 0
 	}
-	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "[]byte") {
-		return rtgIdentByteSlice
+	if n == 3 {
+		if src[start] == 'i' && src[start+1] == 'n' && src[start+2] == 't' {
+			return rtgIdentInt
+		}
+		if src[start] == 'l' && src[start+1] == 'e' && src[start+2] == 'n' {
+			return rtgIdentLen
+		}
 	}
-	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "make") {
-		return rtgIdentMake
+	if n == 4 {
+		if src[start] == 'm' && src[start+1] == 'a' && src[start+2] == 'k' && src[start+3] == 'e' {
+			return rtgIdentMake
+		}
+		if src[start] == 'b' && src[start+1] == 'y' && src[start+2] == 't' && src[start+3] == 'e' {
+			return rtgIdentByte
+		}
+		if src[start] == 'o' && src[start+1] == 'p' && src[start+2] == 'e' && src[start+3] == 'n' {
+			return rtgIdentOpen
+		}
+		if src[start] == 'r' && src[start+1] == 'e' && src[start+2] == 'a' && src[start+3] == 'd' {
+			return rtgIdentRead
+		}
+		if src[start] == 'c' && src[start+1] == 'o' && src[start+2] == 'p' && src[start+3] == 'y' {
+			return rtgIdentCopy
+		}
 	}
-	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "int") {
-		return rtgIdentInt
+	if n == 5 {
+		if src[start] == 'i' && src[start+1] == 'n' && src[start+2] == 't' {
+			if src[start+3] == '1' && src[start+4] == '6' {
+				return rtgIdentInt16
+			}
+			if src[start+3] == '3' && src[start+4] == '2' {
+				return rtgIdentInt32
+			}
+			if src[start+3] == '6' && src[start+4] == '4' {
+				return rtgIdentInt64
+			}
+		}
+		if src[start] == 'c' && src[start+1] == 'l' && src[start+2] == 'o' && src[start+3] == 's' && src[start+4] == 'e' {
+			return rtgIdentClose
+		}
+		if src[start] == 'w' && src[start+1] == 'r' && src[start+2] == 'i' && src[start+3] == 't' && src[start+4] == 'e' {
+			return rtgIdentWrite
+		}
+		if src[start] == 'c' && src[start+1] == 'h' && src[start+2] == 'm' && src[start+3] == 'o' && src[start+4] == 'd' {
+			return rtgIdentChmod
+		}
 	}
-	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "int16") {
-		return rtgIdentInt16
-	}
-	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "int32") {
-		return rtgIdentInt32
-	}
-	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "int64") {
-		return rtgIdentInt64
-	}
-	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "byte") {
-		return rtgIdentByte
-	}
-	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "len") {
-		return rtgIdentLen
-	}
-	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "open") {
-		return rtgIdentOpen
-	}
-	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "close") {
-		return rtgIdentClose
-	}
-	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "read") {
-		return rtgIdentRead
-	}
-	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "write") {
-		return rtgIdentWrite
-	}
-	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "chmod") {
-		return rtgIdentChmod
-	}
-	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "copy") {
-		return rtgIdentCopy
+	if n == 6 {
+		if src[start] == 'a' && src[start+1] == 'p' && src[start+2] == 'p' && src[start+3] == 'e' && src[start+4] == 'n' && src[start+5] == 'd' {
+			return rtgIdentAppend
+		}
+		if src[start] == '[' && src[start+1] == ']' && src[start+2] == 'b' && src[start+3] == 'y' && src[start+4] == 't' && src[start+5] == 'e' {
+			return rtgIdentByteSlice
+		}
 	}
 	return 0
 }
@@ -1897,33 +1923,32 @@ func rtgEvalConstByName(g *rtgLinearGen, nameStart int, nameEnd int) rtgConstRes
 	if builtin.ok {
 		return builtin
 	}
-	for i := 0; i < len(g.meta.globals); i++ {
-		s := &g.meta.globals[i]
-		if s.kind == rtgTokConst && rtgBytesEqualRange(g.prog.src, s.nameStart, s.nameEnd, nameStart, nameEnd) {
-			if s.constValueOK != 0 {
-				return rtgConstResultOk(s.constValue)
-			}
-			ep := rtgParseExpression(g.prog, s.initStart, s.initEnd)
-			if !ep.ok || len(ep.exprs) == 0 {
-				var r rtgConstResult
-				return r
-			}
-			rootIndex := len(ep.exprs) - 1
-			oldIota := g.constEvalIota
-			oldIotaValid := g.constEvalIotaValid
-			g.constEvalIota = s.iotaValue
-			g.constEvalIotaValid = 1
-			result := rtgEvalConstExpr(g, &ep, rootIndex)
-			value := result.value
-			ok := result.ok
-			g.constEvalIota = oldIota
-			g.constEvalIotaValid = oldIotaValid
-			if ok {
-				return rtgConstResultOk(value)
-			}
+	symIndex := rtgFindMetaGlobalIndex(g.meta, nameStart, nameEnd, rtgTokConst)
+	if symIndex >= 0 {
+		s := &g.meta.globals[symIndex]
+		if s.constValueOK != 0 {
+			return rtgConstResultOk(s.constValue)
+		}
+		ep := rtgParseExpression(g.prog, s.initStart, s.initEnd)
+		if !ep.ok || len(ep.exprs) == 0 {
 			var r rtgConstResult
 			return r
 		}
+		rootIndex := len(ep.exprs) - 1
+		oldIota := g.constEvalIota
+		oldIotaValid := g.constEvalIotaValid
+		g.constEvalIota = s.iotaValue
+		g.constEvalIotaValid = 1
+		result := rtgEvalConstExpr(g, &ep, rootIndex)
+		value := result.value
+		ok := result.ok
+		g.constEvalIota = oldIota
+		g.constEvalIotaValid = oldIotaValid
+		if ok {
+			return rtgConstResultOk(value)
+		}
+		var r rtgConstResult
+		return r
 	}
 	var r rtgConstResult
 	return r
@@ -2221,6 +2246,9 @@ func rtgParseExpression(p *rtgProgram, start int, end int) rtgExprParse {
 	ep.prog = p
 	ep.pos = start
 	ep.end = end
+	ep.exprs = make([]rtgExpr, 0, 512)
+	ep.args = make([]int, 0, 512)
+	ep.fields = make([]rtgCompositeField, 0, 512)
 	ep.ok = true
 	rtgParseBinaryExpr(&ep, 1)
 	if ep.pos < ep.end {
@@ -3020,6 +3048,19 @@ func rtgBuildMeta(pp *rtgProgram) rtgMeta {
 	p := pp
 	var m rtgMeta
 	m.prog = p
+	m.types = make([]rtgTypeInfo, 0, 2048)
+	m.fields = make([]rtgFieldInfo, 0, 512)
+	m.globals = make([]rtgSymbolInfo, 0, 512)
+	m.params = make([]rtgSymbolInfo, 0, 3072)
+	m.funcs = make([]rtgFuncInfo, 0, 1280)
+	m.globalBuckets = make([]int, 1024)
+	for i := 0; i < len(m.globalBuckets); i++ {
+		m.globalBuckets[i] = -1
+	}
+	m.funcBuckets = make([]int, 2048)
+	for i := 0; i < len(m.funcBuckets); i++ {
+		m.funcBuckets[i] = -1
+	}
 	m.ok = true
 	rtgInitBuiltinTypes(&m)
 
@@ -3060,8 +3101,67 @@ func rtgBuildMeta(pp *rtgProgram) rtgMeta {
 	for i := 0; i < len(p.funcs); i++ {
 		rtgParseFuncInfo(&m, i)
 	}
+	rtgBuildFuncLookup(&m)
 
 	return m
+}
+
+func rtgHashRange(src []byte, start int, end int) int {
+	h := 0
+	for i := start; i < end; i++ {
+		h = (h*33 + int(src[i])) & 2147483647
+	}
+	return h
+}
+
+func rtgMetaAppendGlobal(m *rtgMeta, sym rtgSymbolInfo) {
+	index := len(m.globals)
+	m.globals = append(m.globals, sym)
+	if len(m.globalBuckets) == 0 {
+		return
+	}
+	m.globalNext = append(m.globalNext, -1)
+	hash := rtgHashRange(m.prog.src, sym.nameStart, sym.nameEnd)
+	bucket := hash % len(m.globalBuckets)
+	m.globalNext[index] = m.globalBuckets[bucket]
+	m.globalBuckets[bucket] = index
+}
+
+func rtgFindMetaGlobalIndex(m *rtgMeta, nameStart int, nameEnd int, kind int) int {
+	if len(m.globalBuckets) > 0 && len(m.globalNext) == len(m.globals) {
+		hash := rtgHashRange(m.prog.src, nameStart, nameEnd)
+		bucket := hash % len(m.globalBuckets)
+		i := m.globalBuckets[bucket]
+		for i >= 0 {
+			s := &m.globals[i]
+			if s.kind == kind && rtgBytesEqualRange(m.prog.src, s.nameStart, s.nameEnd, nameStart, nameEnd) {
+				return i
+			}
+			i = m.globalNext[i]
+		}
+		return -1
+	}
+	for i := 0; i < len(m.globals); i++ {
+		s := &m.globals[i]
+		if s.kind == kind && rtgBytesEqualRange(m.prog.src, s.nameStart, s.nameEnd, nameStart, nameEnd) {
+			return i
+		}
+	}
+	return -1
+}
+
+func rtgBuildFuncLookup(m *rtgMeta) {
+	m.funcNext = make([]int, len(m.funcs), 1280)
+	for i := 0; i < len(m.funcNext); i++ {
+		m.funcNext[i] = -1
+	}
+	for i := 0; i < len(m.funcs); i++ {
+		f := &m.funcs[i]
+		hash := rtgHashRange(m.prog.src, f.nameStart, f.nameEnd)
+		bucket := hash % len(m.funcBuckets)
+		m.funcNext[i] = m.funcBuckets[bucket]
+		m.funcBuckets[bucket] = i
+	}
 }
 
 func rtgInitBuiltinTypes(m *rtgMeta) {
@@ -3168,7 +3268,7 @@ func rtgParseConstDecls(m *rtgMeta, p *rtgProgram, start int, end int) {
 				sym.constValue = constResult.value
 				sym.constValueOK = 1
 			}
-			m.globals = append(m.globals, sym)
+			rtgMetaAppendGlobal(m, sym)
 		}
 		iotaValue++
 		j = specEnd
@@ -3203,9 +3303,10 @@ func rtgEvalMetaParsedConstExpr(m *rtgMeta, p *rtgProgram, ep *rtgExprParse, idx
 		if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "iota") {
 			return rtgConstResultOk(iotaValue)
 		}
-		for i := 0; i < len(m.globals); i++ {
-			s := &m.globals[i]
-			if s.kind == rtgTokConst && s.constValueOK != 0 && rtgBytesEqualRange(p.src, s.nameStart, s.nameEnd, e.nameStart, e.nameEnd) {
+		symIndex := rtgFindMetaGlobalIndex(m, e.nameStart, e.nameEnd, rtgTokConst)
+		if symIndex >= 0 {
+			s := &m.globals[symIndex]
+			if s.constValueOK != 0 {
 				return rtgConstResultOk(s.constValue)
 			}
 		}
@@ -3358,7 +3459,7 @@ func rtgParseTopDeclEntry(m *rtgMeta, p *rtgProgram, kind int, start int, end in
 	if typ == 0 && initStart < initEnd {
 		typ = rtgInferTopLiteralType(m, p, initStart, initEnd)
 	}
-	m.globals = append(m.globals, rtgSymbolInfo{nameStart: name.start, nameEnd: name.end, kind: kind, typ: typ, initStart: initStart, initEnd: initEnd})
+	rtgMetaAppendGlobal(m, rtgSymbolInfo{nameStart: name.start, nameEnd: name.end, kind: kind, typ: typ, initStart: initStart, initEnd: initEnd})
 }
 
 func rtgInferTopLiteralType(m *rtgMeta, p *rtgProgram, start int, end int) int {
@@ -3802,6 +3903,10 @@ func rtgAsmImmFits8Signed(imm int) bool {
 	return imm >= -128 && imm <= 127
 }
 func rtgAsmMovRaxIntToken(a *rtgAsm, p *rtgProgram, tokIndex int) {
+	if rtgTargetArch == rtgArchWasm32 {
+		rtgWasm32EmitRegImm(a, rtgWasm32OpMovRegImm, rtgWasm32RegRax, rtgParseIntToken(p, tokIndex))
+		return
+	}
 	needsMovabs := rtgIntTokenNeedsMovabs(p, tokIndex)
 	value := rtgParseIntToken(p, tokIndex)
 	if needsMovabs {
@@ -4312,6 +4417,8 @@ type rtgLinearGen struct {
 	meta               *rtgMeta
 	asm                rtgAsm
 	funcLabels         []int
+	funcReachable      []bool
+	funcQueue          []int
 	currentFunc        int
 	returnStruct       int
 	locals             []rtgLocalInfo
@@ -4354,7 +4461,7 @@ func rtgAddStringData(g *rtgLinearGen, msg []byte) int {
 }
 func rtgEmitLinearRange(g *rtgLinearGen, start int, end int) bool {
 	var bp rtgBodyParse
-	var stmts []rtgStmt
+	stmts := make([]rtgStmt, 0, 1024)
 	bp.prog = g.prog
 	bp.stmts = stmts
 	bp.ok = true
@@ -4573,7 +4680,7 @@ func rtgEmitLinearIf(g *rtgLinearGen, stmt *rtgStmt) bool {
 	rtgAsmMarkLabel(a, elseLabel)
 	if rtgTokIsKind(p, stmt.elseStart, rtgTokIf) && rtgTokIsKind(p, stmt.elseStart-1, rtgTokElse) {
 		var nested rtgBodyParse
-		var stmts []rtgStmt
+		stmts := make([]rtgStmt, 0, 16)
 		nested.prog = p
 		nested.stmts = stmts
 		nested.ok = true
@@ -5339,10 +5446,18 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 		nameEnd = p.toks[stmt.startTok].end
 	}
 	assignTok := rtgFindAssignmentToken(p, stmt.startTok, stmt.endTok)
+	compoundAssign := false
+	if assignTok >= 0 && assignTok < len(p.toks) {
+		tok := &p.toks[assignTok]
+		if tok.end-tok.start == 2 && p.src[tok.start+1] == '=' {
+			c := p.src[tok.start]
+			compoundAssign = c == '+' || c == '-' || c == '*' || c == '/' || c == '%'
+		}
+	}
 	if assignTok > stmt.startTok && rtgEmitMultiAssign(g, stmt, assignTok) {
 		return true
 	}
-	if assignTok > stmt.startTok && rtgTokIsCompoundAssign(p, assignTok) {
+	if assignTok > stmt.startTok && compoundAssign {
 		lhs := rtgParseExpression(p, stmt.startTok, assignTok)
 		if lhs.ok && len(lhs.exprs) > 0 {
 			lhsIndex := len(lhs.exprs) - 1
@@ -5605,7 +5720,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 		}
 	}
 	if nameEnd <= nameStart {
-		if rtgTokCharIs(p, stmt.startTok, '*') && assignTok > stmt.startTok && rtgTokIsCompoundAssign(p, assignTok) {
+		if rtgTokCharIs(p, stmt.startTok, '*') && assignTok > stmt.startTok && compoundAssign {
 			left := rtgParseExpression(p, stmt.startTok+1, assignTok)
 			if !left.ok || len(left.exprs) == 0 {
 				return false
@@ -5770,7 +5885,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 	if rtgEmitAppendAssignGeneral(g, stmt, &ep) {
 		return true
 	}
-	if rtgTokIsCompoundAssign(p, assignTok) {
+	if compoundAssign {
 		if globalOffset >= 0 {
 			rtgAsmLoadRaxBss(a, globalOffset)
 		} else {
@@ -6111,11 +6226,12 @@ func rtgInferParsedExprType(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 		if localIndex >= 0 {
 			return g.locals[localIndex].typ
 		}
-		for i := 0; i < len(meta.globals); i++ {
-			s := &meta.globals[i]
-			if rtgBytesEqualRange(p.src, s.nameStart, s.nameEnd, e.nameStart, e.nameEnd) {
-				return s.typ
-			}
+		symIndex := rtgFindMetaGlobalIndex(meta, e.nameStart, e.nameEnd, rtgTokVar)
+		if symIndex < 0 {
+			symIndex = rtgFindMetaGlobalIndex(meta, e.nameStart, e.nameEnd, rtgTokConst)
+		}
+		if symIndex >= 0 {
+			return meta.globals[symIndex].typ
 		}
 		constStringTok := rtgFindConstStringToken(g, e.nameStart, e.nameEnd)
 		if constStringTok >= 0 {
@@ -7447,11 +7563,8 @@ func rtgExprCanFoldConst(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		if builtin.ok {
 			return true
 		}
-		for i := 0; i < len(g.meta.globals); i++ {
-			s := &g.meta.globals[i]
-			if s.kind == rtgTokConst && rtgBytesEqualRange(g.prog.src, s.nameStart, s.nameEnd, e.nameStart, e.nameEnd) {
-				return true
-			}
+		if rtgFindMetaGlobalIndex(g.meta, e.nameStart, e.nameEnd, rtgTokConst) >= 0 {
+			return true
 		}
 		return false
 	}
@@ -7738,7 +7851,7 @@ func rtgEmitEnsureMemSlice(g *rtgLinearGen, elemSize int) {
 	rtgAsmJnzLabel(a, okLabel)
 	backingSize := 2097152
 	if rtgTargetArch == rtgArchWasm32 {
-		backingSize = 524288
+		backingSize = rtgWasm32FallbackSliceBackingSize
 	}
 	backingOff := g.asm.bssSize
 	g.asm.bssSize += backingSize
@@ -7759,7 +7872,7 @@ func rtgEmitEnsureLocalSlice(g *rtgLinearGen, offset int, elemSize int) {
 	rtgAsmJnzLabel(a, okLabel)
 	backingSize := 2097152
 	if rtgTargetArch == rtgArchWasm32 {
-		backingSize = 524288
+		backingSize = rtgWasm32FallbackSliceBackingSize
 	}
 	backingOff := g.asm.bssSize
 	g.asm.bssSize += backingSize
@@ -8345,21 +8458,18 @@ func rtgFindGlobalOffset(g *rtgLinearGen, nameStart int, nameEnd int) int {
 	return -1
 }
 func rtgFindGlobalType(g *rtgLinearGen, nameStart int, nameEnd int) int {
-	for i := 0; i < len(g.meta.globals); i++ {
-		s := &g.meta.globals[i]
-		if s.kind == rtgTokVar && rtgBytesEqualRange(g.prog.src, s.nameStart, s.nameEnd, nameStart, nameEnd) {
-			return s.typ
-		}
+	symIndex := rtgFindMetaGlobalIndex(g.meta, nameStart, nameEnd, rtgTokVar)
+	if symIndex >= 0 {
+		return g.meta.globals[symIndex].typ
 	}
 	return 0
 }
 func rtgFindConstStringToken(g *rtgLinearGen, nameStart int, nameEnd int) int {
-	for i := 0; i < len(g.meta.globals); i++ {
-		s := &g.meta.globals[i]
-		if s.kind == rtgTokConst && rtgBytesEqualRange(g.prog.src, s.nameStart, s.nameEnd, nameStart, nameEnd) {
-			if s.initStart+1 == s.initEnd && rtgTokIsKind(g.prog, s.initStart, rtgTokString) {
-				return s.initStart
-			}
+	symIndex := rtgFindMetaGlobalIndex(g.meta, nameStart, nameEnd, rtgTokConst)
+	if symIndex >= 0 {
+		s := &g.meta.globals[symIndex]
+		if s.initStart+1 == s.initEnd && rtgTokIsKind(g.prog, s.initStart, rtgTokString) {
+			return s.initStart
 		}
 	}
 	return -1
@@ -8371,26 +8481,25 @@ func rtgFindSmallConstByName(g *rtgLinearGen, nameStart int, nameEnd int) int {
 	if rtgBytesEqualText(g.prog.src, nameStart, nameEnd, "nil") {
 		return 0
 	}
-	for i := 0; i < len(g.meta.globals); i++ {
-		s := &g.meta.globals[i]
-		if s.kind == rtgTokConst && rtgBytesEqualRange(g.prog.src, s.nameStart, s.nameEnd, nameStart, nameEnd) {
-			if s.initStart+1 != s.initEnd {
-				return -129
-			}
-			if rtgTokIsKind(g.prog, s.initStart, rtgTokNumber) {
-				value := rtgParseIntToken(g.prog, s.initStart)
-				if rtgAsmImmFits8Signed(value) {
-					return value
-				}
-			}
-			if rtgTokIsKind(g.prog, s.initStart, rtgTokChar) {
-				value := rtgParseCharToken(g.prog, s.initStart)
-				if rtgAsmImmFits8Signed(value) {
-					return value
-				}
-			}
+	symIndex := rtgFindMetaGlobalIndex(g.meta, nameStart, nameEnd, rtgTokConst)
+	if symIndex >= 0 {
+		s := &g.meta.globals[symIndex]
+		if s.initStart+1 != s.initEnd {
 			return -129
 		}
+		if rtgTokIsKind(g.prog, s.initStart, rtgTokNumber) {
+			value := rtgParseIntToken(g.prog, s.initStart)
+			if rtgAsmImmFits8Signed(value) {
+				return value
+			}
+		}
+		if rtgTokIsKind(g.prog, s.initStart, rtgTokChar) {
+			value := rtgParseCharToken(g.prog, s.initStart)
+			if rtgAsmImmFits8Signed(value) {
+				return value
+			}
+		}
+		return -129
 	}
 	return -129
 }
@@ -8422,7 +8531,7 @@ func rtgZeroLocalAtOffset(g *rtgLinearGen, offset int) {
 		}
 		backingSize := 2097152
 		if rtgTargetArch == rtgArchWasm32 {
-			backingSize = 524288
+			backingSize = rtgWasm32FallbackSliceBackingSize
 		}
 		backingOff := g.asm.bssSize
 		g.asm.bssSize += backingSize
@@ -8447,6 +8556,20 @@ func rtgFuncInfoFromCall(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 	if e.kind == rtgExprSelector {
 		wantMethod = true
 	} else if e.kind != rtgExprIdent {
+		return -1
+	}
+	if len(g.meta.funcBuckets) > 0 && len(g.meta.funcNext) == len(g.meta.funcs) {
+		hash := rtgHashRange(g.prog.src, nameStart, nameEnd)
+		bucket := hash % len(g.meta.funcBuckets)
+		i := g.meta.funcBuckets[bucket]
+		for i >= 0 {
+			f := &g.meta.funcs[i]
+			isMethod := f.receiverType != 0
+			if isMethod == wantMethod && rtgBytesEqualRange(g.prog.src, f.nameStart, f.nameEnd, nameStart, nameEnd) {
+				return i
+			}
+			i = g.meta.funcNext[i]
+		}
 		return -1
 	}
 	for i := 0; i < len(g.meta.funcs); i++ {
@@ -8492,7 +8615,7 @@ func rtgStoreParamWord(g *rtgLinearGen, reg int, offset int) bool {
 }
 func rtgAsmMovRaxImm(a *rtgAsm, imm int) {
 	if rtgTargetArch == rtgArchWasm32 {
-		rtgWasm32AsmMovRaxImm(a, imm)
+		rtgWasm32EmitRegImm(a, rtgWasm32OpMovRegImm, rtgWasm32RegRax, imm)
 		return
 	}
 	if rtgTargetArch == rtgArchAarch64 {

@@ -2,7 +2,7 @@ package main
 
 func compileWasiWasm32(input []int, output int) int {
 	rtgSetTarget(rtgTargetWasiWasm32)
-	src := make([]byte, 0, 1048576)
+	src := make([]byte, 0, 655360)
 	for i := 0; i < len(input); i++ {
 		src = rtgReadAll(input[i], src)
 		src = append(src, '\n')
@@ -46,11 +46,10 @@ func rtgTryCompileScalarProgramWasm32(p *rtgProgram, meta *rtgMeta) rtgCompileRe
 	for i := 0; i < len(meta.funcs); i++ {
 		label := rtgAsmNewLabel(a)
 		g.funcLabels = append(g.funcLabels, label)
-		src := meta.prog.src
-		nameStart := meta.funcs[i].nameStart
-		nameEnd := meta.funcs[i].nameEnd
-		rtgAsmAddFuncSymbol(a, src, nameStart, nameEnd, label)
 	}
+	g.funcReachable = make([]bool, len(meta.funcs), 1280)
+	g.funcQueue = make([]int, 0, 1280)
+	rtgWasm32MarkFunc(&g, appIndex)
 	if !rtgLinearInitGlobals(&g) {
 		var result rtgCompileResult
 		return result
@@ -61,7 +60,8 @@ func rtgTryCompileScalarProgramWasm32(p *rtgProgram, meta *rtgMeta) rtgCompileRe
 	}
 	rtgAsmCallLabel(a, g.funcLabels[appIndex])
 	rtgWasm32AsmExit(a)
-	for i := 0; i < len(meta.funcs); i++ {
+	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
+		i := g.funcQueue[queueIndex]
 		if !rtgEmitScalarFunction(&g, i) {
 			rtgPrintErr("rtg: wasm32 failed in function ")
 			write(2, meta.prog.src[meta.funcs[i].nameStart:meta.funcs[i].nameEnd], -1)
@@ -138,7 +138,7 @@ func rtgTryCompileWasiWasm32(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 	}
 	fn := &p.funcs[app.declIndex]
 	var body rtgBodyParse
-	var stmts []rtgStmt
+	stmts := make([]rtgStmt, 0, 1024)
 	body.prog = p
 	body.stmts = stmts
 	body.ok = true
