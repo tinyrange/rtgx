@@ -114,7 +114,8 @@ func writeUnitDirectory(dir string, units []unit.Unit) error {
 		return err
 	}
 	names := map[string]string{}
-	for _, u := range units {
+	for i := 0; i < len(units); i++ {
+		u := units[i]
 		name := emit.FileName(u.ImportPath)
 		if existing, ok := names[name]; ok {
 			return fmt.Errorf("rtg: emitted unit filename collision for %s: %s and %s", name, existing, u.ImportPath)
@@ -148,12 +149,14 @@ func runLink(cfg config) error {
 
 func readUnitInputs(inputs []string) ([]unit.SourceFile, error) {
 	var sources []unit.SourceFile
-	for _, input := range inputs {
+	for i := 0; i < len(inputs); i++ {
+		input := inputs[i]
 		paths, err := unitInputPaths(input)
 		if err != nil {
 			return nil, err
 		}
-		for _, path := range paths {
+		for j := 0; j < len(paths); j++ {
+			path := paths[j]
 			data, err := os.ReadFile(path)
 			if err != nil {
 				return nil, err
@@ -183,7 +186,8 @@ func unitInputPaths(input string) ([]string, error) {
 		return nil, err
 	}
 	var paths []string
-	for _, entry := range entries {
+	for i := 0; i < len(entries); i++ {
+		entry := entries[i]
 		if entry.IsDir() {
 			continue
 		}
