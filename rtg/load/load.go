@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"j5.nz/rtg/rtg/mod"
@@ -82,7 +81,7 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 	for dir := range fileEntries {
 		fileDirs = append(fileDirs, dir)
 	}
-	sort.Strings(fileDirs)
+	sortStrings(fileDirs)
 	for _, dir := range fileDirs {
 		files := fileEntries[dir]
 		if err := loadPackageFilesRecursive(g, opts, seen, dir, files); err != nil {
@@ -230,7 +229,7 @@ func readPackageFiles(module mod.Module, dir string, importPath string, files []
 		return Package{}, fmt.Errorf("%s: no Go source files", dir)
 	}
 	files = append([]string(nil), files...)
-	sort.Strings(files)
+	sortStrings(files)
 	files = uniqueStrings(files)
 	pkg := Package{Dir: dir, ImportPath: importPath, ImportPositions: map[string]ImportPosition{}}
 	importSet := map[string]bool{}
@@ -259,7 +258,7 @@ func readPackageFiles(module mod.Module, dir string, importPath string, files []
 	for imp := range importSet {
 		pkg.Imports = append(pkg.Imports, imp)
 	}
-	sort.Strings(pkg.Imports)
+	sortStrings(pkg.Imports)
 	return pkg, nil
 }
 
@@ -343,8 +342,20 @@ func goFiles(dir string, target string) ([]string, error) {
 		}
 		files = append(files, path)
 	}
-	sort.Strings(files)
+	sortStrings(files)
 	return files, nil
+}
+
+func sortStrings(values []string) {
+	for i := 1; i < len(values); i++ {
+		value := values[i]
+		j := i - 1
+		for j >= 0 && values[j] > value {
+			values[j+1] = values[j]
+			j = j - 1
+		}
+		values[j+1] = value
+	}
 }
 
 func fileBuildTagsMatchTarget(path string, targetOS string, targetArch string) (bool, error) {

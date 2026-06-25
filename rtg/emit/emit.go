@@ -2,7 +2,6 @@ package emit
 
 import (
 	"bytes"
-	"sort"
 	"strconv"
 
 	"j5.nz/rtg/rtg/unit"
@@ -37,19 +36,14 @@ func Source(u unit.Unit) []byte {
 	out.WriteString(u.Package)
 	out.WriteString("\n\n")
 	imports := append([]string(nil), u.Imports...)
-	sort.Strings(imports)
+	sortStrings(imports)
 	for _, imp := range imports {
 		out.WriteString("// rtg:import ")
 		out.WriteString(quote(imp))
 		out.WriteByte('\n')
 	}
 	exports := append([]unit.Symbol(nil), u.Exports...)
-	sort.Slice(exports, func(i int, j int) bool {
-		if exports[i].Name == exports[j].Name {
-			return exports[i].UnitName < exports[j].UnitName
-		}
-		return exports[i].Name < exports[j].Name
-	})
+	sortSymbolsByName(exports)
 	for _, sym := range exports {
 		out.WriteString("// rtg:export ")
 		out.WriteString(sym.Name)
@@ -58,12 +52,7 @@ func Source(u unit.Unit) []byte {
 		out.WriteByte('\n')
 	}
 	refs := append([]unit.Symbol(nil), u.References...)
-	sort.Slice(refs, func(i int, j int) bool {
-		if refs[i].ImportPath == refs[j].ImportPath {
-			return refs[i].Name < refs[j].Name
-		}
-		return refs[i].ImportPath < refs[j].ImportPath
-	})
+	sortSymbolsByImportPathName(refs)
 	for _, sym := range refs {
 		out.WriteString("// rtg:ref ")
 		out.WriteString(quoteIfNeeded(sym.ImportPath))
@@ -112,4 +101,54 @@ func quoteIfNeeded(s string) string {
 		}
 	}
 	return s
+}
+
+func sortStrings(values []string) {
+	for i := 1; i < len(values); i++ {
+		value := values[i]
+		j := i - 1
+		for j >= 0 && values[j] > value {
+			values[j+1] = values[j]
+			j = j - 1
+		}
+		values[j+1] = value
+	}
+}
+
+func sortSymbolsByName(symbols []unit.Symbol) {
+	for i := 1; i < len(symbols); i++ {
+		value := symbols[i]
+		j := i - 1
+		for j >= 0 && symbolAfterByName(symbols[j], value) {
+			symbols[j+1] = symbols[j]
+			j = j - 1
+		}
+		symbols[j+1] = value
+	}
+}
+
+func symbolAfterByName(a unit.Symbol, b unit.Symbol) bool {
+	if a.Name == b.Name {
+		return a.UnitName > b.UnitName
+	}
+	return a.Name > b.Name
+}
+
+func sortSymbolsByImportPathName(symbols []unit.Symbol) {
+	for i := 1; i < len(symbols); i++ {
+		value := symbols[i]
+		j := i - 1
+		for j >= 0 && symbolAfterByImportPathName(symbols[j], value) {
+			symbols[j+1] = symbols[j]
+			j = j - 1
+		}
+		symbols[j+1] = value
+	}
+}
+
+func symbolAfterByImportPathName(a unit.Symbol, b unit.Symbol) bool {
+	if a.ImportPath == b.ImportPath {
+		return a.Name > b.Name
+	}
+	return a.ImportPath > b.ImportPath
 }

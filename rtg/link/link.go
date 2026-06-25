@@ -3,7 +3,6 @@ package link
 import (
 	"bytes"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -72,9 +71,7 @@ func Build(units []unit.Unit) (Plan, error) {
 		return Plan{}, err
 	}
 	ordered := append([]unit.Unit(nil), units...)
-	sort.Slice(ordered, func(i int, j int) bool {
-		return ordered[i].ImportPath < ordered[j].ImportPath
-	})
+	sortUnitsByImportPath(ordered)
 	return Plan{Units: ordered}, nil
 }
 
@@ -324,8 +321,32 @@ func sortedReachableFunctions(reachable map[string]bool) []string {
 	for name := range reachable {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	sortStrings(names)
 	return names
+}
+
+func sortUnitsByImportPath(units []unit.Unit) {
+	for i := 1; i < len(units); i++ {
+		value := units[i]
+		j := i - 1
+		for j >= 0 && units[j].ImportPath > value.ImportPath {
+			units[j+1] = units[j]
+			j = j - 1
+		}
+		units[j+1] = value
+	}
+}
+
+func sortStrings(values []string) {
+	for i := 1; i < len(values); i++ {
+		value := values[i]
+		j := i - 1
+		for j >= 0 && values[j] > value {
+			values[j+1] = values[j]
+			j = j - 1
+		}
+		values[j+1] = value
+	}
 }
 
 func shouldEmitDecl(decl unit.Decl, reachable map[string]bool) bool {

@@ -3,7 +3,6 @@ package lower
 import (
 	"fmt"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -26,9 +25,7 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 	u := unit.Unit{ImportPath: pkg.ImportPath, Package: pkg.Name}
 	u.Imports = append(u.Imports, pkg.Imports...)
 	files := append([]load.File(nil), pkg.Files...)
-	sort.Slice(files, func(i int, j int) bool {
-		return files[i].Path < files[j].Path
-	})
+	sortFilesByPath(files)
 	parsedFiles := make([]parse.File, 0, len(files))
 	topNames := map[string]string{}
 	for _, file := range files {
@@ -58,9 +55,7 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 			u.Exports = append(u.Exports, unit.Symbol{ImportPath: pkg.ImportPath, Name: name, UnitName: unitName})
 		}
 	}
-	sort.Slice(u.Exports, func(i int, j int) bool {
-		return u.Exports[i].Name < u.Exports[j].Name
-	})
+	sortSymbolsByName(u.Exports)
 	depPackages := dependencyPackages(graph)
 	seenRefs := map[string]bool{}
 	for _, parsed := range parsedFiles {
@@ -90,13 +85,51 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 	if syntheticEntrypoint {
 		u.Decls = append(u.Decls, syntheticAppMainDecl(topNames["appMain"], topNames["main"]))
 	}
-	sort.Slice(u.References, func(i int, j int) bool {
-		if u.References[i].ImportPath == u.References[j].ImportPath {
-			return u.References[i].Name < u.References[j].Name
-		}
-		return u.References[i].ImportPath < u.References[j].ImportPath
-	})
+	sortSymbolsByImportPathName(u.References)
 	return u, nil
+}
+
+func sortFilesByPath(files []load.File) {
+	for i := 1; i < len(files); i++ {
+		value := files[i]
+		j := i - 1
+		for j >= 0 && files[j].Path > value.Path {
+			files[j+1] = files[j]
+			j = j - 1
+		}
+		files[j+1] = value
+	}
+}
+
+func sortSymbolsByName(symbols []unit.Symbol) {
+	for i := 1; i < len(symbols); i++ {
+		value := symbols[i]
+		j := i - 1
+		for j >= 0 && symbols[j].Name > value.Name {
+			symbols[j+1] = symbols[j]
+			j = j - 1
+		}
+		symbols[j+1] = value
+	}
+}
+
+func sortSymbolsByImportPathName(symbols []unit.Symbol) {
+	for i := 1; i < len(symbols); i++ {
+		value := symbols[i]
+		j := i - 1
+		for j >= 0 && symbolAfterByImportPathName(symbols[j], value) {
+			symbols[j+1] = symbols[j]
+			j = j - 1
+		}
+		symbols[j+1] = value
+	}
+}
+
+func symbolAfterByImportPathName(a unit.Symbol, b unit.Symbol) bool {
+	if a.ImportPath == b.ImportPath {
+		return a.Name > b.Name
+	}
+	return a.ImportPath > b.ImportPath
 }
 
 func unitDeclName(decl parse.Decl) string {

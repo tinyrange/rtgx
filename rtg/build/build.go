@@ -1,8 +1,6 @@
 package build
 
 import (
-	"sort"
-
 	"j5.nz/rtg/rtg/check"
 	"j5.nz/rtg/rtg/load"
 	"j5.nz/rtg/rtg/lower"
@@ -21,8 +19,18 @@ func Units(graph *load.Graph) ([]unit.Unit, error) {
 		}
 		units = append(units, u)
 	}
-	sort.Slice(units, func(i int, j int) bool {
-		return units[i].ImportPath < units[j].ImportPath
-	})
+	sortUnitsByImportPath(units)
 	return units, nil
+}
+
+func sortUnitsByImportPath(units []unit.Unit) {
+	for i := 1; i < len(units); i++ {
+		value := units[i]
+		j := i - 1
+		for j >= 0 && units[j].ImportPath > value.ImportPath {
+			units[j+1] = units[j]
+			j = j - 1
+		}
+		units[j+1] = value
+	}
 }
