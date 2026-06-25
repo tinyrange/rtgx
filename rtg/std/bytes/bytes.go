@@ -13,6 +13,15 @@ func (b *Buffer) WriteString(s string) int {
 	return len(s)
 }
 
+func (b *Buffer) Write(p []byte) int {
+	i := 0
+	for i < len(p) {
+		b.buf = append(b.buf, p[i])
+		i = i + 1
+	}
+	return len(p)
+}
+
 func (b *Buffer) WriteByte(c byte) int {
 	b.buf = append(b.buf, c)
 	return 0

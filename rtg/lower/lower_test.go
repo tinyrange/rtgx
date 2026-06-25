@@ -208,8 +208,9 @@ import "example.com/app/dep"
 
 func appMain() int {
 	var b dep.Buffer
-	b.WriteString("PASS")
-	return b.Len()
+	p := &b
+	p.WriteString("PASS")
+	return p.Len()
 }
 `),
 			},
@@ -248,10 +249,13 @@ func (b *Buffer) Len() int {
 	if !strings.Contains(body, "var b rtg_example_com_app_dep_Buffer") {
 		t.Fatalf("imported receiver type was not rewritten: %q", body)
 	}
-	if !strings.Contains(body, "rtg_example_com_app_dep_Buffer_WriteString(&b, \"PASS\")") {
+	if !strings.Contains(body, "p := &b") {
+		t.Fatalf("address-of receiver local was not preserved: %q", body)
+	}
+	if !strings.Contains(body, "rtg_example_com_app_dep_Buffer_WriteString(p, \"PASS\")") {
 		t.Fatalf("imported pointer method call was not lowered: %q", body)
 	}
-	if !strings.Contains(body, "return rtg_example_com_app_dep_Buffer_Len(&b)") {
+	if !strings.Contains(body, "return rtg_example_com_app_dep_Buffer_Len(p)") {
 		t.Fatalf("imported method call was not lowered: %q", body)
 	}
 	var gotRefs []string

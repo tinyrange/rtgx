@@ -424,7 +424,9 @@ import "strings"
 
 func main() {
 	var b strings.Builder
-	b.WriteString("PA")
+	p := &b
+	p.Write([]byte("P"))
+	p.WriteString("A")
 	b.WriteByte('S')
 	b.WriteByte('S')
 	if b.Len() != 4 {
@@ -436,8 +438,9 @@ func main() {
 		return
 	}
 	b.Reset()
-	b.WriteString("PASS\n")
-	print(b.String())
+	p.Write([]byte("PASS"))
+	p.WriteByte('\n')
+	print(p.String())
 }
 `)
 	runFrontendFixtureMatchesHostGo(t, fixture)
@@ -504,20 +507,21 @@ import "bytes"
 
 func main() {
 	var b bytes.Buffer
-	b.WriteString("PA")
-	b.WriteByte('S')
-	b.WriteByte('S')
+	p := &b
+	p.Write([]byte("PA"))
+	p.WriteByte('S')
+	p.WriteByte('S')
 	if b.Len() != 4 {
 		print("FAIL len\n")
 		return
 	}
-	if string(b.Bytes()) != "PASS" {
+	if string(p.Bytes()) != "PASS" {
 		print("FAIL bytes\n")
 		return
 	}
-	b.WriteString("\n")
-	if b.String() == "PASS\n" {
-		print(b.String())
+	p.WriteString("\n")
+	if p.String() == "PASS\n" {
+		print(p.String())
 		return
 	}
 	print("FAIL string\n")

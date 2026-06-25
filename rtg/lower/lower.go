@@ -1479,6 +1479,13 @@ func collectShortDeclLocalTypes(toks []scan.Token, assign int, types map[string]
 	}
 	if assign+5 < len(toks) && toks[assign+1].Text == "&" && toks[assign+2].Kind == scan.Ident && toks[assign+3].Text == "." && toks[assign+4].Kind == scan.Ident && toks[assign+5].Text == "{" {
 		types[toks[assign-1].Text] = localTypeInfo{qualifier: toks[assign+2].Text, name: toks[assign+4].Text, pointer: true}
+		return
+	}
+	if assign+2 < len(toks) && toks[assign+1].Text == "&" && toks[assign+2].Kind == scan.Ident {
+		if pointed := types[toks[assign+2].Text]; pointed.name != "" {
+			pointed.pointer = true
+			types[toks[assign-1].Text] = pointed
+		}
 	}
 }
 
