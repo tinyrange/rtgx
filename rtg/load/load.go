@@ -340,6 +340,7 @@ func fileBuildTagsMatchTarget(path string, targetOS string, targetArch string) (
 }
 
 func leadingGoBuildExpr(src string) (string, bool) {
+	inBlockComment := false
 	for len(src) > 0 {
 		line := src
 		next := strings.IndexByte(src, '\n')
@@ -350,10 +351,22 @@ func leadingGoBuildExpr(src string) (string, bool) {
 			src = ""
 		}
 		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if inBlockComment {
+			if strings.Contains(line, "*/") {
+				inBlockComment = false
+			}
+			continue
+		}
 		if strings.HasPrefix(line, "//go:build ") {
 			return strings.TrimSpace(strings.TrimPrefix(line, "//go:build ")), true
 		}
-		if line == "" || strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") {
+		if strings.HasPrefix(line, "/*") {
+			if !strings.Contains(line, "*/") {
+				inBlockComment = true
+			}
+			continue
+		}
+		if line == "" || strings.HasPrefix(line, "//") {
 			continue
 		}
 		return "", false
@@ -363,6 +376,7 @@ func leadingGoBuildExpr(src string) (string, bool) {
 
 func leadingPlusBuildLines(src string) []string {
 	var lines []string
+	inBlockComment := false
 	for len(src) > 0 {
 		line := src
 		next := strings.IndexByte(src, '\n')
@@ -373,11 +387,23 @@ func leadingPlusBuildLines(src string) []string {
 			src = ""
 		}
 		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if inBlockComment {
+			if strings.Contains(line, "*/") {
+				inBlockComment = false
+			}
+			continue
+		}
 		if strings.HasPrefix(line, "// +build ") {
 			lines = append(lines, strings.TrimSpace(strings.TrimPrefix(line, "// +build ")))
 			continue
 		}
-		if line == "" || strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") {
+		if strings.HasPrefix(line, "/*") {
+			if !strings.Contains(line, "*/") {
+				inBlockComment = true
+			}
+			continue
+		}
+		if line == "" || strings.HasPrefix(line, "//") {
 			continue
 		}
 		break
