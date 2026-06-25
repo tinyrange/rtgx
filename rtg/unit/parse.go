@@ -10,7 +10,8 @@ import (
 
 func ParseSources(sources []SourceFile) ([]Unit, error) {
 	units := make([]Unit, 0, len(sources))
-	for _, source := range sources {
+	for i := 0; i < len(sources); i++ {
+		source := sources[i]
 		u, err := ParseSource(source.Path, source.Source)
 		if err != nil {
 			return nil, err
@@ -31,7 +32,8 @@ func ParseSource(path string, src []byte) (Unit, error) {
 	seenImports := map[string]bool{}
 	seenExports := map[string]bool{}
 	seenRefs := map[string]bool{}
-	for _, line := range lines {
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		if strings.HasPrefix(line, "package ") && u.Package == "" {
 			u.Package = strings.TrimSpace(strings.TrimPrefix(line, "package "))
 			continue
@@ -130,7 +132,8 @@ func ParseSource(path string, src []byte) (Unit, error) {
 	if u.Package == "" {
 		return Unit{}, fmt.Errorf("%s: missing package declaration", path)
 	}
-	for _, decl := range u.Decls {
+	for i := 0; i < len(u.Decls); i++ {
+		decl := u.Decls[i]
 		if strings.TrimSpace(decl.Body) == "" {
 			return Unit{}, fmt.Errorf("%s: declaration metadata for %s has no body", path, decl.Name)
 		}
@@ -156,7 +159,8 @@ func declBodyComplete(decl Decl) bool {
 func balancedAfterFirst(toks []scan.Token, open string, close string) bool {
 	depth := 0
 	seen := false
-	for _, tok := range toks {
+	for i := 0; i < len(toks); i++ {
+		tok := toks[i]
 		if tok.Kind == scan.EOF {
 			break
 		}
@@ -179,7 +183,8 @@ func delimitersBalanced(toks []scan.Token) bool {
 	paren := 0
 	brack := 0
 	brace := 0
-	for _, tok := range toks {
+	for i := 0; i < len(toks); i++ {
+		tok := toks[i]
 		if tok.Kind == scan.EOF {
 			break
 		}
@@ -205,7 +210,8 @@ func delimitersBalanced(toks []scan.Token) bool {
 }
 
 func hasRTGBuildConstraint(lines []string) bool {
-	for _, line := range lines {
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
