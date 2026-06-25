@@ -1,5 +1,36 @@
 package strings
 
+type Builder struct {
+	buf []byte
+}
+
+func (b *Builder) WriteString(s string) int {
+	i := 0
+	for i < len(s) {
+		b.buf = append(b.buf, s[i])
+		i = i + 1
+	}
+	return len(s)
+}
+
+func (b *Builder) WriteByte(c byte) int {
+	b.buf = append(b.buf, c)
+	return 0
+}
+
+func (b *Builder) Len() int {
+	return len(b.buf)
+}
+
+func (b *Builder) String() string {
+	return string(b.buf)
+}
+
+func (b *Builder) Reset() {
+	var empty []byte
+	b.buf = empty
+}
+
 func HasPrefix(s string, prefix string) bool {
 	n := len(prefix)
 	if n > len(s) {

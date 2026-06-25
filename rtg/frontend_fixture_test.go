@@ -415,6 +415,34 @@ func main() {
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
+func TestStdStringsBuilderFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/stdstringsbuilder\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "strings"
+
+func main() {
+	var b strings.Builder
+	b.WriteString("PA")
+	b.WriteByte('S')
+	b.WriteByte('S')
+	if b.Len() != 4 {
+		print("FAIL len\n")
+		return
+	}
+	if b.String() != "PASS" {
+		print("FAIL string\n")
+		return
+	}
+	b.Reset()
+	b.WriteString("PASS\n")
+	print(b.String())
+}
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
 func TestStdStrconvFrontendMatchesHostGo(t *testing.T) {
 	fixture := t.TempDir()
 	writeFixtureFile(t, fixture, "go.mod", "module example.com/stdstrconv\n")
