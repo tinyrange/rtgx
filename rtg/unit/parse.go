@@ -70,7 +70,11 @@ func ParseSource(path string, src []byte) (Unit, error) {
 				return Unit{}, fmt.Errorf("%s: duplicate rtg unit metadata", path)
 			}
 			seenUnit = true
-			u.ImportPath = strings.TrimSpace(strings.TrimPrefix(body, "unit "))
+			importPath, err := unquoteMetadataField(strings.TrimSpace(strings.TrimPrefix(body, "unit ")))
+			if err != nil {
+				return Unit{}, fmt.Errorf("%s: invalid rtg unit metadata", path)
+			}
+			u.ImportPath = importPath
 			if u.ImportPath == "" {
 				return Unit{}, fmt.Errorf("%s: empty rtg unit metadata", path)
 			}

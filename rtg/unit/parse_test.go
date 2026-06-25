@@ -53,6 +53,19 @@ package main
 	}
 }
 
+func TestParseSourceAcceptsQuotedUnitImportPath(t *testing.T) {
+	u, err := ParseSource("quotedunit.rtg.go", withRTGBuild(`// rtg:unit "example.com/app path\\quoted\"line\nnext"
+package main
+`))
+	if err != nil {
+		t.Fatalf("ParseSource failed: %v", err)
+	}
+	want := "example.com/app path\\quoted\"line\nnext"
+	if u.ImportPath != want {
+		t.Fatalf("import path = %q, want %q", u.ImportPath, want)
+	}
+}
+
 func TestParseSourcesReadsLoadedUnitFiles(t *testing.T) {
 	units, err := ParseSources([]SourceFile{
 		{Path: "main.rtg.go", Source: sourceForTest(Unit{
@@ -320,6 +333,13 @@ func TestParseSourceRejectsInvalidQuotedMetadata(t *testing.T) {
 		src  string
 		want string
 	}{
+		{
+			name: "unit",
+			src: `// rtg:unit "example.com/app/\q"
+package main
+`,
+			want: "invalid rtg unit metadata",
+		},
 		{
 			name: "import",
 			src: `// rtg:unit example.com/app

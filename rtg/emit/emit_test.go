@@ -63,6 +63,24 @@ func TestSourceEscapesImportMetadata(t *testing.T) {
 	}
 }
 
+func TestSourceEscapesUnitMetadata(t *testing.T) {
+	u := unit.Unit{
+		ImportPath: "example.com/app path\\quoted\"line\nnext",
+		Package:    "main",
+	}
+	src := Source(u)
+	if !strings.Contains(string(src), `// rtg:unit "example.com/app path\\quoted\"line\nnext"`+"\n") {
+		t.Fatalf("emitted source did not escape unit metadata:\n%s", string(src))
+	}
+	parsed, err := unit.ParseSource("escapedunit.rtg.go", src)
+	if err != nil {
+		t.Fatalf("ParseSource failed: %v", err)
+	}
+	if parsed.ImportPath != u.ImportPath {
+		t.Fatalf("parsed import path = %q, want %q", parsed.ImportPath, u.ImportPath)
+	}
+}
+
 func TestSourceEscapesDeclarationPathMetadata(t *testing.T) {
 	u := unit.Unit{
 		ImportPath: "example.com/app/pkg/answer",
