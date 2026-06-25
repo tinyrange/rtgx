@@ -136,6 +136,33 @@ func appMain() int {
 	}
 }
 
+func TestFileRejectsUnsupportedLiterals(t *testing.T) {
+	file, err := parse.FileSource("literals.go", []byte("package main\n\nfunc appMain() int {\n\t_ = `raw`\n\t_ = 077\n\t_ = 0o77\n\t_ = 1i\n\t_ = 0x10\n\t_ = 0b10\n\t_ = 0.5\n\treturn 0\n}\n"))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted unsupported literals")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"literals.go:4:6: raw string literals are not supported",
+		"literals.go:5:6: octal literals are not supported",
+		"literals.go:6:6: octal literals are not supported",
+		"literals.go:7:6: imaginary literals are not supported",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing diagnostic %q in:\n%s", want, msg)
+		}
+	}
+	for _, allowed := range []string{"0x10", "0b10", "0.5"} {
+		if strings.Contains(msg, allowed) {
+			t.Fatalf("supported literal %s was diagnosed:\n%s", allowed, msg)
+		}
+	}
+}
+
 func TestFileRejectsAnyInterfaceTypeAlias(t *testing.T) {
 	file, err := parse.FileSource("any.go", []byte(`package main
 

@@ -182,6 +182,15 @@ func File(file parse.File) Diagnostics {
 		if tok.Kind == scan.EOF {
 			break
 		}
+		if tok.Kind == scan.String && strings.HasPrefix(tok.Text, "`") {
+			diags = append(diags, diag(file, tok, "raw string literals are not supported"))
+		}
+		if tok.Kind == scan.Number && isImaginaryLiteral(tok.Text) {
+			diags = append(diags, diag(file, tok, "imaginary literals are not supported"))
+		}
+		if tok.Kind == scan.Number && isOctalLiteral(tok.Text) {
+			diags = append(diags, diag(file, tok, "octal literals are not supported"))
+		}
 		switch tok.Text {
 		case "go":
 			diags = append(diags, diag(file, tok, "goroutines are not supported"))
@@ -316,6 +325,24 @@ func startsGenericInstantiation(toks []scan.Token, i int) bool {
 		return false
 	}
 	return toks[close+1].Text == "{" || toks[close+1].Text == "("
+}
+
+func isImaginaryLiteral(text string) bool {
+	return strings.HasSuffix(text, "i")
+}
+
+func isOctalLiteral(text string) bool {
+	if len(text) < 2 || text[0] != '0' {
+		return false
+	}
+	next := text[1]
+	if next == 'x' || next == 'X' || next == 'b' || next == 'B' || next == '.' {
+		return false
+	}
+	if next == 'o' || next == 'O' {
+		return true
+	}
+	return next >= '0' && next <= '9'
 }
 
 func startsArrayType(toks []scan.Token, i int) bool {
