@@ -14,6 +14,9 @@ type Plan struct {
 }
 
 func Build(units []unit.Unit) (Plan, error) {
+	if err := validateUniqueUnits(units); err != nil {
+		return Plan{}, err
+	}
 	exports := map[string]unit.Symbol{}
 	for _, u := range units {
 		for _, sym := range u.Exports {
@@ -43,6 +46,17 @@ func Build(units []unit.Unit) (Plan, error) {
 		return ordered[i].ImportPath < ordered[j].ImportPath
 	})
 	return Plan{Units: ordered}, nil
+}
+
+func validateUniqueUnits(units []unit.Unit) error {
+	seen := map[string]bool{}
+	for _, u := range units {
+		if seen[u.ImportPath] {
+			return fmt.Errorf("duplicate unit: %s", u.ImportPath)
+		}
+		seen[u.ImportPath] = true
+	}
+	return nil
 }
 
 func validateEntrypoint(units []unit.Unit) error {

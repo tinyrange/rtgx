@@ -52,6 +52,25 @@ func TestBuildRejectsUnresolvedReference(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsDuplicateUnits(t *testing.T) {
+	_, err := Build([]unit.Unit{
+		{
+			ImportPath: "example.com/app/dep",
+			Package:    "dep",
+		},
+		{
+			ImportPath: "example.com/app/dep",
+			Package:    "dep",
+		},
+	})
+	if err == nil {
+		t.Fatalf("Build succeeded with duplicate unit identity")
+	}
+	if !strings.Contains(err.Error(), "duplicate unit: example.com/app/dep") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestBuildRejectsMissingEntrypoint(t *testing.T) {
 	_, err := Build([]unit.Unit{{
 		ImportPath: "example.com/app/main",
