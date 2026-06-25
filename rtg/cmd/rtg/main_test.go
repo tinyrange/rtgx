@@ -355,6 +355,26 @@ func helper() {}
 	}
 }
 
+func TestRunBuildRejectsInvalidOrdinaryMainSignature(t *testing.T) {
+	root := t.TempDir()
+	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
+	writeCLIFile(t, root, "cmd/app/main.go", `package main
+
+func main(args []string) {}
+`)
+	err := run(config{output: filepath.Join(root, "app"), inputs: []string{filepath.Join(root, "cmd", "app")}})
+	if err == nil {
+		t.Fatalf("run build succeeded with invalid main signature")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "main function must have no parameters or results") {
+		t.Fatalf("error = %q", err)
+	}
+	if strings.Contains(msg, "missing entrypoint") {
+		t.Fatalf("invalid main fell through to linker diagnostic: %q", err)
+	}
+}
+
 func TestRunLinkValidatesUnitReferences(t *testing.T) {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		t.Skipf("linux/amd64 executable smoke requires linux/amd64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)

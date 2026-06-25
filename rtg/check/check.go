@@ -78,6 +78,9 @@ func declDiagnostics(file parse.File) Diagnostics {
 		if decl.Kind == "func" && decl.Receiver {
 			diags = append(diags, declDiagnostic(file, decl, "methods are not supported"))
 		}
+		if file.PackageName == "main" && decl.Kind == "func" && decl.Name == "main" && !hasOrdinaryMainSignature(file, decl) {
+			diags = append(diags, declDiagnostic(file, decl, "main function must have no parameters or results"))
+		}
 	}
 	return diags
 }
@@ -308,6 +311,31 @@ func findClose(toks []scan.Token, pos int, open string, close string) int {
 			}
 		}
 		pos++
+	}
+	return -1
+}
+
+func hasOrdinaryMainSignature(file parse.File, decl parse.Decl) bool {
+	name := tokenIndexAt(file.Tokens, decl.NameTok.Start)
+	if name < 0 || name+1 >= len(file.Tokens) || file.Tokens[name+1].Text != "(" {
+		return false
+	}
+	open := name + 1
+	close := findClose(file.Tokens, open, "(", ")")
+	if close != open+1 {
+		return false
+	}
+	for i := close + 1; i < len(file.Tokens) && file.Tokens[i].Start < decl.End; i++ {
+		return file.Tokens[i].Text == "{"
+	}
+	return false
+}
+
+func tokenIndexAt(toks []scan.Token, start int) int {
+	for i, tok := range toks {
+		if tok.Start == start {
+			return i
+		}
 	}
 	return -1
 }

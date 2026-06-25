@@ -70,6 +70,50 @@ func appMain() int {
 	}
 }
 
+func TestFileAcceptsOrdinaryMainEntrypoint(t *testing.T) {
+	file, err := parse.FileSource("main.go", []byte(`package main
+
+func main() {
+	print("PASS\n")
+}
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	if diags := File(file); len(diags) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
+}
+
+func TestFileRejectsInvalidOrdinaryMainSignatures(t *testing.T) {
+	file, err := parse.FileSource("main.go", []byte(`package main
+
+func main(args []string) {}
+func mainResult() {}
+func mainWithResult() int { return 0 }
+func main() int { return 0 }
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted invalid ordinary main signatures")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"main.go:3:6: main function must have no parameters or results",
+		"main.go:6:6: main function must have no parameters or results",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing diagnostic %q in:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "mainResult") || strings.Contains(msg, "mainWithResult") {
+		t.Fatalf("non-entrypoint helper names were diagnosed:\n%s", msg)
+	}
+}
+
 func TestFileRejectsMethods(t *testing.T) {
 	file, err := parse.FileSource("method.go", []byte(`package main
 
