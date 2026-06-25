@@ -413,7 +413,20 @@ func TestSourceCombinesUnitsAndAddsAppMainWrapper(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	src := string(Source(plan))
+	artifact := SourceArtifact(plan)
+	src := string(artifact.Source)
+	if string(Source(plan)) != src {
+		t.Fatalf("Source wrapper differs from SourceArtifact source")
+	}
+	if len(artifact.LinkedUnits) != 2 || artifact.LinkedUnits[0] != "example.com/app/dep" || artifact.LinkedUnits[1] != "example.com/app/main" {
+		t.Fatalf("linked units = %#v", artifact.LinkedUnits)
+	}
+	if artifact.Entrypoint.ImportPath != "example.com/app/main" || artifact.Entrypoint.Name != "appMain" || artifact.Entrypoint.UnitName != "rtg_example_com_app_main_appMain" {
+		t.Fatalf("entrypoint = %#v", artifact.Entrypoint)
+	}
+	if !sameStrings(artifact.ReachableFunctions, []string{"rtg_example_com_app_dep_Value", "rtg_example_com_app_main_appMain"}) {
+		t.Fatalf("reachable functions = %#v", artifact.ReachableFunctions)
+	}
 	for _, want := range []string{
 		"package main\n",
 		"func rtg_example_com_app_dep_Value() int { return 7 }\n",
@@ -424,6 +437,18 @@ func TestSourceCombinesUnitsAndAddsAppMainWrapper(t *testing.T) {
 			t.Fatalf("linked source missing %q:\n%s", want, src)
 		}
 	}
+}
+
+func sameStrings(got []string, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestSourceOmitsUnreachableFunctions(t *testing.T) {

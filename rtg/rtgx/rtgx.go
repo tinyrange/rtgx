@@ -23,7 +23,8 @@ func CompileUnits(units []unit.Unit, opts Options) error {
 	if err != nil {
 		return err
 	}
-	return CompileSource(link.Source(plan), opts)
+	artifact := link.SourceArtifact(plan)
+	return CompileSource(artifact.Source, opts)
 }
 
 func CompileUnitSources(sources []unit.SourceFile, opts Options) error {
