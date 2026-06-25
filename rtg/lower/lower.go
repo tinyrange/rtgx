@@ -60,7 +60,7 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 				}
 			}
 			u.Decls = append(u.Decls, unit.Decl{
-				Path:     parsed.Path,
+				Path:     unitPathForDecl(files, parsed.Path),
 				Kind:     decl.Kind,
 				Name:     decl.Name,
 				UnitName: topNames[decl.Name],
@@ -75,6 +75,18 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 		return u.References[i].ImportPath < u.References[j].ImportPath
 	})
 	return u, nil
+}
+
+func unitPathForDecl(files []load.File, path string) string {
+	for _, file := range files {
+		if file.Path == path {
+			if file.UnitPath != "" {
+				return file.UnitPath
+			}
+			return file.Path
+		}
+	}
+	return path
 }
 
 func SymbolName(importPath string, name string) string {

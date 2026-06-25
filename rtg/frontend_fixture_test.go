@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strings"
 	"testing"
 
 	"j5.nz/rtg/rtg/build"
@@ -28,13 +27,9 @@ type frontendSmokeTarget struct {
 func TestHelloFixtureGoldenUnits(t *testing.T) {
 	fixture := filepath.Join("testdata", "hello_module")
 	units := loadFixtureUnits(t, fixture)
-	absFixture, err := filepath.Abs(fixture)
-	if err != nil {
-		t.Fatalf("Abs fixture failed: %v", err)
-	}
 	for _, u := range units {
 		name := emit.FileName(u.ImportPath)
-		got := normalizeFixturePath(string(emit.Source(u)), absFixture)
+		got := string(emit.Source(u))
 		wantPath := filepath.Join("testdata", "golden", "hello_module", name)
 		want, err := os.ReadFile(wantPath)
 		if err != nil {
@@ -130,12 +125,6 @@ func loadFixtureUnits(t *testing.T, fixture string) []unit.Unit {
 		return units[i].ImportPath < units[j].ImportPath
 	})
 	return units
-}
-
-func normalizeFixturePath(src string, fixture string) string {
-	src = filepath.ToSlash(src)
-	fixture = filepath.ToSlash(fixture)
-	return strings.ReplaceAll(src, fixture, "$FIXTURE")
 }
 
 func diffText(want string, got string) string {

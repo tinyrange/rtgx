@@ -43,6 +43,12 @@ func Value() int {
 	if graph.Packages[0].ImportNames["example.com/app/pkg/answer"] != "answer" {
 		t.Fatalf("import local name = %q", graph.Packages[0].ImportNames["example.com/app/pkg/answer"])
 	}
+	if graph.Packages[0].Files[0].UnitPath != "cmd/app/main.go" {
+		t.Fatalf("main unit path = %q, want cmd/app/main.go", graph.Packages[0].Files[0].UnitPath)
+	}
+	if graph.Packages[1].Files[0].UnitPath != "pkg/answer/answer.go" {
+		t.Fatalf("dep unit path = %q, want pkg/answer/answer.go", graph.Packages[1].Files[0].UnitPath)
+	}
 }
 
 func TestLoadEntriesRejectsMissingStdPackage(t *testing.T) {
@@ -122,6 +128,9 @@ func PrintInt(v int) int { return v }
 	}
 	if graph.Packages[1].ImportPath != "fmt" {
 		t.Fatalf("std import path = %q, want fmt", graph.Packages[1].ImportPath)
+	}
+	if graph.Packages[1].Files[0].UnitPath != "fmt/fmt.go" {
+		t.Fatalf("std unit path = %q, want fmt/fmt.go", graph.Packages[1].Files[0].UnitPath)
 	}
 }
 

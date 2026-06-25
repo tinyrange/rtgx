@@ -14,14 +14,16 @@ func TestPackageBuildsDeclarationUnit(t *testing.T) {
 		Imports:    []string{"example.com/app/dep"},
 		Files: []load.File{
 			{
-				Path: "b.go",
+				Path:     "/tmp/work/pkg/b.go",
+				UnitPath: "pkg/b.go",
 				Source: []byte(`package pkg
 
 func B() int { return A() }
 `),
 			},
 			{
-				Path: "a.go",
+				Path:     "/tmp/work/pkg/a.go",
+				UnitPath: "pkg/a.go",
 				Source: []byte(`package pkg
 
 const answer = 7
@@ -42,6 +44,9 @@ func A() int { return answer }
 	}
 	if u.Decls[0].Name != "answer" || u.Decls[1].Name != "A" || u.Decls[2].Name != "B" {
 		t.Fatalf("decl order = %#v", u.Decls)
+	}
+	if u.Decls[0].Path != "pkg/a.go" || u.Decls[2].Path != "pkg/b.go" {
+		t.Fatalf("decl paths = %#v", u.Decls)
 	}
 	if len(u.Exports) != 2 || u.Exports[0].Name != "A" || u.Exports[1].Name != "B" {
 		t.Fatalf("exports = %#v", u.Exports)

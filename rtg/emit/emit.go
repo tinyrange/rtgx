@@ -75,7 +75,7 @@ func Source(u unit.Unit) []byte {
 	if len(imports) > 0 || len(exports) > 0 || len(refs) > 0 {
 		out.WriteByte('\n')
 	}
-	for _, decl := range u.Decls {
+	for i, decl := range u.Decls {
 		out.WriteString("// rtg:decl ")
 		out.WriteString(decl.Kind)
 		if decl.Name != "" {
@@ -93,7 +93,9 @@ func Source(u unit.Unit) []byte {
 		if len(decl.Body) == 0 || decl.Body[len(decl.Body)-1] != '\n' {
 			out.WriteByte('\n')
 		}
-		out.WriteByte('\n')
+		if i+1 < len(u.Decls) {
+			out.WriteByte('\n')
+		}
 	}
 	return out.Bytes()
 }

@@ -11,9 +11,10 @@ import (
 )
 
 type File struct {
-	Path   string
-	Source []byte
-	Body   string
+	Path     string
+	UnitPath string
+	Source   []byte
+	Body     string
 }
 
 type Package struct {
@@ -161,13 +162,27 @@ func readPackage(module mod.Module, dir string, importPath string) (Package, err
 			}
 		}
 		body := string(data[info.BodyStart:])
-		pkg.Files = append(pkg.Files, File{Path: path, Source: data, Body: strings.TrimLeft(body, " \t\r\n")})
+		pkg.Files = append(pkg.Files, File{Path: path, UnitPath: unitFilePath(module, importPath, path), Source: data, Body: strings.TrimLeft(body, " \t\r\n")})
 	}
 	for imp := range importSet {
 		pkg.Imports = append(pkg.Imports, imp)
 	}
 	sort.Strings(pkg.Imports)
 	return pkg, nil
+}
+
+func unitFilePath(module mod.Module, importPath string, path string) string {
+	if importPath == module.Path || strings.HasPrefix(importPath, module.Path+"/") {
+		rel, err := filepath.Rel(module.Root, path)
+		rel = filepath.ToSlash(rel)
+		if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, "../") {
+			return rel
+		}
+	}
+	if importPath != "" {
+		return filepath.ToSlash(filepath.Join(filepath.FromSlash(importPath), filepath.Base(path)))
+	}
+	return filepath.ToSlash(filepath.Base(path))
 }
 
 func PackageNameFromImportPath(path string) string {
