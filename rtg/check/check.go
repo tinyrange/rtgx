@@ -97,6 +97,11 @@ func declDiagnostics(file parse.File) Diagnostics {
 		if decl.Kind == "func" && decl.Receiver {
 			diags = append(diags, declDiagnostic(file, decl, "methods are not supported"))
 		}
+		if decl.Kind == "func" {
+			if tok, ok := namedResultToken(file, decl); ok {
+				diags = append(diags, diag(file, tok, "named result parameters are not supported"))
+			}
+		}
 		if file.PackageName == "main" && decl.Kind == "func" && decl.Name == "main" && !hasOrdinaryMainSignature(file, decl) {
 			diags = append(diags, declDiagnostic(file, decl, "main function must have no parameters or results"))
 		}
@@ -227,6 +232,9 @@ func File(file parse.File) Diagnostics {
 		}
 		if startsTypeAssertion(file.Tokens, i) {
 			diags = append(diags, diag(file, file.Tokens[i+1], "type assertions and type switches are not supported"))
+		}
+		if colon := fullSliceSecondColon(file.Tokens, i); colon >= 0 {
+			diags = append(diags, diag(file, file.Tokens[colon], "full slice expressions are not supported"))
 		}
 		if startsUnsupportedBuiltinCall(file.Tokens, i) {
 			diags = append(diags, diag(file, tok, "unsupported builtin: "+tok.Text))
@@ -410,6 +418,31 @@ func startsTypeAssertion(toks []scan.Token, i int) bool {
 	return close > i+2
 }
 
+func fullSliceSecondColon(toks []scan.Token, i int) int {
+	if i >= len(toks) || toks[i].Text != "[" {
+		return -1
+	}
+	close := findClose(toks, i, "[", "]")
+	if close < 0 {
+		return -1
+	}
+	colons := 0
+	paren := 0
+	brack := 0
+	brace := 0
+	for j := i + 1; j < close; j++ {
+		if paren == 0 && brack == 0 && brace == 0 && toks[j].Text == ":" {
+			colons++
+			if colons == 2 {
+				return j
+			}
+			continue
+		}
+		updateDepth(toks[j].Text, &paren, &brack, &brace)
+	}
+	return -1
+}
+
 func startsUnsupportedBuiltinCall(toks []scan.Token, i int) bool {
 	if i+1 >= len(toks) || toks[i].Kind != scan.Ident || toks[i+1].Text != "(" {
 		return false
@@ -454,6 +487,23 @@ func findOpen(toks []scan.Token, pos int, open string, close string) int {
 		pos--
 	}
 	return -1
+}
+
+func updateDepth(text string, paren *int, brack *int, brace *int) {
+	switch text {
+	case "(":
+		*paren = *paren + 1
+	case ")":
+		*paren = *paren - 1
+	case "[":
+		*brack = *brack + 1
+	case "]":
+		*brack = *brack - 1
+	case "{":
+		*brace = *brace + 1
+	case "}":
+		*brace = *brace - 1
+	}
 }
 
 func precededByTypeContext(toks []scan.Token, pos int) bool {
@@ -629,6 +679,28 @@ func isStatementBoundary(text string) bool {
 
 func maxSourcePosition() int {
 	return int(^uint(0) >> 1)
+}
+
+func namedResultToken(file parse.File, decl parse.Decl) (scan.Token, bool) {
+	name := tokenIndexAt(file.Tokens, decl.NameTok.Start)
+	if name < 0 || name+1 >= len(file.Tokens) || file.Tokens[name+1].Text != "(" {
+		return scan.Token{}, false
+	}
+	paramsClose := findClose(file.Tokens, name+1, "(", ")")
+	if paramsClose < 0 || paramsClose+1 >= len(file.Tokens) || file.Tokens[paramsClose+1].Text != "(" {
+		return scan.Token{}, false
+	}
+	resultsOpen := paramsClose + 1
+	resultsClose := findClose(file.Tokens, resultsOpen, "(", ")")
+	if resultsClose < 0 || file.Tokens[resultsClose].Start >= decl.End {
+		return scan.Token{}, false
+	}
+	for i := resultsOpen + 1; i < resultsClose; i++ {
+		if file.Tokens[i].Kind == scan.Ident && isTypeStartAfterName(file.Tokens, i, resultsClose) {
+			return file.Tokens[i], true
+		}
+	}
+	return scan.Token{}, false
 }
 
 func hasOrdinaryMainSignature(file parse.File, decl parse.Decl) bool {

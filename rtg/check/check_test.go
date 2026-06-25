@@ -303,6 +303,49 @@ func main() int { return 0 }
 	}
 }
 
+func TestFileRejectsNamedResultParameters(t *testing.T) {
+	file, err := parse.FileSource("results.go", []byte(`package main
+
+func value() (out int) {
+	out = 1
+	return
+}
+
+func appMain() int { return value() }
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted named result parameters")
+	}
+	if !strings.Contains(err.Error(), "results.go:3:15: named result parameters are not supported") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestFileRejectsFullSliceExpressions(t *testing.T) {
+	file, err := parse.FileSource("slice.go", []byte(`package main
+
+func appMain() int {
+	values := []int{1, 2, 3}
+	x := values[1:2:3]
+	return x[0]
+}
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted full slice expression")
+	}
+	if !strings.Contains(err.Error(), "slice.go:5:17: full slice expressions are not supported") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestFileRejectsMethods(t *testing.T) {
 	file, err := parse.FileSource("method.go", []byte(`package main
 
