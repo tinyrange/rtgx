@@ -1,6 +1,9 @@
 package parse
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFileSourceParsesImportsAndDecls(t *testing.T) {
 	file, err := FileSource("main.go", []byte(`package main
@@ -41,6 +44,23 @@ func TestFileSourceRejectsUnexpectedTopLevelToken(t *testing.T) {
 	_, err := FileSource("bad.go", []byte("package main\nx := 1\n"))
 	if err == nil {
 		t.Fatalf("FileSource succeeded for non-declaration top-level statement")
+	}
+}
+
+func TestFileSourceRejectsMalformedImportBlockEntry(t *testing.T) {
+	_, err := FileSource("bad.go", []byte(`package main
+
+import (
+	fmt
+)
+
+func appMain() int { return 0 }
+`))
+	if err == nil {
+		t.Fatalf("FileSource accepted malformed import block entry")
+	}
+	if !strings.Contains(err.Error(), "4:2: malformed import declaration") {
+		t.Fatalf("error = %q", err)
 	}
 }
 

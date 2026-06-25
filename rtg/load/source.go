@@ -33,14 +33,22 @@ func ParseSourceInfo(path string, src []byte) (SourceInfo, error) {
 		pos++
 		if pos < len(toks) && toks[pos].Text == "(" {
 			pos++
-			for pos < len(toks) && toks[pos].Text != ")" {
-				if toks[pos].Kind == scan.String {
-					value, err := scan.UnquoteString(toks[pos].Text)
-					if err != nil {
-						return SourceInfo{}, fmt.Errorf("%s: %w", path, err)
+			for pos < len(toks) && toks[pos].Text != ")" && toks[pos].Kind != scan.EOF {
+				alias := ""
+				if toks[pos].Kind == scan.Ident || toks[pos].Text == "." || toks[pos].Text == "_" {
+					if pos+1 < len(toks) && toks[pos+1].Kind == scan.String {
+						alias = toks[pos].Text
+						pos++
 					}
-					info.Imports = append(info.Imports, ImportInfo{Path: value, Alias: aliasBefore(toks, pos)})
 				}
+				if toks[pos].Kind != scan.String {
+					return SourceInfo{}, fmt.Errorf("%s: malformed import declaration", path)
+				}
+				value, err := scan.UnquoteString(toks[pos].Text)
+				if err != nil {
+					return SourceInfo{}, fmt.Errorf("%s: %w", path, err)
+				}
+				info.Imports = append(info.Imports, ImportInfo{Path: value, Alias: alias})
 				pos++
 			}
 			if pos >= len(toks) {

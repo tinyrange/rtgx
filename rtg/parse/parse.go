@@ -91,8 +91,10 @@ func parseImportDecl(file *File, pos int) (int, error) {
 					return pos, err
 				}
 				file.Imports = append(file.Imports, Import{Path: path, Alias: alias, Tok: toks[pos]})
+				pos++
+				continue
 			}
-			pos++
+			return pos, fmt.Errorf("%d:%d: malformed import declaration", toks[pos].Line, toks[pos].Column)
 		}
 		if pos >= len(toks) || toks[pos].Text != ")" {
 			return pos, fmt.Errorf("%d:%d: unterminated import block", toks[pos-1].Line, toks[pos-1].Column)

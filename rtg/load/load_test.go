@@ -343,6 +343,24 @@ func appMain() int { return 0 }
 	}
 }
 
+func TestParseSourceInfoRejectsMalformedImportBlockEntry(t *testing.T) {
+	src := []byte(`package main
+
+import (
+	fmt
+)
+
+func appMain() int { return 0 }
+`)
+	_, err := ParseSourceInfo("input.go", src)
+	if err == nil {
+		t.Fatalf("ParseSourceInfo accepted malformed import block entry")
+	}
+	if !strings.Contains(err.Error(), "input.go: malformed import declaration") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func writeFile(t *testing.T, root string, name string, data string) {
 	t.Helper()
 	path := filepath.Join(root, name)
