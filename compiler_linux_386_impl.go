@@ -115,6 +115,8 @@ func rtgTryCompileScalarProgram386(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 	}
 	rtgAsmCallLabel(a, g.funcLabels[appIndex])
 	if rtgTargetIsWindows() {
+		rtgAsmPushRax(a)
+		rtgWin386CallImport(a, rtgWinImportExitProcess)
 		rtgAsmRet(a)
 	} else {
 		rtgAsmMovRdiRax(a)
@@ -443,22 +445,30 @@ func rtgAsmImageWindows386(a *rtgAsm) []byte {
 	for (a.codeOffset+len(a.code))%4 != 0 {
 		a.code = append(a.code, 0)
 	}
+	textVirtualSize := len(a.code)
+	textRawSize := rtgAlignValue(textVirtualSize, rtgWinFileAlign)
+	dataRVA := rtgAlignValue(a.codeOffset+textVirtualSize, rtgWinSectionAlign)
+	a.dataOffset = dataRVA
 	var imports rtgWinImportLayout
 	if rtgAsmHasWinImportRelocs(a) {
 		imports = rtgAppendWinImports(a, false)
 	}
 	rtgAsmPatchWindows(a, imports, rtgWinImageBase, false)
-	payloadSize := len(a.code) + len(a.data)
-	rawSize := rtgAlignValue(payloadSize, rtgWinFileAlign)
-	virtualSize := payloadSize + a.bssSize
+	dataRawSize := rtgAlignValue(len(a.data), rtgWinFileAlign)
+	dataVirtualSize := len(a.data) + a.bssSize
+	iatSize := 0
+	if imports.kernelIATRVA != 0 {
+		iatSize = (rtgWinImportCount() + 1) * imports.thunkSize
+	}
 	var out []byte
-	out = rtgAppendPEHeader32(out, a.codeOffset, rawSize, virtualSize, imports.importRVA, imports.importSize)
+	out = rtgAppendPEHeader32(out, a.codeOffset, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, imports.importRVA, imports.importSize, imports.kernelIATRVA, iatSize)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
 	}
+	out = rtgAppendUntil(out, rtgWinHeadersSize+textRawSize)
 	for i := 0; i < len(a.data); i++ {
 		out = append(out, a.data[i])
 	}
-	out = rtgAppendUntil(out, rtgWinHeadersSize+rawSize)
+	out = rtgAppendUntil(out, rtgWinHeadersSize+textRawSize+dataRawSize)
 	return out
 }

@@ -23,8 +23,10 @@ const rtgOSWindows = 2
 var rtgTargetArch int = rtgArchAmd64
 var rtgTargetOS int = rtgOSLinux
 var rtgNativeIntSize int = 8
+var rtgCurrentTarget int = rtgTargetLinuxAmd64
 
 func rtgSetTarget(target int) {
+	rtgCurrentTarget = target
 	rtgTargetOS = rtgOSLinux
 	if target == rtgTargetLinux386 {
 		rtgTargetArch = rtgArch386
@@ -170,6 +172,14 @@ func rtgAsmEmit4(a *rtgAsm, v0 int, v1 int, v2 int, v3 int) {
 	a.code = append(a.code, byte(v3))
 }
 
+func rtgAsmEmit5(a *rtgAsm, v0 int, v1 int, v2 int, v3 int, v4 int) {
+	a.code = append(a.code, byte(v0))
+	a.code = append(a.code, byte(v1))
+	a.code = append(a.code, byte(v2))
+	a.code = append(a.code, byte(v3))
+	a.code = append(a.code, byte(v4))
+}
+
 func rtgAsmAddAbsReloc(a *rtgAsm, at int, off int, kind int) {
 	a.absRelocs = append(a.absRelocs, rtgAbsRef{at: at, off: off, kind: kind})
 }
@@ -302,6 +312,12 @@ func rtgAppend64(out []byte, v int) []byte {
 	return out
 }
 
+func rtgAppend64U32(out []byte, v int) []byte {
+	out = rtgAppend32(out, v)
+	out = rtgAppend32(out, 0)
+	return out
+}
+
 type rtgElf64SymbolSections struct {
 	symtab     []byte
 	strtab     []byte
@@ -355,22 +371,22 @@ func rtgAppendElf64Sym(out []byte, name int, info int, shndx int, value int, siz
 	out = append(out, byte(info))
 	out = append(out, 0)
 	out = rtgAppend16(out, shndx)
-	out = rtgAppend64(out, value)
-	out = rtgAppend64(out, size)
+	out = rtgAppend64U32(out, value)
+	out = rtgAppend64U32(out, size)
 	return out
 }
 
 func rtgAppendElf64Shdr(out []byte, name int, typ int, flags int, addr int, off int, size int, link int, info int, align int, entsize int) []byte {
 	out = rtgAppend32(out, name)
 	out = rtgAppend32(out, typ)
-	out = rtgAppend64(out, flags)
-	out = rtgAppend64(out, addr)
-	out = rtgAppend64(out, off)
-	out = rtgAppend64(out, size)
+	out = rtgAppend64U32(out, flags)
+	out = rtgAppend64U32(out, addr)
+	out = rtgAppend64U32(out, off)
+	out = rtgAppend64U32(out, size)
 	out = rtgAppend32(out, link)
 	out = rtgAppend32(out, info)
-	out = rtgAppend64(out, align)
-	out = rtgAppend64(out, entsize)
+	out = rtgAppend64U32(out, align)
+	out = rtgAppend64U32(out, entsize)
 	return out
 }
 
@@ -424,80 +440,80 @@ func rtgAppendElf64SectionHeaders(out []byte, sec *rtgElf64SymbolSections, a *rt
 
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 0)
-	out = rtgAppend64(out, 0)
-	out = rtgAppend64(out, 0)
-	out = rtgAppend64(out, 0)
-	out = rtgAppend64(out, 0)
+	out = rtgAppend64U32(out, 0)
+	out = rtgAppend64U32(out, 0)
+	out = rtgAppend64U32(out, 0)
+	out = rtgAppend64U32(out, 0)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 0)
-	out = rtgAppend64(out, 0)
-	out = rtgAppend64(out, 0)
+	out = rtgAppend64U32(out, 0)
+	out = rtgAppend64U32(out, 0)
 
 	out = rtgAppend32(out, sec.textName)
 	out = rtgAppend32(out, 1)
-	out = rtgAppend64(out, 6)
-	out = rtgAppend64(out, base+codeOff)
-	out = rtgAppend64(out, codeOff)
-	out = rtgAppend64(out, codeSize)
+	out = rtgAppend64U32(out, 6)
+	out = rtgAppend64U32(out, base+codeOff)
+	out = rtgAppend64U32(out, codeOff)
+	out = rtgAppend64U32(out, codeSize)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 0)
-	out = rtgAppend64(out, 16)
-	out = rtgAppend64(out, 0)
+	out = rtgAppend64U32(out, 16)
+	out = rtgAppend64U32(out, 0)
 
 	out = rtgAppend32(out, sec.dataName)
 	out = rtgAppend32(out, 1)
-	out = rtgAppend64(out, 3)
-	out = rtgAppend64(out, base+dataOff)
-	out = rtgAppend64(out, dataOff)
-	out = rtgAppend64(out, dataSize)
+	out = rtgAppend64U32(out, 3)
+	out = rtgAppend64U32(out, base+dataOff)
+	out = rtgAppend64U32(out, dataOff)
+	out = rtgAppend64U32(out, dataSize)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 0)
-	out = rtgAppend64(out, 8)
-	out = rtgAppend64(out, 0)
+	out = rtgAppend64U32(out, 8)
+	out = rtgAppend64U32(out, 0)
 
 	out = rtgAppend32(out, sec.bssName)
 	out = rtgAppend32(out, 8)
-	out = rtgAppend64(out, 3)
-	out = rtgAppend64(out, base+dataOff+dataSize)
-	out = rtgAppend64(out, dataOff+dataSize)
-	out = rtgAppend64(out, bssSize)
+	out = rtgAppend64U32(out, 3)
+	out = rtgAppend64U32(out, base+dataOff+dataSize)
+	out = rtgAppend64U32(out, dataOff+dataSize)
+	out = rtgAppend64U32(out, bssSize)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 0)
-	out = rtgAppend64(out, 8)
-	out = rtgAppend64(out, 0)
+	out = rtgAppend64U32(out, 8)
+	out = rtgAppend64U32(out, 0)
 
 	out = rtgAppend32(out, sec.symtabName)
 	out = rtgAppend32(out, 2)
-	out = rtgAppend64(out, 0)
-	out = rtgAppend64(out, 0)
-	out = rtgAppend64(out, sec.symtabOff)
-	out = rtgAppend64(out, symtabSize)
+	out = rtgAppend64U32(out, 0)
+	out = rtgAppend64U32(out, 0)
+	out = rtgAppend64U32(out, sec.symtabOff)
+	out = rtgAppend64U32(out, symtabSize)
 	out = rtgAppend32(out, 5)
 	out = rtgAppend32(out, 1)
-	out = rtgAppend64(out, 8)
-	out = rtgAppend64(out, 24)
+	out = rtgAppend64U32(out, 8)
+	out = rtgAppend64U32(out, 24)
 
 	out = rtgAppend32(out, sec.strtabName)
 	out = rtgAppend32(out, 3)
-	out = rtgAppend64(out, 0)
-	out = rtgAppend64(out, 0)
-	out = rtgAppend64(out, sec.strtabOff)
-	out = rtgAppend64(out, strtabSize)
+	out = rtgAppend64U32(out, 0)
+	out = rtgAppend64U32(out, 0)
+	out = rtgAppend64U32(out, sec.strtabOff)
+	out = rtgAppend64U32(out, strtabSize)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 0)
-	out = rtgAppend64(out, 1)
-	out = rtgAppend64(out, 0)
+	out = rtgAppend64U32(out, 1)
+	out = rtgAppend64U32(out, 0)
 
 	out = rtgAppend32(out, sec.shstrName)
 	out = rtgAppend32(out, 3)
-	out = rtgAppend64(out, 0)
-	out = rtgAppend64(out, 0)
-	out = rtgAppend64(out, sec.shstrOff)
-	out = rtgAppend64(out, shstrtabSize)
+	out = rtgAppend64U32(out, 0)
+	out = rtgAppend64U32(out, 0)
+	out = rtgAppend64U32(out, sec.shstrOff)
+	out = rtgAppend64U32(out, shstrtabSize)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 0)
-	out = rtgAppend64(out, 1)
-	out = rtgAppend64(out, 0)
+	out = rtgAppend64U32(out, 1)
+	out = rtgAppend64U32(out, 0)
 	return out
 }
 
@@ -605,93 +621,56 @@ const rtgWinHeadersSize = 0x200
 const rtgWinFileAlign = 0x200
 const rtgWinSectionAlign = 0x1000
 
-const rtgWinImportOpen = 1
-const rtgWinImportClose = 2
-const rtgWinImportRead = 3
-const rtgWinImportWrite = 4
-const rtgWinImportLseek = 5
-const rtgWinImportExit = 6
-const rtgWinImportArgc = 7
-const rtgWinImportArgv = 8
-const rtgWinImportEnviron = 9
-const rtgWinImportGetMainArgs = 10
-const rtgWinImportGetStdHandle = 11
-const rtgWinImportWriteFile = 12
-const rtgWinImportExitProcess = 13
-const rtgWinImportGetCommandLineA = 14
+const rtgWinImportCreateFileA = 1
+const rtgWinImportCloseHandle = 2
+const rtgWinImportReadFile = 3
+const rtgWinImportWriteFile = 4
+const rtgWinImportSetFilePointer = 5
+const rtgWinImportGetStdHandle = 6
+const rtgWinImportGetCommandLineA = 7
+const rtgWinImportExitProcess = 8
 
 type rtgWinImportLayout struct {
 	importRVA    int
 	importSize   int
-	msvcrtIATRVA int
 	kernelIATRVA int
 	thunkSize    int
 }
 
 func rtgWinImportCount() int {
-	return 14
+	return 8
 }
 
 func rtgWinImportName(id int) string {
-	if id == rtgWinImportOpen {
-		return "_open"
+	if id == rtgWinImportCreateFileA {
+		return "CreateFileA"
 	}
-	if id == rtgWinImportClose {
-		return "_close"
+	if id == rtgWinImportCloseHandle {
+		return "CloseHandle"
 	}
-	if id == rtgWinImportRead {
-		return "_read"
-	}
-	if id == rtgWinImportWrite {
-		return "_write"
-	}
-	if id == rtgWinImportLseek {
-		return "_lseek"
-	}
-	if id == rtgWinImportExit {
-		return "exit"
-	}
-	if id == rtgWinImportArgc {
-		if rtgTargetArch == rtgArch386 {
-			return "__p___argc"
-		}
-		return "__argc"
-	}
-	if id == rtgWinImportArgv {
-		if rtgTargetArch == rtgArch386 {
-			return "__p___argv"
-		}
-		return "__argv"
-	}
-	if id == rtgWinImportEnviron {
-		if rtgTargetArch == rtgArch386 {
-			return "__p__environ"
-		}
-		return "_environ"
-	}
-	if id == rtgWinImportGetMainArgs {
-		return "__getmainargs"
-	}
-	if id == rtgWinImportGetStdHandle {
-		return "GetStdHandle"
+	if id == rtgWinImportReadFile {
+		return "ReadFile"
 	}
 	if id == rtgWinImportWriteFile {
 		return "WriteFile"
 	}
-	if id == rtgWinImportExitProcess {
-		return "ExitProcess"
+	if id == rtgWinImportSetFilePointer {
+		return "SetFilePointer"
+	}
+	if id == rtgWinImportGetStdHandle {
+		return "GetStdHandle"
 	}
 	if id == rtgWinImportGetCommandLineA {
 		return "GetCommandLineA"
+	}
+	if id == rtgWinImportExitProcess {
+		return "ExitProcess"
 	}
 	return ""
 }
 
 func rtgWinImportIATRVA(layout rtgWinImportLayout, id int) int {
-	if id >= rtgWinImportGetStdHandle {
-		return layout.kernelIATRVA + (id-rtgWinImportGetStdHandle)*layout.thunkSize
-	}
-	return layout.msvcrtIATRVA + (id-1)*layout.thunkSize
+	return layout.kernelIATRVA + (id-1)*layout.thunkSize
 }
 
 func rtgAsmAddWinImportReloc(a *rtgAsm, at int, importID int) {
@@ -709,19 +688,19 @@ func rtgAsmHasWinImportRelocs(a *rtgAsm) bool {
 
 func rtgAppendWinImports(a *rtgAsm, is64 bool) rtgWinImportLayout {
 	var layout rtgWinImportLayout
-	msvcrtCount := 10
-	kernelCount := 4
+	kernelCount := rtgWinImportCount()
 	thunkSize := 4
 	if is64 {
 		thunkSize = 8
 	}
-	dataRVA := a.codeOffset + len(a.code)
+	dataRVA := a.dataOffset
+	if dataRVA == 0 {
+		dataRVA = a.codeOffset + len(a.code)
+	}
 	importOff := rtgAlignValue(len(a.data), thunkSize)
 	a.data = rtgAppendUntil(a.data, importOff)
 	descOff := importOff
-	msvcrtILTOff := descOff + 60
-	msvcrtIATOff := msvcrtILTOff + (msvcrtCount+1)*thunkSize
-	kernelILTOff := msvcrtIATOff + (msvcrtCount+1)*thunkSize
+	kernelILTOff := descOff + 40
 	kernelIATOff := kernelILTOff + (kernelCount+1)*thunkSize
 	nameOff := kernelIATOff + (kernelCount+1)*thunkSize
 	a.data = rtgAppendUntil(a.data, nameOff)
@@ -735,41 +714,25 @@ func rtgAppendWinImports(a *rtgAsm, is64 bool) rtgWinImportLayout {
 			a.data = append(a.data, 0)
 		}
 	}
-	msvcrtNameOff := len(a.data)
-	a.data = rtgAppendStringZ(a.data, "msvcrt.dll")
 	kernelNameOff := len(a.data)
 	a.data = rtgAppendStringZ(a.data, "kernel32.dll")
 
-	for i := 0; i < msvcrtCount; i++ {
+	for i := 0; i < kernelCount; i++ {
 		nameRVA := dataRVA + nameOffsets[i]
 		if is64 {
-			rtgPut64At(a.data, msvcrtILTOff+i*thunkSize, nameRVA)
-			rtgPut64At(a.data, msvcrtIATOff+i*thunkSize, nameRVA)
-		} else {
-			rtgPut32At(a.data, msvcrtILTOff+i*thunkSize, nameRVA)
-			rtgPut32At(a.data, msvcrtIATOff+i*thunkSize, nameRVA)
-		}
-	}
-	for i := 0; i < kernelCount; i++ {
-		nameRVA := dataRVA + nameOffsets[msvcrtCount+i]
-		if is64 {
-			rtgPut64At(a.data, kernelILTOff+i*thunkSize, nameRVA)
-			rtgPut64At(a.data, kernelIATOff+i*thunkSize, nameRVA)
+			rtgPut64U32At(a.data, kernelILTOff+i*thunkSize, nameRVA)
+			rtgPut64U32At(a.data, kernelIATOff+i*thunkSize, nameRVA)
 		} else {
 			rtgPut32At(a.data, kernelILTOff+i*thunkSize, nameRVA)
 			rtgPut32At(a.data, kernelIATOff+i*thunkSize, nameRVA)
 		}
 	}
-	rtgPut32At(a.data, descOff, dataRVA+msvcrtILTOff)
-	rtgPut32At(a.data, descOff+12, dataRVA+msvcrtNameOff)
-	rtgPut32At(a.data, descOff+16, dataRVA+msvcrtIATOff)
-	rtgPut32At(a.data, descOff+20, dataRVA+kernelILTOff)
-	rtgPut32At(a.data, descOff+32, dataRVA+kernelNameOff)
-	rtgPut32At(a.data, descOff+36, dataRVA+kernelIATOff)
+	rtgPut32At(a.data, descOff, dataRVA+kernelILTOff)
+	rtgPut32At(a.data, descOff+12, dataRVA+kernelNameOff)
+	rtgPut32At(a.data, descOff+16, dataRVA+kernelIATOff)
 
 	layout.importRVA = dataRVA + importOff
 	layout.importSize = len(a.data) - importOff
-	layout.msvcrtIATRVA = dataRVA + msvcrtIATOff
 	layout.kernelIATRVA = dataRVA + kernelIATOff
 	layout.thunkSize = thunkSize
 	return layout
@@ -786,6 +749,11 @@ func rtgPut64At(out []byte, at int, v int) {
 	out[at+7] = byte(v >> 56)
 }
 
+func rtgPut64U32At(out []byte, at int, v int) {
+	rtgPut32At(out, at, v)
+	rtgPut32At(out, at+4, 0)
+}
+
 func rtgAsmPatchWindows(a *rtgAsm, layout rtgWinImportLayout, imageBase int, is64 bool) {
 	for i := 0; i < len(a.relocs); i++ {
 		r := a.relocs[i]
@@ -795,7 +763,9 @@ func rtgAsmPatchWindows(a *rtgAsm, layout rtgWinImportLayout, imageBase int, is6
 			rtgPut32At(a.code, r.at, disp)
 		}
 	}
-	a.dataOffset = a.codeOffset + len(a.code)
+	if a.dataOffset == 0 {
+		a.dataOffset = a.codeOffset + len(a.code)
+	}
 	for i := 0; i < len(a.absRelocs); i++ {
 		r := a.absRelocs[i]
 		if r.kind == rtgAbsWinImportReloc {
@@ -821,37 +791,36 @@ func rtgAsmPatchWindows(a *rtgAsm, layout rtgWinImportLayout, imageBase int, is6
 	}
 }
 
-func rtgAppendPEHeader64(out []byte, entryRVA int, sectionRawSize int, sectionVirtualSize int, importRVA int, importSize int) []byte {
-	sectionRVA := rtgWinSectionRVA
-	sizeOfImage := rtgAlignValue(sectionRVA+sectionVirtualSize, rtgWinSectionAlign)
+func rtgAppendPEHeader64(out []byte, entryRVA int, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
+	sizeOfImage := rtgAlignValue(dataRVA+dataVirtualSize, rtgWinSectionAlign)
 	out = rtgAppendDOSStub(out)
 	out = append(out, 'P')
 	out = append(out, 'E')
 	out = append(out, 0)
 	out = append(out, 0)
 	out = rtgAppend16(out, 0x8664)
-	out = rtgAppend16(out, 1)
+	out = rtgAppend16(out, 2)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend16(out, 240)
 	out = rtgAppend16(out, 0x22)
 	out = rtgAppend16(out, 0x20b)
+	out = append(out, 1)
 	out = append(out, 0)
-	out = append(out, 0)
-	out = rtgAppend32(out, sectionRawSize)
-	out = rtgAppend32(out, sectionRawSize)
+	out = rtgAppend32(out, textRawSize)
+	out = rtgAppend32(out, dataRawSize)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, entryRVA)
-	out = rtgAppend32(out, sectionRVA)
-	out = rtgAppend64(out, rtgWinImageBase)
+	out = rtgAppend32(out, rtgWinSectionRVA)
+	out = rtgAppend64U32(out, rtgWinImageBase)
 	out = rtgAppend32(out, rtgWinSectionAlign)
 	out = rtgAppend32(out, rtgWinFileAlign)
-	out = rtgAppend16(out, 6)
+	out = rtgAppend16(out, 4)
 	out = rtgAppend16(out, 0)
 	out = rtgAppend16(out, 0)
 	out = rtgAppend16(out, 0)
-	out = rtgAppend16(out, 6)
+	out = rtgAppend16(out, 4)
 	out = rtgAppend16(out, 0)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, sizeOfImage)
@@ -859,57 +828,63 @@ func rtgAppendPEHeader64(out []byte, entryRVA int, sectionRawSize int, sectionVi
 	out = rtgAppend32(out, 0)
 	out = rtgAppend16(out, 3)
 	out = rtgAppend16(out, 0)
-	out = rtgAppend64(out, 0x100000)
-	out = rtgAppend64(out, 0x100000)
-	out = rtgAppend64(out, 0x100000)
-	out = rtgAppend64(out, 0x1000)
+	out = rtgAppend64U32(out, 0x100000)
+	out = rtgAppend64U32(out, 0x100000)
+	out = rtgAppend64U32(out, 0x100000)
+	out = rtgAppend64U32(out, 0x1000)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 16)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, importRVA)
 	out = rtgAppend32(out, importSize)
-	for i := 2; i < 16; i++ {
+	for i := 2; i < 12; i++ {
 		out = rtgAppend32(out, 0)
 		out = rtgAppend32(out, 0)
 	}
-	out = rtgAppendPETextSection(out, sectionRawSize, sectionVirtualSize)
+	out = rtgAppend32(out, iatRVA)
+	out = rtgAppend32(out, iatSize)
+	for i := 13; i < 16; i++ {
+		out = rtgAppend32(out, 0)
+		out = rtgAppend32(out, 0)
+	}
+	out = rtgAppendPESection(out, ".text", textVirtualSize, rtgWinSectionRVA, textRawSize, rtgWinHeadersSize, 0x60000020)
+	out = rtgAppendPESection(out, ".data", dataVirtualSize, dataRVA, dataRawSize, rtgWinHeadersSize+textRawSize, 0xc0000040)
 	out = rtgAppendUntil(out, rtgWinHeadersSize)
 	return out
 }
 
-func rtgAppendPEHeader32(out []byte, entryRVA int, sectionRawSize int, sectionVirtualSize int, importRVA int, importSize int) []byte {
-	sectionRVA := rtgWinSectionRVA
-	sizeOfImage := rtgAlignValue(sectionRVA+sectionVirtualSize, rtgWinSectionAlign)
+func rtgAppendPEHeader32(out []byte, entryRVA int, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
+	sizeOfImage := rtgAlignValue(dataRVA+dataVirtualSize, rtgWinSectionAlign)
 	out = rtgAppendDOSStub(out)
 	out = append(out, 'P')
 	out = append(out, 'E')
 	out = append(out, 0)
 	out = append(out, 0)
 	out = rtgAppend16(out, 0x14c)
-	out = rtgAppend16(out, 1)
+	out = rtgAppend16(out, 2)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend16(out, 224)
 	out = rtgAppend16(out, 0x102)
 	out = rtgAppend16(out, 0x10b)
+	out = append(out, 1)
 	out = append(out, 0)
-	out = append(out, 0)
-	out = rtgAppend32(out, sectionRawSize)
-	out = rtgAppend32(out, sectionRawSize)
+	out = rtgAppend32(out, textRawSize)
+	out = rtgAppend32(out, dataRawSize)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, entryRVA)
-	out = rtgAppend32(out, sectionRVA)
-	out = rtgAppend32(out, sectionRVA)
+	out = rtgAppend32(out, rtgWinSectionRVA)
+	out = rtgAppend32(out, dataRVA)
 	out = rtgAppend32(out, rtgWinImageBase)
 	out = rtgAppend32(out, rtgWinSectionAlign)
 	out = rtgAppend32(out, rtgWinFileAlign)
-	out = rtgAppend16(out, 6)
+	out = rtgAppend16(out, 4)
 	out = rtgAppend16(out, 0)
 	out = rtgAppend16(out, 0)
 	out = rtgAppend16(out, 0)
-	out = rtgAppend16(out, 6)
+	out = rtgAppend16(out, 4)
 	out = rtgAppend16(out, 0)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, sizeOfImage)
@@ -927,11 +902,18 @@ func rtgAppendPEHeader32(out []byte, entryRVA int, sectionRawSize int, sectionVi
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, importRVA)
 	out = rtgAppend32(out, importSize)
-	for i := 2; i < 16; i++ {
+	for i := 2; i < 12; i++ {
 		out = rtgAppend32(out, 0)
 		out = rtgAppend32(out, 0)
 	}
-	out = rtgAppendPETextSection(out, sectionRawSize, sectionVirtualSize)
+	out = rtgAppend32(out, iatRVA)
+	out = rtgAppend32(out, iatSize)
+	for i := 13; i < 16; i++ {
+		out = rtgAppend32(out, 0)
+		out = rtgAppend32(out, 0)
+	}
+	out = rtgAppendPESection(out, ".text", textVirtualSize, rtgWinSectionRVA, textRawSize, rtgWinHeadersSize, 0x60000020)
+	out = rtgAppendPESection(out, ".data", dataVirtualSize, dataRVA, dataRawSize, rtgWinHeadersSize+textRawSize, 0xc0000040)
 	out = rtgAppendUntil(out, rtgWinHeadersSize)
 	return out
 }
@@ -939,32 +921,58 @@ func rtgAppendPEHeader32(out []byte, entryRVA int, sectionRawSize int, sectionVi
 func rtgAppendDOSStub(out []byte) []byte {
 	out = append(out, 'M')
 	out = append(out, 'Z')
-	for len(out) < 0x3c {
-		out = append(out, 0)
-	}
+	out = rtgAppend16(out, 0x90)
+	out = rtgAppend16(out, 3)
+	out = rtgAppend16(out, 0)
+	out = rtgAppend16(out, 4)
+	out = rtgAppend16(out, 0)
+	out = rtgAppend16(out, 0xffff)
+	out = rtgAppend16(out, 0)
+	out = rtgAppend16(out, 0xb8)
+	out = rtgAppend16(out, 0)
+	out = rtgAppend16(out, 0)
+	out = rtgAppend16(out, 0)
+	out = rtgAppend16(out, 0x40)
+	out = rtgAppend16(out, 0)
+	out = rtgAppendUntil(out, 0x3c)
 	out = rtgAppend32(out, 0x80)
+	out = rtgAppendUntil(out, 0x40)
+	out = append(out, 0x0e)
+	out = append(out, 0x1f)
+	out = append(out, 0xba)
+	out = append(out, 0x0e)
+	out = append(out, 0x00)
+	out = append(out, 0xb4)
+	out = append(out, 0x09)
+	out = append(out, 0xcd)
+	out = append(out, 0x21)
+	out = append(out, 0xb8)
+	out = append(out, 0x01)
+	out = append(out, 0x4c)
+	out = append(out, 0xcd)
+	out = append(out, 0x21)
+	out = rtgAppendStringZ(out, "This program cannot be run in DOS mode.\r\r\n$")
 	out = rtgAppendUntil(out, 0x80)
 	return out
 }
 
-func rtgAppendPETextSection(out []byte, rawSize int, virtualSize int) []byte {
-	out = append(out, '.')
-	out = append(out, 't')
-	out = append(out, 'e')
-	out = append(out, 'x')
-	out = append(out, 't')
-	out = append(out, 0)
-	out = append(out, 0)
-	out = append(out, 0)
+func rtgAppendPESection(out []byte, name string, virtualSize int, rva int, rawSize int, rawPtr int, characteristics int) []byte {
+	for i := 0; i < 8; i++ {
+		if i < len(name) {
+			out = append(out, name[i])
+		} else {
+			out = append(out, 0)
+		}
+	}
 	out = rtgAppend32(out, virtualSize)
-	out = rtgAppend32(out, rtgWinSectionRVA)
+	out = rtgAppend32(out, rva)
 	out = rtgAppend32(out, rawSize)
-	out = rtgAppend32(out, rtgWinHeadersSize)
+	out = rtgAppend32(out, rawPtr)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend16(out, 0)
 	out = rtgAppend16(out, 0)
-	out = rtgAppend32(out, 0xe00000e0)
+	out = rtgAppend32(out, characteristics)
 	return out
 }
 
@@ -2007,6 +2015,14 @@ func rtgEvalConstExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) rtgConstResult
 		return rtgConstResultOk(value)
 	}
 	if e.kind == rtgExprIdent {
+		localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
+		if localIndex >= 0 {
+			if g.locals[localIndex].constValid != 0 {
+				return rtgConstResultOk(g.locals[localIndex].constValue)
+			}
+			var r rtgConstResult
+			return r
+		}
 		result := rtgEvalConstByName(g, e.nameStart, e.nameEnd)
 		return result
 	}
@@ -4390,11 +4406,13 @@ func rtgAsmJnzLabel(a *rtgAsm, label int) {
 }
 
 type rtgLocalInfo struct {
-	nameStart int
-	nameEnd   int
-	offset    int
-	typ       int
-	size      int
+	nameStart  int
+	nameEnd    int
+	offset     int
+	typ        int
+	size       int
+	constValue int
+	constValid int
 }
 
 type rtgGlobalInfo struct {
@@ -4991,6 +5009,7 @@ func rtgEmitLinearIncDec(g *rtgLinearGen, start int, end int) bool {
 	if root.kind == rtgExprIdent {
 		localOffset := rtgFindLocalOffset(g, root.nameStart, root.nameEnd)
 		if localOffset >= 0 {
+			rtgClearLocalConstAtOffset(g, localOffset)
 			if rtgTargetArch == rtgArchAarch64 || rtgTargetArch == rtgArchArm || rtgTargetArch == rtgArchWasm32 {
 				rtgAsmLoadRaxStack(a, localOffset)
 				rtgAsmPushImm(a, 1)
@@ -5309,6 +5328,11 @@ func rtgLinearInitGlobals(g *rtgLinearGen) bool {
 			size = 8
 		}
 		g.asm.bssSize += rtgAlignTo8(size)
+		if rtgTypeIsInt(meta, s.typ) && rtgBytesEqualText(g.prog.src, s.nameStart, s.nameEnd, "rtgCompilerDefaultTarget") {
+			rtgAsmMovRaxImm(a, rtgCurrentTarget)
+			rtgAsmStoreRaxBss(a, off)
+			continue
+		}
 		if s.initStart < s.initEnd {
 			ep := rtgParseExpression(g.prog, s.initStart, s.initEnd)
 			if !ep.ok || len(ep.exprs) == 0 {
@@ -5786,8 +5810,9 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 		ep := rtgParseExpression(p, assignTok+1, stmt.endTok)
 		return ep.ok
 	}
+	declaresLocal := stmt.kind == rtgStmtVar || rtgTokIsKind(p, stmt.startTok, rtgTokVar) || stmt.kind == rtgStmtShort
 	offset := rtgFindLocalOffset(g, nameStart, nameEnd)
-	if stmt.kind == rtgStmtVar || rtgTokIsKind(p, stmt.startTok, rtgTokVar) || stmt.kind == rtgStmtShort {
+	if declaresLocal {
 		offset = -1
 	}
 	globalOffset := -1
@@ -5856,6 +5881,12 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 			rtgAsmStoreRaxBss(a, globalOffset)
 		} else {
 			rtgZeroLocalAtOffset(g, offset)
+			localType := rtgLocalTypeAtOffset(g, offset)
+			if declaresLocal && fieldStackOffset < 0 && rtgLocalConstTrackable(g, localType, nameStart, nameEnd, stmt.endTok) {
+				rtgSetLocalConstAtOffset(g, offset, 0)
+			} else {
+				rtgClearLocalConstAtOffset(g, offset)
+			}
 		}
 		return true
 	}
@@ -5873,6 +5904,14 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 		targetType = rtgLocalTypeAtOffset(g, offset)
 	}
 	targetResolved := rtgResolveType(meta, targetType)
+	trackLocalConst := globalOffset < 0 && fieldStackOffset < 0 && declaresLocal && rtgLocalConstTrackable(g, targetType, nameStart, nameEnd, stmt.endTok)
+	localConst := rtgConstResult{}
+	if trackLocalConst {
+		localConst = rtgEvalConstExpr(g, &ep, rootIndex)
+	}
+	if globalOffset < 0 && fieldStackOffset < 0 && !declaresLocal {
+		rtgClearLocalConstAtOffset(g, offset)
+	}
 	if stmt.kind == rtgStmtShort {
 		root := &ep.exprs[rootIndex]
 		if root.kind == rtgExprCall && root.argCount == 2 && rtgExprIdentCode(p, &ep, root.left) == rtgIdentAppend {
@@ -5883,6 +5922,9 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 		}
 	}
 	if rtgEmitAppendAssignGeneral(g, stmt, &ep) {
+		if globalOffset < 0 && fieldStackOffset < 0 {
+			rtgClearLocalConstAtOffset(g, offset)
+		}
 		return true
 	}
 	if compoundAssign {
@@ -5904,10 +5946,20 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 			rtgAsmStoreRaxBss(a, globalOffset)
 		} else {
 			rtgAsmStoreRaxStack(a, offset)
+			if fieldStackOffset < 0 {
+				rtgClearLocalConstAtOffset(g, offset)
+			}
 		}
 		return true
 	}
 	if globalOffset < 0 && rtgEmitTypedAssign(g, &ep, rootIndex, offset) {
+		if fieldStackOffset < 0 {
+			if trackLocalConst && localConst.ok {
+				rtgSetLocalConstAtOffset(g, offset, localConst.value)
+			} else {
+				rtgClearLocalConstAtOffset(g, offset)
+			}
+		}
 		return true
 	}
 	if !rtgEmitIntExpr(g, &ep, rootIndex) {
@@ -5918,6 +5970,13 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 		rtgAsmStoreRaxBss(a, globalOffset)
 	} else {
 		rtgAsmStoreRaxStack(a, offset)
+		if fieldStackOffset < 0 {
+			if trackLocalConst && localConst.ok {
+				rtgSetLocalConstAtOffset(g, offset, localConst.value)
+			} else {
+				rtgClearLocalConstAtOffset(g, offset)
+			}
+		}
 	}
 	return true
 }
@@ -5939,6 +5998,9 @@ func rtgEmitMultiAssign(g *rtgLinearGen, stmt *rtgStmt, assignTok int) bool {
 	}
 	if lhsCount != rhsCount {
 		return false
+	}
+	for i := 0; i < lhsCount; i++ {
+		rtgClearLocalConstAssignTarget(g, stmt.kind, lhs[i*2], lhs[i*2+1])
 	}
 	var tempOffsets []int
 	var tempTypes []int
@@ -5970,6 +6032,29 @@ func rtgEmitMultiAssign(g *rtgLinearGen, stmt *rtgStmt, assignTok int) bool {
 	}
 	return true
 }
+
+func rtgClearLocalConstAssignTarget(g *rtgLinearGen, kind int, targetStart int, targetEnd int) {
+	p := g.prog
+	ep := rtgParseExpression(p, targetStart, targetEnd)
+	if !ep.ok || len(ep.exprs) == 0 {
+		return
+	}
+	root := &ep.exprs[len(ep.exprs)-1]
+	if root.kind != rtgExprIdent {
+		return
+	}
+	if root.nameEnd == root.nameStart+1 && p.src[root.nameStart] == '_' {
+		return
+	}
+	localIndex := rtgFindLocalIndex(g, root.nameStart, root.nameEnd)
+	if kind == rtgStmtShort {
+		localIndex = rtgFindLocalIndexInCurrentScope(g, root.nameStart, root.nameEnd)
+	}
+	if localIndex >= 0 {
+		rtgClearLocalConstAtOffset(g, g.locals[localIndex].offset)
+	}
+}
+
 func rtgEmitTupleCallAssign(g *rtgLinearGen, kind int, lhs []int, lhsCount int, rhsStart int, rhsEnd int) bool {
 	p := g.prog
 	ep := rtgParseExpression(p, rhsStart, rhsEnd)
@@ -6039,11 +6124,13 @@ func rtgEmitTempToTarget(g *rtgLinearGen, kind int, targetStart int, targetEnd i
 			if localIndex < 0 {
 				offset := rtgAddTypedLocal(g, root.nameStart, root.nameEnd, tempType)
 				rtgEmitCopyStackToStack(g, tempOffset, offset, size)
+				rtgClearLocalConstAtOffset(g, offset)
 				return true
 			}
 		}
 		if localIndex >= 0 {
 			rtgEmitCopyStackToStack(g, tempOffset, g.locals[localIndex].offset, size)
+			rtgClearLocalConstAtOffset(g, g.locals[localIndex].offset)
 			return true
 		}
 		globalOffset := rtgFindGlobalOffset(g, root.nameStart, root.nameEnd)
@@ -6117,6 +6204,66 @@ func rtgFindLocalIndexInCurrentScope(g *rtgLinearGen, nameStart int, nameEnd int
 	}
 	return -1
 }
+
+func rtgSetLocalConstAtOffset(g *rtgLinearGen, offset int, value int) {
+	for i := len(g.locals) - 1; i >= 0; i-- {
+		if g.locals[i].offset == offset {
+			g.locals[i].constValue = value
+			g.locals[i].constValid = 1
+			return
+		}
+	}
+}
+
+func rtgClearLocalConstAtOffset(g *rtgLinearGen, offset int) {
+	for i := len(g.locals) - 1; i >= 0; i-- {
+		if g.locals[i].offset == offset {
+			g.locals[i].constValid = 0
+			return
+		}
+	}
+}
+
+func rtgLocalConstTrackable(g *rtgLinearGen, typ int, nameStart int, nameEnd int, afterTok int) bool {
+	resolved := rtgResolveType(g.meta, typ)
+	if !rtgTypeKindIsScalarInt(resolved.kind) {
+		return false
+	}
+	return !rtgLocalNameWrittenAfter(g, nameStart, nameEnd, afterTok)
+}
+
+func rtgLocalNameWrittenAfter(g *rtgLinearGen, nameStart int, nameEnd int, afterTok int) bool {
+	if nameEnd <= nameStart {
+		return true
+	}
+	p := g.prog
+	end := len(p.toks)
+	if g.currentFunc >= 0 && g.currentFunc < len(g.meta.funcs) {
+		end = g.meta.funcs[g.currentFunc].bodyEnd
+	}
+	i := afterTok
+	if i < 0 {
+		i = 0
+	}
+	for i < end {
+		if rtgTokIsKind(p, i, rtgTokIdent) && rtgBytesEqualRange(p.src, p.toks[i].start, p.toks[i].end, nameStart, nameEnd) {
+			if rtgTokCharIs(p, i-1, '&') {
+				return true
+			}
+			if rtgTok2Is(p, i+1, '+', '+') || rtgTok2Is(p, i+1, '-', '-') {
+				return true
+			}
+			lineEnd := rtgStatementLineEnd(p, i, end)
+			assignTok := rtgFindAssignmentToken(p, i, lineEnd)
+			if assignTok > i {
+				return true
+			}
+		}
+		i++
+	}
+	return false
+}
+
 func rtgSplitTopLevelComma(p *rtgProgram, start int, end int, ranges []int) []int {
 	partStart := start
 	paren := 0
@@ -7556,8 +7703,9 @@ func rtgExprCanFoldConst(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		return true
 	}
 	if e.kind == rtgExprIdent {
-		if rtgFindLocalIndex(g, e.nameStart, e.nameEnd) >= 0 {
-			return false
+		localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
+		if localIndex >= 0 {
+			return g.locals[localIndex].constValid != 0
 		}
 		builtin := rtgEvalBuiltinConst(g, e.nameStart, e.nameEnd)
 		if builtin.ok {

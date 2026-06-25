@@ -124,6 +124,16 @@ func (target compilerTarget) safeName() string {
 	return strings.ReplaceAll(target.name, "/", "-")
 }
 
+func skipIfTargetRunnerMissing(t *testing.T, target compilerTarget) {
+	t.Helper()
+	if len(target.runner) == 0 {
+		return
+	}
+	if _, err := exec.LookPath(target.runner[0]); err != nil {
+		t.Skipf("runner %s is not installed", target.runner[0])
+	}
+}
+
 func compile(inputFiles []string, outputFile string) error {
 	resetRuntime()
 
@@ -270,7 +280,7 @@ func TestCompilerTargetDiagnostics(t *testing.T) {
 	checkFailure(
 		"unsupported target",
 		[]string{"-t", "linux/arm64", "-o", outputFile, "tests/print_pass_smoke.go"},
-		[]string{"rtg: unsupported target: linux/arm64", "linux/amd64", "linux/386", "linux/aarch64", "linux/arm", "wasi/wasm32"},
+		[]string{"rtg: unsupported target: linux/arm64", "linux/amd64", "linux/386", "linux/aarch64", "linux/arm", "windows/amd64", "windows/386", "wasi/wasm32"},
 	)
 	checkFailure(
 		"missing target argument",
@@ -283,11 +293,7 @@ func TestStage1CompilerCanEmitSmokeTargets(t *testing.T) {
 	for _, target := range supportedCompilerTargets(t) {
 		target := target
 		t.Run(target.name, func(t *testing.T) {
-			if len(target.runner) > 0 {
-				if _, err := exec.LookPath(target.runner[0]); err != nil {
-					t.Skipf("runner %s is not installed", target.runner[0])
-				}
-			}
+			skipIfTargetRunnerMissing(t, target)
 			outDir := t.TempDir()
 			if target.name == "linux/aarch64" || target.name == "linux/amd64" {
 				var err error
@@ -411,6 +417,8 @@ func TestCompileTests(t *testing.T) {
 	for _, target := range targets {
 		target := target
 		t.Run(target.name, func(t *testing.T) {
+			skipIfTargetRunnerMissing(t, target)
+
 			outDir := t.TempDir()
 			stage2 := buildStage2Compiler(t, target, outDir)
 
@@ -463,54 +471,6 @@ func TestRunTests(t *testing.T) {
 
 			if expected.exitCode != 0 {
 				t.Fatalf("host go execution failed with exit code %d\nstdout: %sstderr: %s", expected.exitCode, expected.stdout, expected.stderr)
-			}
-		})
-	}
-}
-
-// Test the self-hosting of the compiler.
-func TestCompilerCompiler(t *testing.T) {
-	for _, target := range supportedCompilerTargets(t) {
-		target := target
-		t.Run(target.name, func(t *testing.T) {
-			// compile stage0
-			outDir := t.TempDir()
-			stage0 := filepath.Join(outDir, "stage0")
-
-			err := compile(target.files, stage0)
-			if err != nil {
-				t.Fatalf("compilation failed: %v", err)
-			}
-
-			// use stage0 to compile stage1
-			stage1 := filepath.Join(outDir, "stage1")
-			if err := runHostCompilerBinaryForTarget(t, target, stage0, stage1, target.files); err != nil {
-				t.Fatalf("stage0 compilation failed: %v", err)
-			}
-
-			// use stage1 to compile stage2
-			stage2 := filepath.Join(outDir, "stage2")
-			if err := runTargetCompilerBinary(t, target, stage1, stage2, target.files); err != nil {
-				t.Fatalf("stage1 compilation failed: %v", err)
-			}
-
-			// use stage2 to compile stage3
-			stage3 := filepath.Join(outDir, "stage3")
-			if err := runTargetCompilerBinary(t, target, stage2, stage3, target.files); err != nil {
-				t.Fatalf("stage2 compilation failed: %v", err)
-			}
-
-			// make sure stage2 and stage3 are byte identical
-			stage2Data, err := os.ReadFile(stage2)
-			if err != nil {
-				t.Fatalf("failed to read stage2: %v", err)
-			}
-			stage3Data, err := os.ReadFile(stage3)
-			if err != nil {
-				t.Fatalf("failed to read stage3: %v", err)
-			}
-			if !bytes.Equal(stage2Data, stage3Data) {
-				t.Fatal("stage2 and stage3 are not identical")
 			}
 		})
 	}

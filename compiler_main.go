@@ -1,5 +1,7 @@
 package main
 
+var rtgCompilerDefaultTarget int = rtgTargetLinuxAmd64
+
 func rtgOpenArg(path string, env []string) int {
 	directFd := open(path, O_RDONLY)
 	if directFd >= 0 {
@@ -89,7 +91,7 @@ func rtgPrintUnsupportedTarget(target string) {
 func appMain(args []string, env []string) int {
 	var input []int
 	var outputPath string
-	target := rtgTargetLinuxAmd64
+	target := rtgCompilerDefaultTarget
 	i := 1
 	for i < len(args) {
 		arg := args[i]

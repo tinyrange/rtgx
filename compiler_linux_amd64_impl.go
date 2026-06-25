@@ -111,6 +111,8 @@ func rtgTryCompileScalarProgramAmd64(p *rtgProgram, meta *rtgMeta) rtgCompileRes
 	}
 	rtgAsmCallLabel(a, g.funcLabels[appIndex])
 	if rtgTargetIsWindows() {
+		rtgAsmMovRcxRax(a)
+		rtgWinAmd64CallImport(a, rtgWinImportExitProcess, 40)
 		rtgAsmRet(a)
 	} else {
 		rtgAsmMovRdiRax(a)
@@ -153,21 +155,21 @@ func rtgEmitProgramEntryArgsAmd64(g *rtgLinearGen, appIndex int) bool {
 	}
 	argsOff := g.asm.bssSize
 	g.asm.bssSize += 32768
-	argsLenOff := g.asm.bssSize
-	g.asm.bssSize += 8
-	argvPtrOff := g.asm.bssSize
-	g.asm.bssSize += 8
-	envPtrOff := g.asm.bssSize
-	g.asm.bssSize += 8
-	startupOff := g.asm.bssSize
-	g.asm.bssSize += 8
-	envDataOff := g.asm.bssSize
-	g.asm.bssSize += 32768
-	envLenOff := g.asm.bssSize
-	g.asm.bssSize += 8
 	if rtgTargetIsWindows() {
-		rtgAsmBuildWindowsArgvEnvSlicesAmd64(&g.asm, argsOff, argsLenOff, argvPtrOff, envPtrOff, startupOff, envDataOff, envLenOff)
+		argsTextOff := g.asm.bssSize
+		g.asm.bssSize += 32768
+		argsLenOff := g.asm.bssSize
+		g.asm.bssSize += 8
+		envDataOff := g.asm.bssSize
+		g.asm.bssSize += 32768
+		envLenOff := g.asm.bssSize
+		g.asm.bssSize += 8
+		rtgAsmBuildWindowsArgvEnvSlicesAmd64(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
 	} else {
+		envDataOff := g.asm.bssSize
+		g.asm.bssSize += 32768
+		envLenOff := g.asm.bssSize
+		g.asm.bssSize += 8
 		rtgAsmBuildArgvEnvSlicesAmd64(&g.asm, argsOff, envDataOff, envLenOff)
 	}
 	if app.paramCount == 1 {
@@ -180,7 +182,7 @@ func rtgEmitProgramEntryArgsAmd64(g *rtgLinearGen, appIndex int) bool {
 	return true
 }
 
-func rtgAsmBuildWindowsArgvEnvSlicesAmd64(a *rtgAsm, bssOff int, argsLenOff int, argvPtrOff int, envPtrOff int, startupOff int, envOff int, envLenOff int) {
+func rtgAsmBuildWindowsArgvEnvSlicesAmd64(a *rtgAsm, bssOff int, argsTextOff int, argsLenOff int, envOff int, envLenOff int) {
 	pathNameOff := len(a.data)
 	a.data = append(a.data, 'P')
 	a.data = append(a.data, 'A')
@@ -188,85 +190,81 @@ func rtgAsmBuildWindowsArgvEnvSlicesAmd64(a *rtgAsm, bssOff int, argsLenOff int,
 	a.data = append(a.data, 'H')
 	a.data = append(a.data, '=')
 	a.data = append(a.data, 0)
-	loopLabel := rtgAsmNewLabel(a)
-	strlenLabel := rtgAsmNewLabel(a)
-	afterLenLabel := rtgAsmNewLabel(a)
-	doneLabel := rtgAsmNewLabel(a)
-	envLoopLabel := rtgAsmNewLabel(a)
-	envStrlenLabel := rtgAsmNewLabel(a)
-	envAfterLenLabel := rtgAsmNewLabel(a)
-	envDoneLabel := rtgAsmNewLabel(a)
+	skipLabel := rtgAsmNewLabel(a)
+	startLabel := rtgAsmNewLabel(a)
+	skipCharLabel := rtgAsmNewLabel(a)
+	copyLabel := rtgAsmNewLabel(a)
+	notQuoteLabel := rtgAsmNewLabel(a)
+	copyCharLabel := rtgAsmNewLabel(a)
+	argDoneLabel := rtgAsmNewLabel(a)
+	finishLabel := rtgAsmNewLabel(a)
 
-	rtgAsmMovRaxBssAddr(a, argsLenOff)
-	rtgAsmMovRcxRax(a)
-	rtgAsmMovRaxBssAddr(a, argvPtrOff)
-	rtgAsmMovRdxRax(a)
-	rtgAsmMovRaxBssAddr(a, envPtrOff)
-	rtgAsmMovR8Rax(a)
-	rtgAsmEmit24(a, 0xc93145)
-	rtgAsmEmit4(a, 0x48, 0x83, 0xec, 40)
-	rtgAsmMovRaxBssAddr(a, startupOff)
-	rtgAsmEmit4(a, 0x48, 0x89, 0x44, 0x24)
-	rtgAsmEmit8(a, 32)
-	rtgAsmEmit16(a, 0x15ff)
-	at := len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddWinImportReloc(a, at, rtgWinImportGetMainArgs)
-	rtgAsmEmit4(a, 0x48, 0x83, 0xc4, 40)
-	rtgAsmLoadRaxBss(a, argsLenOff)
-	rtgAsmStoreRaxBss(a, argsLenOff)
-	rtgAsmMovR8Rax(a)
-	rtgAsmLoadRaxBss(a, argvPtrOff)
-	rtgAsmMovR9Rax(a)
+	rtgWinAmd64CallImport(a, rtgWinImportGetCommandLineA, 40)
+	rtgAsmEmit24(a, 0xc68948)
 	rtgAsmMovR10BssAddr(a, bssOff)
+	rtgAsmMovRaxBssAddr(a, argsTextOff)
+	rtgAsmMovRdxRax(a)
 	rtgAsmEmit24(a, 0xdb314d)
-	rtgAsmMarkLabel(a, loopLabel)
-	rtgAsmEmit24(a, 0xc3394d)
-	rtgAsmJgeLabel(a, doneLabel)
-	rtgAsmEmit32(a, 0xd93c8b4b)
-	rtgAsmEmit32(a, 0x483a8949)
-	rtgAsmEmit16(a, 0xc031)
-	rtgAsmMarkLabel(a, strlenLabel)
-	rtgAsmEmit32(a, 0x00073c80)
-	rtgAsmJzLabel(a, afterLenLabel)
-	rtgAsmEmit24(a, 0xc0ff48)
-	rtgAsmJmpLabel(a, strlenLabel)
-	rtgAsmMarkLabel(a, afterLenLabel)
-	rtgAsmEmit32(a, 0x08428949)
+
+	rtgAsmMarkLabel(a, skipLabel)
+	rtgAsmEmit3(a, 0x80, 0x3e, 0)
+	rtgAsmJzLabel(a, finishLabel)
+	rtgAsmEmit3(a, 0x80, 0x3e, ' ')
+	rtgAsmJzLabel(a, skipCharLabel)
+	rtgAsmEmit3(a, 0x80, 0x3e, 9)
+	rtgAsmJnzLabel(a, startLabel)
+	rtgAsmMarkLabel(a, skipCharLabel)
+	rtgAsmEmit24(a, 0xc6ff48)
+	rtgAsmJmpLabel(a, skipLabel)
+
+	rtgAsmMarkLabel(a, startLabel)
+	rtgAsmEmit24(a, 0x128949)
+	rtgAsmEmit16(a, 0xc931)
+	rtgAsmEmit24(a, 0xc03145)
+	rtgAsmMarkLabel(a, copyLabel)
+	rtgAsmEmit16(a, 0x068a)
+	rtgAsmEmit2(a, 0x3c, 0)
+	rtgAsmJzLabel(a, argDoneLabel)
+	rtgAsmEmit2(a, 0x3c, '"')
+	rtgAsmJnzLabel(a, notQuoteLabel)
+	rtgAsmEmit4(a, 0x41, 0x83, 0xf0, 1)
+	rtgAsmEmit24(a, 0xc6ff48)
+	rtgAsmJmpLabel(a, copyLabel)
+	rtgAsmMarkLabel(a, notQuoteLabel)
+	rtgAsmEmit4(a, 0x41, 0x83, 0xf8, 0)
+	rtgAsmJnzLabel(a, copyCharLabel)
+	rtgAsmEmit2(a, 0x3c, ' ')
+	rtgAsmJzLabel(a, argDoneLabel)
+	rtgAsmEmit2(a, 0x3c, 9)
+	rtgAsmJzLabel(a, argDoneLabel)
+	rtgAsmMarkLabel(a, copyCharLabel)
+	rtgAsmEmit16(a, 0x0288)
+	rtgAsmEmit24(a, 0xc6ff48)
+	rtgAsmEmit24(a, 0xc2ff48)
+	rtgAsmEmit24(a, 0xc1ff48)
+	rtgAsmJmpLabel(a, copyLabel)
+
+	rtgAsmMarkLabel(a, argDoneLabel)
+	rtgAsmEmit3(a, 0xc6, 0x02, 0)
+	rtgAsmEmit24(a, 0xc2ff48)
+	rtgAsmEmit32(a, 0x084a8949)
 	rtgAsmEmit32(a, 0x10c28349)
 	rtgAsmEmit24(a, 0xc3ff49)
-	rtgAsmJmpLabel(a, loopLabel)
-	rtgAsmMarkLabel(a, doneLabel)
+	rtgAsmEmit2(a, 0x3c, 0)
+	rtgAsmJzLabel(a, finishLabel)
+	rtgAsmEmit24(a, 0xc6ff48)
+	rtgAsmJmpLabel(a, skipLabel)
 
-	rtgWinAmd64LoadImportPtrRax(a, rtgWinImportEnviron)
-	rtgAsmEmit24(a, 0x008b48)
-	rtgAsmMovR9Rax(a)
+	rtgAsmMarkLabel(a, finishLabel)
+	rtgAsmEmit24(a, 0xd8894c)
+	rtgAsmStoreRaxBss(a, argsLenOff)
+
 	rtgAsmMovR10BssAddr(a, envOff)
 	rtgAsmMovRaxDataAddr(a, pathNameOff)
 	rtgAsmEmit24(a, 0x028949)
 	rtgAsmMovRaxImm(a, 5)
 	rtgAsmEmit32(a, 0x08428949)
-	rtgAsmEmit32(a, 0x10c28349)
-	rtgAsmEmit24(a, 0xdb314d)
-	rtgAsmEmit24(a, 0xc3ff49)
-	rtgAsmMarkLabel(a, envLoopLabel)
-	rtgAsmEmit32(a, 0xd93c8b4b)
-	rtgAsmEmit4(a, 0x48, 0x83, 0xff, 0)
-	rtgAsmJzLabel(a, envDoneLabel)
-	rtgAsmEmit32(a, 0x483a8949)
-	rtgAsmEmit16(a, 0xc031)
-	rtgAsmMarkLabel(a, envStrlenLabel)
-	rtgAsmEmit32(a, 0x00073c80)
-	rtgAsmJzLabel(a, envAfterLenLabel)
-	rtgAsmEmit24(a, 0xc0ff48)
-	rtgAsmJmpLabel(a, envStrlenLabel)
-	rtgAsmMarkLabel(a, envAfterLenLabel)
-	rtgAsmEmit32(a, 0x08428949)
-	rtgAsmEmit32(a, 0x10c28349)
-	rtgAsmEmit24(a, 0xc3ff49)
-	rtgAsmJmpLabel(a, envLoopLabel)
-	rtgAsmMarkLabel(a, envDoneLabel)
-	rtgAsmEmit24(a, 0xd8894c)
+	rtgAsmMovRaxImm(a, 1)
 	rtgAsmStoreRaxBss(a, envLenOff)
 
 	rtgAsmMovRaxBssAddr(a, bssOff)
@@ -408,9 +406,9 @@ func rtgAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, memSize int
 	out = rtgAppend16(out, 2)
 	out = rtgAppend16(out, 0x3e)
 	out = rtgAppend32(out, 1)
-	out = rtgAppend64(out, base+entryOff)
-	out = rtgAppend64(out, 64)
-	out = rtgAppend64(out, shoff)
+	out = rtgAppend64U32(out, base+entryOff)
+	out = rtgAppend64U32(out, 64)
+	out = rtgAppend64U32(out, shoff)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend16(out, 64)
 	out = rtgAppend16(out, 56)
@@ -421,12 +419,12 @@ func rtgAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, memSize int
 
 	out = rtgAppend32(out, 1)
 	out = rtgAppend32(out, 7)
-	out = rtgAppend64(out, 0)
-	out = rtgAppend64(out, base)
-	out = rtgAppend64(out, base)
-	out = rtgAppend64(out, fileSize)
-	out = rtgAppend64(out, memSize)
-	out = rtgAppend64(out, 0x1000)
+	out = rtgAppend64U32(out, 0)
+	out = rtgAppend64U32(out, base)
+	out = rtgAppend64U32(out, base)
+	out = rtgAppend64U32(out, fileSize)
+	out = rtgAppend64U32(out, memSize)
+	out = rtgAppend64U32(out, 0x1000)
 	return out
 }
 
@@ -434,22 +432,30 @@ func rtgAsmImageWindowsAmd64(a *rtgAsm) []byte {
 	for (a.codeOffset+len(a.code))%8 != 0 {
 		a.code = append(a.code, 0)
 	}
+	textVirtualSize := len(a.code)
+	textRawSize := rtgAlignValue(textVirtualSize, rtgWinFileAlign)
+	dataRVA := rtgAlignValue(a.codeOffset+textVirtualSize, rtgWinSectionAlign)
+	a.dataOffset = dataRVA
 	var imports rtgWinImportLayout
 	if rtgAsmHasWinImportRelocs(a) {
 		imports = rtgAppendWinImports(a, true)
 	}
 	rtgAsmPatchWindows(a, imports, rtgWinImageBase, true)
-	payloadSize := len(a.code) + len(a.data)
-	rawSize := rtgAlignValue(payloadSize, rtgWinFileAlign)
-	virtualSize := payloadSize + a.bssSize
+	dataRawSize := rtgAlignValue(len(a.data), rtgWinFileAlign)
+	dataVirtualSize := len(a.data) + a.bssSize
+	iatSize := 0
+	if imports.kernelIATRVA != 0 {
+		iatSize = (rtgWinImportCount() + 1) * imports.thunkSize
+	}
 	var out []byte
-	out = rtgAppendPEHeader64(out, a.codeOffset, rawSize, virtualSize, imports.importRVA, imports.importSize)
+	out = rtgAppendPEHeader64(out, a.codeOffset, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, imports.importRVA, imports.importSize, imports.kernelIATRVA, iatSize)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
 	}
+	out = rtgAppendUntil(out, rtgWinHeadersSize+textRawSize)
 	for i := 0; i < len(a.data); i++ {
 		out = append(out, a.data[i])
 	}
-	out = rtgAppendUntil(out, rtgWinHeadersSize+rawSize)
+	out = rtgAppendUntil(out, rtgWinHeadersSize+textRawSize+dataRawSize)
 	return out
 }
