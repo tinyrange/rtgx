@@ -43,6 +43,9 @@ func Build(units []unit.Unit) (Plan, error) {
 	if err := validateDeclSymbols(units); err != nil {
 		return Plan{}, err
 	}
+	if err := validateUniqueDeclSymbols(units); err != nil {
+		return Plan{}, err
+	}
 	exports := map[string]unit.Symbol{}
 	for _, u := range units {
 		for _, sym := range u.Exports {
@@ -208,6 +211,22 @@ func validateDeclSymbols(units []unit.Unit) error {
 			if decl.Kind == "type" && !strings.Contains(decl.Body, decl.UnitName) {
 				return fmt.Errorf("%s: declaration %s body does not define %s", u.ImportPath, decl.Name, decl.UnitName)
 			}
+		}
+	}
+	return nil
+}
+
+func validateUniqueDeclSymbols(units []unit.Unit) error {
+	owners := map[string]string{}
+	for _, u := range units {
+		for _, decl := range u.Decls {
+			if decl.UnitName == "" {
+				continue
+			}
+			if owner, ok := owners[decl.UnitName]; ok {
+				return fmt.Errorf("%s: duplicate declaration symbol %s already declared in %s", u.ImportPath, decl.UnitName, owner)
+			}
+			owners[decl.UnitName] = u.ImportPath
 		}
 	}
 	return nil

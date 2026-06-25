@@ -308,6 +308,63 @@ func TestBuildRejectsEmptySymbolDeclarationBody(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsDuplicateDeclarationSymbols(t *testing.T) {
+	mainUnit := unit.Unit{
+		ImportPath: "example.com/app/main",
+		Package:    "main",
+		Decls: []unit.Decl{
+			{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_main_appMain", Body: "func rtg_example_com_app_main_appMain() int { return 0 }\n"},
+		},
+	}
+	tests := []struct {
+		name  string
+		units []unit.Unit
+		want  string
+	}{
+		{
+			name: "same unit",
+			units: []unit.Unit{mainUnit, {
+				ImportPath: "example.com/app/dep",
+				Package:    "dep",
+				Decls: []unit.Decl{
+					{Kind: "func", Name: "Value", UnitName: "rtg_example_com_app_dep_Value", Body: "func rtg_example_com_app_dep_Value() int { return 1 }\n"},
+					{Kind: "func", Name: "Other", UnitName: "rtg_example_com_app_dep_Value", Body: "func rtg_example_com_app_dep_Value() int { return 2 }\n"},
+				},
+			}},
+			want: "example.com/app/dep: duplicate declaration symbol rtg_example_com_app_dep_Value already declared in example.com/app/dep",
+		},
+		{
+			name: "different units",
+			units: []unit.Unit{mainUnit, {
+				ImportPath: "example.com/app/dep",
+				Package:    "dep",
+				Decls: []unit.Decl{
+					{Kind: "func", Name: "Value", UnitName: "rtg_example_com_app_dep_Value", Body: "func rtg_example_com_app_dep_Value() int { return 1 }\n"},
+				},
+			}, {
+				ImportPath: "example.com/app/other",
+				Package:    "other",
+				Decls: []unit.Decl{
+					{Kind: "func", Name: "Value", UnitName: "rtg_example_com_app_dep_Value", Body: "func rtg_example_com_app_dep_Value() int { return 2 }\n"},
+				},
+			}},
+			want: "example.com/app/other: duplicate declaration symbol rtg_example_com_app_dep_Value already declared in example.com/app/dep",
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Build(tt.units)
+			if err == nil {
+				t.Fatalf("Build succeeded with duplicate declaration symbol")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildRejectsMissingEntrypoint(t *testing.T) {
 	_, err := Build([]unit.Unit{{
 		ImportPath: "example.com/app/main",
