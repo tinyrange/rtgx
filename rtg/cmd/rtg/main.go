@@ -121,7 +121,7 @@ func runLink(cfg config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(cfg.output, link.Source(plan), 0644)
+	return rtgx.CompileSource(link.Source(plan), rtgx.Options{Target: cfg.target, Output: cfg.output})
 }
 
 func readUnitInputs(inputs []string) ([]unit.Unit, error) {
@@ -221,5 +221,5 @@ func parseArgs(args []string) (config, error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: rtg [-t target] [-check] [-emit-unit -o output.rtg.go] [-link -o output.rtg.go] [package-or-files...]")
+	fmt.Fprintln(os.Stderr, "usage: rtg [-t target] [-check] [-emit-unit -o output.rtg.go] [-link -o output] [package-or-files...]")
 }
