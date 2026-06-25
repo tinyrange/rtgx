@@ -786,7 +786,33 @@ func appMain() int { return 0 }
 	if err == nil {
 		t.Fatalf("ParseSourceInfo accepted malformed import block entry")
 	}
-	if !strings.Contains(err.Error(), "input.go: malformed import declaration") {
+	if !strings.Contains(err.Error(), "input.go:4:2: malformed import declaration") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestParseSourceInfoRejectsUnterminatedImportBlock(t *testing.T) {
+	src := []byte(`package main
+
+import (
+	"fmt"
+`)
+	_, err := ParseSourceInfo("input.go", src)
+	if err == nil {
+		t.Fatalf("ParseSourceInfo accepted unterminated import block")
+	}
+	if !strings.Contains(err.Error(), "input.go:5:1: unterminated import block") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestParseSourceInfoReportsScannerPosition(t *testing.T) {
+	src := []byte("package main\n\nimport \"unterminated\n")
+	_, err := ParseSourceInfo("input.go", src)
+	if err == nil {
+		t.Fatalf("ParseSourceInfo accepted scanner error")
+	}
+	if !strings.Contains(err.Error(), "input.go:3:8: unterminated literal") {
 		t.Fatalf("error = %q", err)
 	}
 }
