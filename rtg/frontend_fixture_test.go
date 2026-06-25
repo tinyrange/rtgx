@@ -243,6 +243,26 @@ func Count() int { return count }
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
+func TestSliceBoundCallArgumentFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/slicebounds\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "example.com/slicebounds/pkg/dep"
+
+func main() {
+	text := "xPASS\nx"
+	print(text[dep.Start():dep.End()])
+}
+`)
+	writeFixtureFile(t, fixture, "pkg/dep/dep.go", `package dep
+
+func Start() int { return 1 }
+func End() int { return 6 }
+`)
+	runFrontendFixtureOutput(t, fixture, []byte("PASS\n"))
+}
+
 func TestIfShortConditionNestedCallArgumentFrontendMatchesHostGo(t *testing.T) {
 	fixture := t.TempDir()
 	writeFixtureFile(t, fixture, "go.mod", "module example.com/ifshortcond\n")

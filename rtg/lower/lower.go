@@ -320,8 +320,8 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 	for i := 0; i < len(toks); i++ {
 		short, ok := normalizationConditionalShortStatement(toks, i)
 		if ok {
-			initTemps, initReplacements := normalizeCallArgumentExpressions(body, toks, short.initStart, short.semi, unitName, &tempIndex)
-			condTemps, condReplacements := normalizeCallArgumentExpressions(body, toks, short.condStart, short.condEnd, unitName, &tempIndex)
+			initTemps, initReplacements := normalizeExpression(body, toks, short.initStart, short.semi, unitName, &tempIndex)
+			condTemps, condReplacements := normalizeExpression(body, toks, short.condStart, short.condEnd, unitName, &tempIndex)
 			insertStart := statementInsertStart(body, toks[short.token].Start)
 			out = append(out, body[cursor:insertStart]...)
 			indent := statementIndent(body, toks[short.token].Start)
@@ -363,9 +363,9 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 		post, ok := normalizationClassicForPostStatement(toks, i)
 		if ok {
 			if expressionContainsCall(toks, post.postStart, post.postEnd) {
-				initTemps, initReplacements := normalizeCallArgumentExpressions(body, toks, post.initStart, post.initEnd, unitName, &tempIndex)
-				condTemps, condReplacements := normalizeCallArgumentExpressions(body, toks, post.condStart, post.condEnd, unitName, &tempIndex)
-				postTemps, postReplacements := normalizeCallArgumentExpressions(body, toks, post.postStart, post.postEnd, unitName, &tempIndex)
+				initTemps, initReplacements := normalizeExpression(body, toks, post.initStart, post.initEnd, unitName, &tempIndex)
+				condTemps, condReplacements := normalizeExpression(body, toks, post.condStart, post.condEnd, unitName, &tempIndex)
+				postTemps, postReplacements := normalizeExpression(body, toks, post.postStart, post.postEnd, unitName, &tempIndex)
 				insertStart := statementInsertStart(body, toks[post.token].Start)
 				out = append(out, body[cursor:insertStart]...)
 				indent := statementIndent(body, toks[post.token].Start)
@@ -432,7 +432,7 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 		}
 		classic, ok := normalizationClassicForConditionStatement(toks, i)
 		if ok {
-			temps, replacements := normalizeCallArgumentExpressions(body, toks, classic.condStart, classic.condEnd, unitName, &tempIndex)
+			temps, replacements := normalizeExpression(body, toks, classic.condStart, classic.condEnd, unitName, &tempIndex)
 			if len(temps) > 0 {
 				condition := applyExpressionReplacements(body, toks[classic.condStart].Start, toks[classic.condEnd-1].End, replacements)
 				out = append(out, body[cursor:toks[classic.condStart].Start]...)
@@ -464,7 +464,7 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 		if !ok {
 			continue
 		}
-		temps, replacements := normalizeCallArgumentExpressions(body, toks, stmt.exprStart, stmt.exprEnd, unitName, &tempIndex)
+		temps, replacements := normalizeExpression(body, toks, stmt.exprStart, stmt.exprEnd, unitName, &tempIndex)
 		if len(temps) == 0 {
 			continue
 		}
@@ -859,7 +859,7 @@ func startsCallStatement(toks []scan.Token, pos int) bool {
 	return statementStartToken(toks, pos) == pos
 }
 
-func normalizeCallArgumentExpressions(body string, toks []scan.Token, start int, end int, unitName string, tempIndex *int) ([]expressionTemp, []expressionReplacement) {
+func normalizeExpression(body string, toks []scan.Token, start int, end int, unitName string, tempIndex *int) ([]expressionTemp, []expressionReplacement) {
 	var temps []expressionTemp
 	var replacements []expressionReplacement
 	paren := 0
@@ -877,9 +877,63 @@ func normalizeCallArgumentExpressions(body string, toks []scan.Token, start int,
 				continue
 			}
 		}
+		if paren == 0 && brack == 0 && brace == 0 && tok.Text == "[" {
+			close := findClose(toks, i, "[", "]")
+			if close > i && close < end {
+				indexTemps, indexReplacements := normalizeIndexBounds(body, toks, i+1, close, unitName, tempIndex)
+				temps = append(temps, indexTemps...)
+				replacements = append(replacements, indexReplacements...)
+				i = close
+				continue
+			}
+		}
 		updateExpressionDepth(tok.Text, &paren, &brack, &brace)
 	}
 	return temps, replacements
+}
+
+func normalizeIndexBounds(body string, toks []scan.Token, start int, end int, unitName string, tempIndex *int) ([]expressionTemp, []expressionReplacement) {
+	var temps []expressionTemp
+	var replacements []expressionReplacement
+	bounds := indexBoundRanges(toks, start, end)
+	for _, bound := range bounds {
+		if bound.start >= bound.end || !expressionContainsCall(toks, bound.start, bound.end) {
+			continue
+		}
+		name := nextExpressionTempName(body, unitName, tempIndex)
+		(*tempIndex)++
+		exprStart := toks[bound.start].Start
+		exprEnd := toks[bound.end-1].End
+		temps = append(temps, expressionTemp{name: name, expr: body[exprStart:exprEnd]})
+		replacements = append(replacements, expressionReplacement{start: exprStart, end: exprEnd, text: name})
+	}
+	return temps, replacements
+}
+
+type expressionRange struct {
+	start int
+	end   int
+}
+
+func indexBoundRanges(toks []scan.Token, start int, end int) []expressionRange {
+	if start >= end {
+		return nil
+	}
+	var out []expressionRange
+	boundStart := start
+	paren := 0
+	brack := 0
+	brace := 0
+	for i := start; i < end; i++ {
+		if paren == 0 && brack == 0 && brace == 0 && toks[i].Text == ":" {
+			out = append(out, expressionRange{start: boundStart, end: i})
+			boundStart = i + 1
+			continue
+		}
+		updateExpressionDepth(toks[i].Text, &paren, &brack, &brace)
+	}
+	out = append(out, expressionRange{start: boundStart, end: end})
+	return out
 }
 
 func normalizeOneCallArguments(body string, toks []scan.Token, start int, end int, unitName string, tempIndex *int) ([]expressionTemp, []expressionReplacement) {

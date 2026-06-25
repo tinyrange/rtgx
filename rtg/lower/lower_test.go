@@ -669,6 +669,72 @@ func appMain() int {
 	}
 }
 
+func TestPackageNormalizesIndexBoundCallArguments(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func index() int { return 1 }
+func appMain() int {
+	values := []int{10, 20}
+	return values[index()]
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[1].Body
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_index()") {
+		t.Fatalf("index bound call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "return values[rtg_example_com_app_appMain_tmp_0]") {
+		t.Fatalf("index expression did not use lifted temp: %q", body)
+	}
+}
+
+func TestPackageNormalizesSliceBoundCallArguments(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func start() int { return 1 }
+func end() int { return 5 }
+func appMain() string {
+	text := "xPASSx"
+	return text[start():end()]
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[2].Body
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_start()") {
+		t.Fatalf("slice start call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_end()") {
+		t.Fatalf("slice end call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "return text[rtg_example_com_app_appMain_tmp_0:rtg_example_com_app_appMain_tmp_1]") {
+		t.Fatalf("slice expression did not use lifted temps: %q", body)
+	}
+}
+
 func TestPackageNormalizesNestedIfConditionCallArguments(t *testing.T) {
 	pkg := load.Package{
 		ImportPath: "example.com/app",
