@@ -197,6 +197,8 @@ func File(file parse.File) Diagnostics {
 			diags = append(diags, diag(file, tok, "octal literals are not supported"))
 		}
 		switch tok.Text {
+		case "...":
+			diags = append(diags, diag(file, tok, "variadic syntax is not supported"))
 		case "go":
 			diags = append(diags, diag(file, tok, "goroutines are not supported"))
 		case "chan", "<-":

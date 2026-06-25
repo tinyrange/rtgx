@@ -346,6 +346,34 @@ func appMain() int {
 	}
 }
 
+func TestFileRejectsVariadicSyntax(t *testing.T) {
+	file, err := parse.FileSource("variadic.go", []byte(`package main
+
+func sum(values ...int) int { return 0 }
+
+func appMain() int {
+	values := []int{1, 2}
+	return sum(values...)
+}
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted variadic syntax")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"variadic.go:3:17: variadic syntax is not supported",
+		"variadic.go:7:19: variadic syntax is not supported",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing diagnostic %q in:\n%s", want, msg)
+		}
+	}
+}
+
 func TestFileRejectsMethods(t *testing.T) {
 	file, err := parse.FileSource("method.go", []byte(`package main
 
