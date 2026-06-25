@@ -160,6 +160,62 @@ func hidden() int { return 9 }
 	}
 }
 
+func TestPackageWithGraphPreservesLocalImportNameShadow(t *testing.T) {
+	mainPkg := load.Package{
+		ImportPath:  "example.com/app/cmd/app",
+		Name:        "main",
+		Imports:     []string{"example.com/app/pkg/answer"},
+		ImportNames: map[string]string{"example.com/app/pkg/answer": "answer"},
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+import "example.com/app/pkg/answer"
+
+type localAnswer struct { Value int }
+
+func appMain() int {
+	answer := localAnswer{Value: 3}
+	return answer.Value
+}
+`),
+			},
+		},
+	}
+	depPkg := load.Package{
+		ImportPath: "example.com/app/pkg/answer",
+		Name:       "answer",
+		Files: []load.File{
+			{
+				Path: "answer.go",
+				Source: []byte(`package answer
+
+func Value() int { return 7 }
+`),
+			},
+		},
+	}
+	graph := &load.Graph{Packages: []load.Package{mainPkg, depPkg}}
+	u, err := PackageWithGraph(mainPkg, graph)
+	if err != nil {
+		t.Fatalf("PackageWithGraph failed: %v", err)
+	}
+	if len(u.References) != 0 {
+		t.Fatalf("references = %#v, want none for local shadow", u.References)
+	}
+	body := u.Decls[1].Body
+	if !strings.Contains(body, "answer := rtg_example_com_app_cmd_app_localAnswer{Value: 3}") {
+		t.Fatalf("local shadow declaration was not preserved: %q", body)
+	}
+	if !strings.Contains(body, "return answer.Value") {
+		t.Fatalf("local selector was rewritten as import reference: %q", body)
+	}
+	if strings.Contains(body, "rtg_example_com_app_pkg_answer_Value") {
+		t.Fatalf("local selector contains imported symbol: %q", body)
+	}
+}
+
 func TestPackagePreservesLocalShadowNames(t *testing.T) {
 	pkg := load.Package{
 		ImportPath: "example.com/app",

@@ -186,7 +186,7 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, i
 		end--
 	}
 	var out []byte
-	localNames := localNamesForDecl(file, decl, topNames)
+	localNames := localNamesForDecl(file, decl, localRewriteNames(topNames, importRefs))
 	cursor := start
 	prevText := ""
 	for i := 0; i < len(file.Tokens); i++ {
@@ -203,7 +203,7 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, i
 		}
 		replacement := ""
 		if tok.Kind == scan.Ident && i+2 < len(file.Tokens) && file.Tokens[i+1].Text == "." && file.Tokens[i+2].Kind == scan.Ident {
-			if symbols, ok := importRefs[tok.Text]; ok {
+			if symbols, ok := importRefs[tok.Text]; ok && !isLocalNameAt(localNames, tok.Text, tok.Start) {
 				member := file.Tokens[i+2]
 				if sym, ok := symbols[member.Text]; ok {
 					replacement = sym.UnitName
@@ -233,7 +233,18 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, i
 	return string(out)
 }
 
-func localNamesForDecl(file parse.File, decl parse.Decl, topNames map[string]string) map[string][]localRange {
+func localRewriteNames(topNames map[string]string, importRefs map[string]map[string]unit.Symbol) map[string]string {
+	names := map[string]string{}
+	for name, unitName := range topNames {
+		names[name] = unitName
+	}
+	for name := range importRefs {
+		names[name] = name
+	}
+	return names
+}
+
+func localNamesForDecl(file parse.File, decl parse.Decl, namesOfInterest map[string]string) map[string][]localRange {
 	names := map[string][]localRange{}
 	if decl.Kind != "func" {
 		return names
@@ -247,14 +258,14 @@ func localNamesForDecl(file parse.File, decl parse.Decl, topNames map[string]str
 	if body < 0 {
 		return names
 	}
-	collectFuncSignatureLocals(toks, start, body, topNames, names)
+	collectFuncSignatureLocals(toks, start, body, namesOfInterest, names)
 	for i := body + 1; i < len(toks) && toks[i].Start < decl.End; i++ {
 		if toks[i].Text == ":=" {
-			collectShortDeclLocals(toks, body, i, decl.End, topNames, names)
+			collectShortDeclLocals(toks, body, i, decl.End, namesOfInterest, names)
 			continue
 		}
 		if toks[i].Text == "var" {
-			collectVarLocals(toks, body, i, decl.End, topNames, names)
+			collectVarLocals(toks, body, i, decl.End, namesOfInterest, names)
 		}
 	}
 	return names

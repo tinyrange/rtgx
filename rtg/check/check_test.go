@@ -245,6 +245,30 @@ func appMain() int { return 0 }
 	}
 }
 
+func TestFileDoesNotCountLocalShadowSelectorAsImportUse(t *testing.T) {
+	file, err := parse.FileSource("imports.go", []byte(`package main
+
+import "example.com/dep"
+
+type localDep struct { Value int }
+
+func appMain() int {
+	dep := localDep{Value: 1}
+	return dep.Value
+}
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted unused import shadowed by local selector")
+	}
+	if !strings.Contains(err.Error(), "imports.go:3:8: unused import: dep") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestFileRejectsUnsupportedBuiltins(t *testing.T) {
 	file, err := parse.FileSource("builtins.go", []byte(`package main
 
@@ -438,6 +462,55 @@ func hidden() int { return 2 }
 		if !strings.Contains(msg, want) {
 			t.Fatalf("missing diagnostic %q in:\n%s", want, msg)
 		}
+	}
+}
+
+func TestGraphIgnoresLocalShadowedImportSelector(t *testing.T) {
+	graph := &load.Graph{
+		Packages: []load.Package{
+			{
+				ImportPath:  "example.com/app",
+				Name:        "main",
+				Imports:     []string{"example.com/app/dep"},
+				ImportNames: map[string]string{"example.com/app/dep": "dep"},
+				Files: []load.File{
+					{
+						Path: "main.go",
+						Source: []byte(`package main
+
+import "example.com/app/dep"
+
+type localDep struct { hidden int }
+
+func useImport() int {
+	return dep.Value()
+}
+
+func appMain() int {
+	dep := localDep{hidden: 1}
+	return dep.hidden + useImport()
+}
+`),
+					},
+				},
+			},
+			{
+				ImportPath: "example.com/app/dep",
+				Name:       "dep",
+				Files: []load.File{
+					{
+						Path: "dep.go",
+						Source: []byte(`package dep
+
+func Value() int { return 1 }
+`),
+					},
+				},
+			},
+		},
+	}
+	if err := Graph(graph); err != nil {
+		t.Fatalf("Graph rejected local shadowed import selector: %v", err)
 	}
 }
 

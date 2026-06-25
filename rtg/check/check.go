@@ -22,6 +22,11 @@ func (d Diagnostic) Error() string {
 
 type Diagnostics []Diagnostic
 
+type sourceRange struct {
+	start int
+	end   int
+}
+
 func (d Diagnostics) Error() string {
 	if len(d) == 0 {
 		return ""
@@ -119,14 +124,17 @@ func declNames(decl parse.Decl) []string {
 
 func importedSelectorDiagnostics(pkg load.Package, file parse.File, exported map[string]map[string]bool) Diagnostics {
 	localImports := map[string]string{}
+	importNames := map[string]bool{}
 	for importPath, localName := range pkg.ImportNames {
 		if localName != "" {
 			localImports[localName] = importPath
+			importNames[localName] = true
 		}
 	}
 	if len(localImports) == 0 {
 		return nil
 	}
+	shadows := localImportShadows(file, importNames)
 	var diags Diagnostics
 	for i := 0; i+2 < len(file.Tokens); i++ {
 		local := file.Tokens[i]
@@ -137,6 +145,9 @@ func importedSelectorDiagnostics(pkg load.Package, file parse.File, exported map
 		}
 		importPath, ok := localImports[local.Text]
 		if !ok {
+			continue
+		}
+		if isLocalShadowAt(shadows, local.Text, local.Start) {
 			continue
 		}
 		if exported[importPath][member.Text] {
@@ -195,7 +206,14 @@ func File(file parse.File) Diagnostics {
 func importDiagnostics(file parse.File) Diagnostics {
 	var diags Diagnostics
 	names := map[string]scan.Token{}
-	used := usedImportNames(file)
+	importNames := map[string]bool{}
+	for _, imp := range file.Imports {
+		localName := importLocalName(imp)
+		if localName != "" && localName != "." && localName != "_" {
+			importNames[localName] = true
+		}
+	}
+	used := usedImportNames(file, importNames)
 	for _, imp := range file.Imports {
 		if imp.Alias == "." {
 			diags = append(diags, diag(file, imp.Tok, "dot imports are not supported"))
@@ -219,10 +237,14 @@ func importDiagnostics(file parse.File) Diagnostics {
 	return diags
 }
 
-func usedImportNames(file parse.File) map[string]bool {
+func usedImportNames(file parse.File, importNames map[string]bool) map[string]bool {
 	used := map[string]bool{}
+	shadows := localImportShadows(file, importNames)
 	for i := 0; i+1 < len(file.Tokens); i++ {
 		if file.Tokens[i].Kind == scan.Ident && file.Tokens[i+1].Text == "." {
+			if isLocalShadowAt(shadows, file.Tokens[i].Text, file.Tokens[i].Start) {
+				continue
+			}
 			used[file.Tokens[i].Text] = true
 		}
 	}
@@ -313,6 +335,165 @@ func findClose(toks []scan.Token, pos int, open string, close string) int {
 		pos++
 	}
 	return -1
+}
+
+func localImportShadows(file parse.File, importNames map[string]bool) map[string][]sourceRange {
+	shadows := map[string][]sourceRange{}
+	if len(importNames) == 0 {
+		return shadows
+	}
+	for _, decl := range file.Decls {
+		if decl.Kind != "func" {
+			continue
+		}
+		start := tokenIndexAt(file.Tokens, decl.Start)
+		if start < 0 {
+			continue
+		}
+		body := findTokenText(file.Tokens, start, decl.End, "{")
+		if body < 0 {
+			continue
+		}
+		collectFuncSignatureImportShadows(file.Tokens, start, body, importNames, shadows)
+		for i := body + 1; i < len(file.Tokens) && file.Tokens[i].Start < decl.End; i++ {
+			if file.Tokens[i].Text == ":=" {
+				collectShortDeclImportShadows(file.Tokens, body, i, decl.End, importNames, shadows)
+			}
+			if file.Tokens[i].Text == "var" {
+				collectVarImportShadows(file.Tokens, body, i, decl.End, importNames, shadows)
+			}
+		}
+	}
+	return shadows
+}
+
+func collectFuncSignatureImportShadows(toks []scan.Token, start int, end int, names map[string]bool, shadows map[string][]sourceRange) {
+	for i := start; i < end; i++ {
+		if toks[i].Text != "(" {
+			continue
+		}
+		close := findClose(toks, i, "(", ")")
+		if close < 0 || close > end {
+			continue
+		}
+		collectParameterImportShadows(toks, i+1, close, names, shadows)
+		i = close
+	}
+}
+
+func collectParameterImportShadows(toks []scan.Token, start int, end int, names map[string]bool, shadows map[string][]sourceRange) {
+	for i := start; i < end; i++ {
+		if toks[i].Kind != scan.Ident || !names[toks[i].Text] {
+			continue
+		}
+		if i+1 < end && isTypeStart(toks[i+1]) {
+			addLocalShadow(shadows, toks[i].Text, 0, maxSourcePosition())
+			continue
+		}
+		if i+2 < end && toks[i+1].Text == "," && toks[i+2].Kind == scan.Ident && isTypeStartAfterName(toks, i+2, end) {
+			addLocalShadow(shadows, toks[i].Text, 0, maxSourcePosition())
+		}
+	}
+}
+
+func collectShortDeclImportShadows(toks []scan.Token, body int, assign int, declEnd int, names map[string]bool, shadows map[string][]sourceRange) {
+	line := toks[assign].Line
+	scopeEnd := localScopeEnd(toks, body, assign, declEnd)
+	for i := assign - 1; i >= 0; i-- {
+		if toks[i].Line != line || isStatementBoundary(toks[i].Text) {
+			return
+		}
+		if toks[i].Kind == scan.Ident && names[toks[i].Text] && (i == 0 || toks[i-1].Text != ".") {
+			addLocalShadow(shadows, toks[i].Text, toks[i].Start, scopeEnd)
+		}
+	}
+}
+
+func collectVarImportShadows(toks []scan.Token, body int, pos int, end int, names map[string]bool, shadows map[string][]sourceRange) {
+	scopeEnd := localScopeEnd(toks, body, pos, end)
+	if pos+1 < len(toks) && toks[pos+1].Text == "(" {
+		for i := pos + 2; i < len(toks) && toks[i].Start < end; i++ {
+			if toks[i].Text == ")" || toks[i].Text == "}" {
+				return
+			}
+			if toks[i].Kind == scan.Ident && names[toks[i].Text] && (toks[i-1].Text == "(" || toks[i-1].Text == "," || toks[i-1].Line != toks[i].Line) {
+				addLocalShadow(shadows, toks[i].Text, toks[i].Start, scopeEnd)
+			}
+		}
+		return
+	}
+	line := toks[pos].Line
+	for i := pos + 1; i < len(toks) && toks[i].Start < end && toks[i].Line == line; i++ {
+		if toks[i].Text == ")" || toks[i].Text == "}" || toks[i].Text == ":=" || toks[i].Text == "=" {
+			return
+		}
+		if toks[i].Kind == scan.Ident && names[toks[i].Text] && (i == pos+1 || toks[i-1].Text == ",") {
+			addLocalShadow(shadows, toks[i].Text, toks[i].Start, scopeEnd)
+		}
+	}
+}
+
+func localScopeEnd(toks []scan.Token, body int, pos int, fallback int) int {
+	var opens []int
+	for i := body; i <= pos && i < len(toks); i++ {
+		if toks[i].Text == "{" {
+			opens = append(opens, i)
+		} else if toks[i].Text == "}" && len(opens) > 0 {
+			opens = opens[:len(opens)-1]
+		}
+	}
+	if len(opens) == 0 {
+		return fallback
+	}
+	close := findClose(toks, opens[len(opens)-1], "{", "}")
+	if close < 0 {
+		return fallback
+	}
+	return toks[close].Start
+}
+
+func addLocalShadow(shadows map[string][]sourceRange, name string, start int, end int) {
+	shadows[name] = append(shadows[name], sourceRange{start: start, end: end})
+}
+
+func isLocalShadowAt(shadows map[string][]sourceRange, name string, pos int) bool {
+	for _, r := range shadows[name] {
+		if pos >= r.start && pos < r.end {
+			return true
+		}
+	}
+	return false
+}
+
+func findTokenText(toks []scan.Token, start int, end int, text string) int {
+	for i := start; i < len(toks) && toks[i].Start < end; i++ {
+		if toks[i].Text == text {
+			return i
+		}
+	}
+	return -1
+}
+
+func isTypeStart(tok scan.Token) bool {
+	return tok.Kind == scan.Ident || tok.Text == "*" || tok.Text == "[" || tok.Text == "..."
+}
+
+func isTypeStartAfterName(toks []scan.Token, pos int, end int) bool {
+	if pos+1 >= end {
+		return false
+	}
+	if toks[pos+1].Text == "," {
+		return isTypeStartAfterName(toks, pos+2, end)
+	}
+	return isTypeStart(toks[pos+1])
+}
+
+func isStatementBoundary(text string) bool {
+	return text == "{" || text == "}" || text == ";" || text == "if" || text == "for" || text == "switch"
+}
+
+func maxSourcePosition() int {
+	return int(^uint(0) >> 1)
 }
 
 func hasOrdinaryMainSignature(file parse.File, decl parse.Decl) bool {
