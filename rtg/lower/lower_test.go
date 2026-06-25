@@ -705,6 +705,40 @@ func appMain() int {
 	}
 }
 
+func TestPackageDoesNotNormalizeForPostClauseCallArguments(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func first() int { return 1 }
+func next(v int) int { return v + 1 }
+func appMain() int {
+	for i := 0; i < 3; i = next(first()) {
+		_ = i
+	}
+	return 0
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[2].Body
+	if strings.Contains(body, "_tmp_") {
+		t.Fatalf("for post clause was normalized unsafely: %q", body)
+	}
+	if !strings.Contains(body, "i = rtg_example_com_app_next(rtg_example_com_app_first())") {
+		t.Fatalf("for post clause shape changed unexpectedly: %q", body)
+	}
+}
+
 func TestPackageNormalizesWithNonCollidingTempNames(t *testing.T) {
 	pkg := load.Package{
 		ImportPath: "example.com/app",
