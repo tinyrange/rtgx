@@ -306,10 +306,167 @@ func goFiles(dir string, target string) ([]string, error) {
 		if !fileNameMatchesTarget(name, targetOS, targetArch) {
 			continue
 		}
-		files = append(files, filepath.Join(dir, name))
+		path := filepath.Join(dir, name)
+		ok, err := fileBuildTagsMatchTarget(path, targetOS, targetArch)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		files = append(files, path)
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+func fileBuildTagsMatchTarget(path string, targetOS string, targetArch string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	expr, ok := leadingGoBuildExpr(string(data))
+	if !ok {
+		return true, nil
+	}
+	return evalGoBuildExpr(expr, targetOS, targetArch), nil
+}
+
+func leadingGoBuildExpr(src string) (string, bool) {
+	for len(src) > 0 {
+		line := src
+		next := strings.IndexByte(src, '\n')
+		if next >= 0 {
+			line = src[:next]
+			src = src[next+1:]
+		} else {
+			src = ""
+		}
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if strings.HasPrefix(line, "//go:build ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "//go:build ")), true
+		}
+		if line == "" || strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") {
+			continue
+		}
+		return "", false
+	}
+	return "", false
+}
+
+func evalGoBuildExpr(expr string, targetOS string, targetArch string) bool {
+	toks := goBuildExprTokens(expr)
+	pos := 0
+	value, ok := parseGoBuildOr(toks, &pos, targetOS, targetArch)
+	if !ok || pos != len(toks) {
+		return false
+	}
+	return value
+}
+
+func goBuildExprTokens(expr string) []string {
+	var toks []string
+	for i := 0; i < len(expr); {
+		c := expr[i]
+		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
+			i++
+			continue
+		}
+		if c == '(' || c == ')' || c == '!' {
+			toks = append(toks, string(c))
+			i++
+			continue
+		}
+		if i+1 < len(expr) && ((expr[i] == '&' && expr[i+1] == '&') || (expr[i] == '|' && expr[i+1] == '|')) {
+			toks = append(toks, expr[i:i+2])
+			i += 2
+			continue
+		}
+		start := i
+		for i < len(expr) && isGoBuildTagChar(expr[i]) {
+			i++
+		}
+		if start == i {
+			return nil
+		}
+		toks = append(toks, expr[start:i])
+	}
+	return toks
+}
+
+func isGoBuildTagChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.'
+}
+
+func parseGoBuildOr(toks []string, pos *int, targetOS string, targetArch string) (bool, bool) {
+	left, ok := parseGoBuildAnd(toks, pos, targetOS, targetArch)
+	if !ok {
+		return false, false
+	}
+	for *pos < len(toks) && toks[*pos] == "||" {
+		*pos = *pos + 1
+		right, ok := parseGoBuildAnd(toks, pos, targetOS, targetArch)
+		if !ok {
+			return false, false
+		}
+		left = left || right
+	}
+	return left, true
+}
+
+func parseGoBuildAnd(toks []string, pos *int, targetOS string, targetArch string) (bool, bool) {
+	left, ok := parseGoBuildUnary(toks, pos, targetOS, targetArch)
+	if !ok {
+		return false, false
+	}
+	for *pos < len(toks) && toks[*pos] == "&&" {
+		*pos = *pos + 1
+		right, ok := parseGoBuildUnary(toks, pos, targetOS, targetArch)
+		if !ok {
+			return false, false
+		}
+		left = left && right
+	}
+	return left, true
+}
+
+func parseGoBuildUnary(toks []string, pos *int, targetOS string, targetArch string) (bool, bool) {
+	if *pos >= len(toks) {
+		return false, false
+	}
+	tok := toks[*pos]
+	if tok == "!" {
+		*pos = *pos + 1
+		value, ok := parseGoBuildUnary(toks, pos, targetOS, targetArch)
+		return !value, ok
+	}
+	if tok == "(" {
+		*pos = *pos + 1
+		value, ok := parseGoBuildOr(toks, pos, targetOS, targetArch)
+		if !ok || *pos >= len(toks) || toks[*pos] != ")" {
+			return false, false
+		}
+		*pos = *pos + 1
+		return value, true
+	}
+	if tok == ")" || tok == "&&" || tok == "||" {
+		return false, false
+	}
+	*pos = *pos + 1
+	return goBuildTagMatches(tok, targetOS, targetArch), true
+}
+
+func goBuildTagMatches(tag string, targetOS string, targetArch string) bool {
+	if tag == targetOS || tag == targetArch {
+		return true
+	}
+	if targetArch == "arm64" && tag == "aarch64" {
+		return true
+	}
+	if targetArch == "wasm" && tag == "wasm32" {
+		return true
+	}
+	return false
 }
 
 func targetFileParts(target string) (string, string) {

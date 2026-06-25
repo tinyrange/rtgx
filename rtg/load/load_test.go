@@ -139,6 +139,80 @@ const Arch = 128
 	}
 }
 
+func TestLoadEntriesFiltersDirectoryFilesByGoBuildConstraint(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "pkg/common.go", `package pkg
+
+const Common = 1
+`)
+	writeFile(t, root, "pkg/linux.go", `//go:build linux && amd64
+
+package pkg
+
+const Value = Common + 1
+`)
+	writeFile(t, root, "pkg/windows.go", `//go:build windows
+
+package pkg
+
+const Value = Common + 2
+`)
+	writeFile(t, root, "pkg/notwin.go", `//go:build !windows
+
+package pkg
+
+const NotWindows = 1
+`)
+	writeFile(t, root, "pkg/ignored.go", `//go:build ignore
+
+package pkg
+
+const Ignored = 1
+`)
+
+	graph, err := LoadEntries([]string{filepath.Join(root, "pkg")}, Options{Target: "linux/amd64"})
+	if err != nil {
+		t.Fatalf("LoadEntries linux/amd64 failed: %v", err)
+	}
+	got := packageFileNames(graph.Packages[0])
+	want := []string{"common.go", "linux.go", "notwin.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("linux/amd64 files = %v, want %v", got, want)
+	}
+
+	graph, err = LoadEntries([]string{filepath.Join(root, "pkg")}, Options{Target: "windows/amd64"})
+	if err != nil {
+		t.Fatalf("LoadEntries windows/amd64 failed: %v", err)
+	}
+	got = packageFileNames(graph.Packages[0])
+	want = []string{"common.go", "windows.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("windows/amd64 files = %v, want %v", got, want)
+	}
+}
+
+func TestLoadEntriesExplicitFilesIgnoreGoBuildConstraint(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "pkg/explicit.go", `//go:build windows
+
+package pkg
+
+const Explicit = 1
+`)
+
+	graph, err := LoadEntries([]string{filepath.Join(root, "pkg", "explicit.go")}, Options{Target: "linux/amd64"})
+	if err != nil {
+		t.Fatalf("LoadEntries explicit file failed: %v", err)
+	}
+	got := packageFileNames(graph.Packages[0])
+	want := []string{"explicit.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("explicit files = %v, want %v", got, want)
+	}
+}
+
 func TestLoadEntriesDeduplicatesExplicitFiles(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n")
