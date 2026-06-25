@@ -246,6 +246,53 @@ const Ignored = Common + 4
 	}
 }
 
+func TestLoadEntriesSupportsUnixBuildTag(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "pkg/common.go", `package pkg
+
+const Common = 1
+`)
+	writeFile(t, root, "pkg/unix.go", `//go:build unix
+
+package pkg
+
+const Unix = Common + 1
+`)
+	writeFile(t, root, "pkg/legacy_unix.go", `// +build unix
+
+package pkg
+
+const LegacyUnix = Common + 2
+`)
+	writeFile(t, root, "pkg/nonunix.go", `//go:build !unix
+
+package pkg
+
+const NonUnix = Common + 3
+`)
+
+	graph, err := LoadEntries([]string{filepath.Join(root, "pkg")}, Options{Target: "linux/amd64"})
+	if err != nil {
+		t.Fatalf("LoadEntries linux/amd64 failed: %v", err)
+	}
+	got := packageFileNames(graph.Packages[0])
+	want := []string{"common.go", "legacy_unix.go", "unix.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("linux/amd64 files = %v, want %v", got, want)
+	}
+
+	graph, err = LoadEntries([]string{filepath.Join(root, "pkg")}, Options{Target: "windows/amd64"})
+	if err != nil {
+		t.Fatalf("LoadEntries windows/amd64 failed: %v", err)
+	}
+	got = packageFileNames(graph.Packages[0])
+	want = []string{"common.go", "nonunix.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("windows/amd64 files = %v, want %v", got, want)
+	}
+}
+
 func TestLoadEntriesExplicitFilesIgnoreGoBuildConstraint(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n")

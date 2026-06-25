@@ -538,10 +538,21 @@ func goBuildTagMatches(tag string, targetOS string, targetArch string) bool {
 	if tag == targetOS || tag == targetArch {
 		return true
 	}
+	if tag == "unix" && isUnixTargetOS(targetOS) {
+		return true
+	}
 	if targetArch == "arm64" && tag == "aarch64" {
 		return true
 	}
 	if targetArch == "wasm" && tag == "wasm32" {
+		return true
+	}
+	return false
+}
+
+func isUnixTargetOS(targetOS string) bool {
+	switch targetOS {
+	case "aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos", "ios", "linux", "netbsd", "openbsd", "solaris":
 		return true
 	}
 	return false
