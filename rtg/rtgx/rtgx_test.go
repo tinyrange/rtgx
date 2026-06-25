@@ -285,6 +285,54 @@ func TestCompileUnitsBuildsRunnableExecutable(t *testing.T) {
 	}
 }
 
+func TestCompileUnitsArtifactIncludesLinkedMetadataAndTargetBytes(t *testing.T) {
+	root, ok := findBackendRootUpward(".")
+	if !ok {
+		t.Skip("backend root not found")
+	}
+	units := []unit.Unit{
+		{
+			ImportPath: "example.com/app/main",
+			Package:    "main",
+			Imports:    []string{"example.com/app/dep"},
+			References: []unit.Symbol{{ImportPath: "example.com/app/dep", Name: "Print", UnitName: "rtg_example_com_app_dep_Print"}},
+			Decls: []unit.Decl{
+				{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_main_appMain", Body: "func rtg_example_com_app_main_appMain() int { return rtg_example_com_app_dep_Print() }\n"},
+			},
+		},
+		{
+			ImportPath: "example.com/app/dep",
+			Package:    "dep",
+			Exports:    []unit.Symbol{{ImportPath: "example.com/app/dep", Name: "Print", UnitName: "rtg_example_com_app_dep_Print"}},
+			Decls: []unit.Decl{
+				{Kind: "func", Name: "Print", UnitName: "rtg_example_com_app_dep_Print", Body: "func rtg_example_com_app_dep_Print() int { print(\"PASS\\n\"); return 0 }\n"},
+			},
+		},
+	}
+	artifact, err := CompileUnitsArtifact(units, Options{Target: "linux/amd64", BackendRoot: root})
+	if err != nil {
+		t.Fatalf("CompileUnitsArtifact failed: %v", err)
+	}
+	if artifact.Target != "linux/amd64" {
+		t.Fatalf("artifact target = %q", artifact.Target)
+	}
+	if !hasTargetMagic("linux/amd64", artifact.Output) {
+		t.Fatalf("artifact output has unexpected magic: % x", leadingBytes(artifact.Output, 8))
+	}
+	if len(artifact.LinkedUnits) != 2 || artifact.LinkedUnits[0] != "example.com/app/dep" || artifact.LinkedUnits[1] != "example.com/app/main" {
+		t.Fatalf("linked units = %#v", artifact.LinkedUnits)
+	}
+	if artifact.Entrypoint != (unit.Symbol{ImportPath: "example.com/app/main", Name: "appMain", UnitName: "rtg_example_com_app_main_appMain"}) {
+		t.Fatalf("entrypoint = %#v", artifact.Entrypoint)
+	}
+	if !strings.Contains(string(artifact.LinkedSource), "// rtg:linked-unit example.com/app/main\n") {
+		t.Fatalf("linked source missing linked-unit metadata:\n%s", string(artifact.LinkedSource))
+	}
+	if len(artifact.ReachableFunctions) != 2 {
+		t.Fatalf("reachable functions = %#v", artifact.ReachableFunctions)
+	}
+}
+
 func TestCompileUnitsValidatesUnitGraph(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "app")
 	err := CompileUnits([]unit.Unit{{
