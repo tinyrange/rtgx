@@ -316,10 +316,11 @@ func startsArrayType(toks []scan.Token, i int) bool {
 }
 
 func startsTypeAssertion(toks []scan.Token, i int) bool {
-	if i+3 >= len(toks) {
+	if i+2 >= len(toks) || toks[i].Text != "." || toks[i+1].Text != "(" {
 		return false
 	}
-	return toks[i].Text == "." && toks[i+1].Text == "(" && toks[i+2].Text == "type" && toks[i+3].Text == ")"
+	close := findClose(toks, i+1, "(", ")")
+	return close > i+2
 }
 
 func startsUnsupportedBuiltinCall(toks []scan.Token, i int) bool {

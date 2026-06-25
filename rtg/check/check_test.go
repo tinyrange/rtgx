@@ -82,6 +82,35 @@ func appMain() int {
 	}
 }
 
+func TestFileRejectsTypeAssertionsAndSwitches(t *testing.T) {
+	file, err := parse.FileSource("assertions.go", []byte(`package main
+
+func appMain() int {
+var x any
+_ = x.(int)
+switch x.(type) {
+}
+return 0
+}
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted type assertion forms")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"assertions.go:5:7: type assertions and type switches are not supported",
+		"assertions.go:6:10: type assertions and type switches are not supported",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing diagnostic %q in:\n%s", want, msg)
+		}
+	}
+}
+
 func TestFileAcceptsSimpleSubsetProgram(t *testing.T) {
 	file, err := parse.FileSource("ok.go", []byte(`package main
 
