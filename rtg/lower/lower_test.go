@@ -222,6 +222,47 @@ func appMain() int {
 	}
 }
 
+func TestPackageRewritesPackageNameAfterInnerBlockShadow(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+const answer = 7
+
+func appMain() int {
+	if answer > 0 {
+		answer := 1
+		_ = answer
+	}
+	return answer
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	if len(u.Decls) != 2 {
+		t.Fatalf("decls = %#v, want 2", u.Decls)
+	}
+	body := u.Decls[1].Body
+	if !strings.Contains(body, "if rtg_example_com_app_answer > 0") {
+		t.Fatalf("package reference before block shadow was not rewritten: %q", body)
+	}
+	if !strings.Contains(body, "answer := 1") || !strings.Contains(body, "_ = answer") {
+		t.Fatalf("inner block local shadow was rewritten: %q", body)
+	}
+	if !strings.Contains(body, "return rtg_example_com_app_answer") {
+		t.Fatalf("package reference after inner block shadow was not rewritten: %q", body)
+	}
+}
+
 func TestPackageWithGraphRewritesStdSelector(t *testing.T) {
 	mainPkg := load.Package{
 		ImportPath:  "example.com/app",

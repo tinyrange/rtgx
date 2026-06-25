@@ -2,6 +2,7 @@ package lower
 
 import (
 	"fmt"
+	"math"
 	"sort"
 
 	"j5.nz/rtg/rtg/load"
@@ -9,6 +10,11 @@ import (
 	"j5.nz/rtg/rtg/scan"
 	"j5.nz/rtg/rtg/unit"
 )
+
+type localRange struct {
+	start int
+	end   int
+}
 
 func Package(pkg load.Package) (unit.Unit, error) {
 	return PackageWithGraph(pkg, nil)
@@ -164,8 +170,8 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, i
 	return string(out)
 }
 
-func localNamesForDecl(file parse.File, decl parse.Decl, topNames map[string]string) map[string]int {
-	names := map[string]int{}
+func localNamesForDecl(file parse.File, decl parse.Decl, topNames map[string]string) map[string][]localRange {
+	names := map[string][]localRange{}
 	if decl.Kind != "func" {
 		return names
 	}
@@ -181,22 +187,26 @@ func localNamesForDecl(file parse.File, decl parse.Decl, topNames map[string]str
 	collectFuncSignatureLocals(toks, start, body, topNames, names)
 	for i := body + 1; i < len(toks) && toks[i].Start < decl.End; i++ {
 		if toks[i].Text == ":=" {
-			collectShortDeclLocals(toks, i, topNames, names)
+			collectShortDeclLocals(toks, body, i, decl.End, topNames, names)
 			continue
 		}
 		if toks[i].Text == "var" {
-			collectVarLocals(toks, i, decl.End, topNames, names)
+			collectVarLocals(toks, body, i, decl.End, topNames, names)
 		}
 	}
 	return names
 }
 
-func isLocalNameAt(names map[string]int, name string, pos int) bool {
-	start, ok := names[name]
-	return ok && pos >= start
+func isLocalNameAt(names map[string][]localRange, name string, pos int) bool {
+	for _, scope := range names[name] {
+		if pos >= scope.start && pos < scope.end {
+			return true
+		}
+	}
+	return false
 }
 
-func collectFuncSignatureLocals(toks []scan.Token, start int, end int, topNames map[string]string, names map[string]int) {
+func collectFuncSignatureLocals(toks []scan.Token, start int, end int, topNames map[string]string, names map[string][]localRange) {
 	for i := start; i < end; i++ {
 		if toks[i].Text != "(" {
 			continue
@@ -210,23 +220,24 @@ func collectFuncSignatureLocals(toks []scan.Token, start int, end int, topNames 
 	}
 }
 
-func collectParameterListLocals(toks []scan.Token, start int, end int, topNames map[string]string, names map[string]int) {
+func collectParameterListLocals(toks []scan.Token, start int, end int, topNames map[string]string, names map[string][]localRange) {
 	for i := start; i < end; i++ {
 		if toks[i].Kind != scan.Ident || topNames[toks[i].Text] == "" {
 			continue
 		}
 		if i+1 < end && isTypeStart(toks[i+1]) {
-			addLocalName(names, toks[i].Text, 0)
+			addLocalName(names, toks[i].Text, 0, math.MaxInt)
 			continue
 		}
 		if i+2 < end && toks[i+1].Text == "," && toks[i+2].Kind == scan.Ident && isTypeStartAfterName(toks, i+2, end) {
-			addLocalName(names, toks[i].Text, 0)
+			addLocalName(names, toks[i].Text, 0, math.MaxInt)
 		}
 	}
 }
 
-func collectShortDeclLocals(toks []scan.Token, assign int, topNames map[string]string, names map[string]int) {
+func collectShortDeclLocals(toks []scan.Token, body int, assign int, declEnd int, topNames map[string]string, names map[string][]localRange) {
 	line := toks[assign].Line
+	scopeEnd := localScopeEnd(toks, body, assign, declEnd)
 	for i := assign - 1; i >= 0; i-- {
 		if toks[i].Line != line {
 			return
@@ -235,12 +246,13 @@ func collectShortDeclLocals(toks []scan.Token, assign int, topNames map[string]s
 			return
 		}
 		if toks[i].Kind == scan.Ident && topNames[toks[i].Text] != "" && (i == 0 || toks[i-1].Text != ".") {
-			addLocalName(names, toks[i].Text, toks[i].Start)
+			addLocalName(names, toks[i].Text, toks[i].Start, scopeEnd)
 		}
 	}
 }
 
-func collectVarLocals(toks []scan.Token, pos int, end int, topNames map[string]string, names map[string]int) {
+func collectVarLocals(toks []scan.Token, body int, pos int, end int, topNames map[string]string, names map[string][]localRange) {
+	scopeEnd := localScopeEnd(toks, body, pos, end)
 	if pos+1 < len(toks) && toks[pos+1].Text == "(" {
 		for i := pos + 2; i < len(toks) && toks[i].Start < end; i++ {
 			if toks[i].Text == ")" || toks[i].Text == "}" {
@@ -250,7 +262,7 @@ func collectVarLocals(toks []scan.Token, pos int, end int, topNames map[string]s
 				continue
 			}
 			if toks[i-1].Text == "(" || toks[i-1].Text == "," || toks[i-1].Line != toks[i].Line {
-				addLocalName(names, toks[i].Text, toks[i].Start)
+				addLocalName(names, toks[i].Text, toks[i].Start, scopeEnd)
 			}
 		}
 		return
@@ -267,16 +279,32 @@ func collectVarLocals(toks []scan.Token, pos int, end int, topNames map[string]s
 			continue
 		}
 		if i == pos+1 || toks[i-1].Text == "," {
-			addLocalName(names, toks[i].Text, toks[i].Start)
+			addLocalName(names, toks[i].Text, toks[i].Start, scopeEnd)
 		}
 	}
 }
 
-func addLocalName(names map[string]int, name string, pos int) {
-	existing, ok := names[name]
-	if !ok || pos < existing {
-		names[name] = pos
+func localScopeEnd(toks []scan.Token, body int, pos int, fallback int) int {
+	var opens []int
+	for i := body; i <= pos && i < len(toks); i++ {
+		if toks[i].Text == "{" {
+			opens = append(opens, i)
+		} else if toks[i].Text == "}" && len(opens) > 0 {
+			opens = opens[:len(opens)-1]
+		}
 	}
+	if len(opens) == 0 {
+		return fallback
+	}
+	close := findClose(toks, opens[len(opens)-1], "{", "}")
+	if close < 0 {
+		return fallback
+	}
+	return toks[close].Start
+}
+
+func addLocalName(names map[string][]localRange, name string, start int, end int) {
+	names[name] = append(names[name], localRange{start: start, end: end})
 }
 
 func tokenIndexAt(toks []scan.Token, start int) int {
