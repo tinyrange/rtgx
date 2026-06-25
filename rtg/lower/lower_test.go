@@ -76,6 +76,41 @@ func TestSymbolNameIsStableIdentifier(t *testing.T) {
 	}
 }
 
+func TestPackageSynthesizesAppMainForOrdinaryMain(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app/cmd/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func main() {
+	print("PASS\n")
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	if len(u.Decls) != 2 {
+		t.Fatalf("decls = %#v, want source main plus synthetic appMain", u.Decls)
+	}
+	if u.Decls[0].Name != "main" || u.Decls[0].UnitName != "rtg_example_com_app_cmd_app_main" {
+		t.Fatalf("source main decl = %#v", u.Decls[0])
+	}
+	if u.Decls[1].Name != "appMain" || u.Decls[1].Path != "rtg-entrypoint" {
+		t.Fatalf("synthetic entrypoint decl = %#v", u.Decls[1])
+	}
+	want := "func rtg_example_com_app_cmd_app_appMain() int {\n\trtg_example_com_app_cmd_app_main()\n\treturn 0\n}\n"
+	if u.Decls[1].Body != want {
+		t.Fatalf("synthetic entrypoint body = %q, want %q", u.Decls[1].Body, want)
+	}
+}
+
 func TestPackageWithGraphRewritesImportedSelector(t *testing.T) {
 	mainPkg := load.Package{
 		ImportPath:  "example.com/app/cmd/app",

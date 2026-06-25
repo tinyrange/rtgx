@@ -252,7 +252,7 @@ func appMain() int {
 	}
 }
 
-func TestRunBuildCompilesLinkedPackageGraph(t *testing.T) {
+func TestRunBuildCompilesOrdinaryMainPackageGraph(t *testing.T) {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		t.Skipf("linux/amd64 executable smoke requires linux/amd64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
@@ -262,8 +262,8 @@ func TestRunBuildCompilesLinkedPackageGraph(t *testing.T) {
 
 import "example.com/app/pkg/answer"
 
-func appMain() int {
-	return answer.Print()
+func main() {
+	answer.Print()
 }
 `)
 	writeCLIFile(t, root, "pkg/answer/answer.go", `package answer
@@ -344,11 +344,11 @@ func TestRunBuildRequiresAppMainEntrypoint(t *testing.T) {
 	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
 	writeCLIFile(t, root, "cmd/app/main.go", `package main
 
-func main() {}
+func helper() {}
 `)
 	err := run(config{output: filepath.Join(root, "app"), inputs: []string{filepath.Join(root, "cmd", "app")}})
 	if err == nil {
-		t.Fatalf("run build succeeded without appMain")
+		t.Fatalf("run build succeeded without entrypoint")
 	}
 	if !strings.Contains(err.Error(), "missing entrypoint") {
 		t.Fatalf("error = %q", err)

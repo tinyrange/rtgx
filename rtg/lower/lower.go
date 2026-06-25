@@ -46,6 +46,11 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 			}
 		}
 	}
+	syntheticEntrypoint := false
+	if pkg.Name == "main" && topNames["appMain"] == "" && topNames["main"] != "" && hasOrdinaryMain(parsedFiles) {
+		topNames["appMain"] = SymbolName(pkg.ImportPath, "appMain")
+		syntheticEntrypoint = true
+	}
 	for name, unitName := range topNames {
 		if isExported(name) {
 			u.Exports = append(u.Exports, unit.Symbol{ImportPath: pkg.ImportPath, Name: name, UnitName: unitName})
@@ -76,6 +81,9 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 			})
 		}
 	}
+	if syntheticEntrypoint {
+		u.Decls = append(u.Decls, syntheticAppMainDecl(topNames["appMain"], topNames["main"]))
+	}
 	sort.Slice(u.References, func(i int, j int) bool {
 		if u.References[i].ImportPath == u.References[j].ImportPath {
 			return u.References[i].Name < u.References[j].Name
@@ -83,6 +91,49 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 		return u.References[i].ImportPath < u.References[j].ImportPath
 	})
 	return u, nil
+}
+
+func hasOrdinaryMain(files []parse.File) bool {
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			if isOrdinaryMainDecl(file, decl) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isOrdinaryMainDecl(file parse.File, decl parse.Decl) bool {
+	if decl.Kind != "func" || decl.Name != "main" || decl.Receiver {
+		return false
+	}
+	name := tokenIndexAt(file.Tokens, decl.NameTok.Start)
+	if name < 0 || name+1 >= len(file.Tokens) || file.Tokens[name+1].Text != "(" {
+		return false
+	}
+	open := name + 1
+	close := findClose(file.Tokens, open, "(", ")")
+	if close != open+1 {
+		return false
+	}
+	for i := close + 1; i < len(file.Tokens) && file.Tokens[i].Start < decl.End; i++ {
+		if file.Tokens[i].Text == "{" {
+			return true
+		}
+		return false
+	}
+	return false
+}
+
+func syntheticAppMainDecl(appMainUnitName string, mainUnitName string) unit.Decl {
+	return unit.Decl{
+		Path:     "rtg-entrypoint",
+		Kind:     "func",
+		Name:     "appMain",
+		UnitName: appMainUnitName,
+		Body:     "func " + appMainUnitName + "() int {\n\t" + mainUnitName + "()\n\treturn 0\n}\n",
+	}
 }
 
 func declNames(decl parse.Decl) []string {
