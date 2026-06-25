@@ -49,6 +49,39 @@ func Value() int {
 	}
 }
 
+func TestLoadEntriesResolvesQuotedModulePathImports(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module \"example.com/app\"\n")
+	writeFile(t, root, "cmd/app/main.go", `package main
+
+import "example.com/app/pkg/answer"
+
+func appMain() int {
+	return answer.Value()
+}
+`)
+	writeFile(t, root, "pkg/answer/answer.go", `package answer
+
+func Value() int {
+	return 7
+}
+`)
+
+	graph, err := LoadEntries([]string{filepath.Join(root, "cmd", "app")}, Options{})
+	if err != nil {
+		t.Fatalf("LoadEntries failed: %v", err)
+	}
+	if graph.Module.Path != "example.com/app" {
+		t.Fatalf("module path = %q, want example.com/app", graph.Module.Path)
+	}
+	if len(graph.Packages) != 2 {
+		t.Fatalf("loaded %d packages, want 2", len(graph.Packages))
+	}
+	if graph.Packages[1].ImportPath != "example.com/app/pkg/answer" {
+		t.Fatalf("dep import path = %q", graph.Packages[1].ImportPath)
+	}
+}
+
 func TestLoadEntriesRejectsLocalImportAcrossNestedModuleRoot(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n")

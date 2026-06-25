@@ -107,6 +107,36 @@ require (
 	}
 }
 
+func TestParseFileUnquotesDirectiveFields(t *testing.T) {
+	module, err := ParseFile(`module "example.com/app"
+
+require "example.com/lib" "v1.2.3"
+replace "example.com/lib" => "../lib"
+replace "example.com/other" "v1.0.0" => "./other"
+`)
+	if err != nil {
+		t.Fatalf("ParseFile failed: %v", err)
+	}
+	if module.Path != "example.com/app" {
+		t.Fatalf("module path = %q, want example.com/app", module.Path)
+	}
+	if len(module.Requires) != 1 || module.Requires[0] != (Require{Path: "example.com/lib", Version: "v1.2.3"}) {
+		t.Fatalf("requires = %#v", module.Requires)
+	}
+	want := []Replace{
+		{Old: "example.com/lib", New: "../lib"},
+		{Old: "example.com/other", New: "./other"},
+	}
+	if len(module.Replaces) != len(want) {
+		t.Fatalf("replaces = %#v, want %#v", module.Replaces, want)
+	}
+	for i := range want {
+		if module.Replaces[i] != want[i] {
+			t.Fatalf("replace %d = %#v, want %#v", i, module.Replaces[i], want[i])
+		}
+	}
+}
+
 func TestParseFileStripsBlockComments(t *testing.T) {
 	module, err := ParseFile(`/* leading */
 module example.com/app /* tail */

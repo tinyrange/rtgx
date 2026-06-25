@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -96,7 +97,11 @@ func ParseFile(data string) (Module, error) {
 			if module.Path != "" || len(fields) != 2 {
 				return Module{}, fmt.Errorf("malformed module directive")
 			}
-			module.Path = fields[1]
+			path, err := unquoteField(fields[1])
+			if err != nil {
+				return Module{}, fmt.Errorf("malformed module directive")
+			}
+			module.Path = path
 			continue
 		}
 		if fields[0] == "require" {
@@ -159,6 +164,14 @@ func parseReplaceFields(fields []string) (Replace, error) {
 	if len(oldFields) > 2 || len(newFields) > 2 {
 		return Replace{}, fmt.Errorf("malformed replace directive")
 	}
+	oldFields, err := unquoteFields(oldFields)
+	if err != nil {
+		return Replace{}, fmt.Errorf("malformed replace directive")
+	}
+	newFields, err = unquoteFields(newFields)
+	if err != nil {
+		return Replace{}, fmt.Errorf("malformed replace directive")
+	}
 	if invalidReplaceFields(oldFields) || invalidReplaceFields(newFields) {
 		return Replace{}, fmt.Errorf("malformed replace directive")
 	}
@@ -188,10 +201,37 @@ func parseRequireFields(fields []string) (Require, error) {
 	if len(fields) != 2 {
 		return Require{}, fmt.Errorf("malformed require directive")
 	}
+	var err error
+	fields, err = unquoteFields(fields)
+	if err != nil {
+		return Require{}, fmt.Errorf("malformed require directive")
+	}
 	if fields[0] == "(" || fields[0] == ")" || fields[1] == "(" || fields[1] == ")" {
 		return Require{}, fmt.Errorf("malformed require directive")
 	}
 	return Require{Path: fields[0], Version: fields[1]}, nil
+}
+
+func unquoteFields(fields []string) ([]string, error) {
+	out := make([]string, 0, len(fields))
+	for _, field := range fields {
+		unquoted, err := unquoteField(field)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, unquoted)
+	}
+	return out, nil
+}
+
+func unquoteField(field string) (string, error) {
+	if len(field) == 0 {
+		return field, nil
+	}
+	if field[0] != '"' && field[0] != '`' {
+		return field, nil
+	}
+	return strconv.Unquote(field)
 }
 
 func stripComments(data string) (string, error) {
