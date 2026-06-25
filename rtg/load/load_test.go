@@ -203,6 +203,22 @@ func appMain() int { return pkg.Value() }
 	}
 }
 
+func TestLoadEntriesRejectsMalformedReplaceDirective(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n\nreplace example.com/lib ../lib\n")
+	writeFile(t, root, "main.go", `package main
+
+func appMain() int { return 0 }
+`)
+	_, err := LoadEntries([]string{root}, Options{})
+	if err == nil {
+		t.Fatalf("LoadEntries accepted malformed replace directive")
+	}
+	if !containsAll(err.Error(), []string{"go.mod", "malformed replace directive"}) {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestLoadEntriesResolvesStdImportsWithStdIdentity(t *testing.T) {
 	root := t.TempDir()
 	stdRoot := filepath.Join(root, "rtgstd")

@@ -63,9 +63,11 @@ func ParseFile(data string) (Module, error) {
 				inReplaceBlock = false
 				continue
 			}
-			if repl, ok := parseReplaceFields(fields); ok {
-				module.Replaces = append(module.Replaces, repl)
+			repl, err := parseReplaceFields(fields)
+			if err != nil {
+				return Module{}, err
 			}
+			module.Replaces = append(module.Replaces, repl)
 			continue
 		}
 		if len(fields) >= 2 && fields[0] == "module" {
@@ -77,9 +79,11 @@ func ParseFile(data string) (Module, error) {
 				inReplaceBlock = true
 				continue
 			}
-			if repl, ok := parseReplaceFields(fields[1:]); ok {
-				module.Replaces = append(module.Replaces, repl)
+			repl, err := parseReplaceFields(fields[1:])
+			if err != nil {
+				return Module{}, err
 			}
+			module.Replaces = append(module.Replaces, repl)
 		}
 	}
 	if module.Path == "" {
@@ -96,7 +100,7 @@ func ParseModulePath(data string) (string, error) {
 	return module.Path, nil
 }
 
-func parseReplaceFields(fields []string) (Replace, bool) {
+func parseReplaceFields(fields []string) (Replace, error) {
 	arrow := -1
 	for i, field := range fields {
 		if field == "=>" {
@@ -105,9 +109,9 @@ func parseReplaceFields(fields []string) (Replace, bool) {
 		}
 	}
 	if arrow <= 0 || arrow+1 >= len(fields) {
-		return Replace{}, false
+		return Replace{}, fmt.Errorf("malformed replace directive")
 	}
-	return Replace{Old: fields[0], New: fields[arrow+1]}, true
+	return Replace{Old: fields[0], New: fields[arrow+1]}, nil
 }
 
 func stripLineComment(line string) string {

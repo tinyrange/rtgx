@@ -50,3 +50,36 @@ replace (
 		}
 	}
 }
+
+func TestParseFileRejectsMalformedReplaces(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{name: "line", data: `module example.com/app
+
+replace example.com/lib ../lib
+`},
+		{name: "block", data: `module example.com/app
+
+replace (
+	example.com/lib ../lib
+)
+`},
+		{name: "missing target", data: `module example.com/app
+
+replace example.com/lib =>
+`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseFile(tt.data)
+			if err == nil {
+				t.Fatalf("ParseFile accepted malformed replace %s", tt.name)
+			}
+			if err.Error() != "malformed replace directive" {
+				t.Fatalf("error = %q", err)
+			}
+		})
+	}
+}
