@@ -111,6 +111,45 @@ return 0
 	}
 }
 
+func TestFileRejectsAnyInterfaceTypeAlias(t *testing.T) {
+	file, err := parse.FileSource("any.go", []byte(`package main
+
+type Box struct { value any }
+type Alias any
+func use(value any) any { return value }
+func appMain() int {
+	var value any
+	var pointer *any
+	var values []any
+	_ = value
+	_ = pointer
+	_ = values
+	return 0
+}
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted any interface aliases")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"any.go:3:25: interfaces are not supported",
+		"any.go:4:12: interfaces are not supported",
+		"any.go:5:16: interfaces are not supported",
+		"any.go:5:21: interfaces are not supported",
+		"any.go:7:12: interfaces are not supported",
+		"any.go:8:15: interfaces are not supported",
+		"any.go:9:15: interfaces are not supported",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing diagnostic %q in:\n%s", want, msg)
+		}
+	}
+}
+
 func TestFileAcceptsSimpleSubsetProgram(t *testing.T) {
 	file, err := parse.FileSource("ok.go", []byte(`package main
 
@@ -118,9 +157,10 @@ type box struct { value int }
 func appMain() int {
 	var b box
 	b.value = 7
+	any := 3
 	values := []int{1, 2}
 	if values[0] == 1 {
-		b.value = b.value + values[1]
+		b.value = b.value + values[1] + any
 	}
 	return b.value
 }

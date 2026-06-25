@@ -191,6 +191,9 @@ func File(file parse.File) Diagnostics {
 		if startsArrayType(file.Tokens, i) {
 			diags = append(diags, diag(file, tok, "arrays are not supported"))
 		}
+		if startsAnyInterfaceType(file.Tokens, i) {
+			diags = append(diags, diag(file, tok, "interfaces are not supported"))
+		}
 		if startsGenericDecl(file.Tokens, i, topFuncs) {
 			diags = append(diags, diag(file, file.Tokens[i+2], "generics are not supported"))
 		}
@@ -313,6 +316,39 @@ func startsArrayType(toks []scan.Token, i int) bool {
 	}
 	beforeName := toks[i-2].Text
 	return beforeName == "var" || beforeName == "type" || beforeName == "(" || beforeName == "{" || beforeName == ","
+}
+
+func startsAnyInterfaceType(toks []scan.Token, i int) bool {
+	if toks[i].Text != "any" || i == 0 {
+		return false
+	}
+	prev := toks[i-1]
+	if prev.Text == "*" {
+		return true
+	}
+	if prev.Text == "]" && i >= 2 && toks[i-2].Text == "[" {
+		return true
+	}
+	if prev.Text == ")" {
+		return isFunctionSignatureResult(toks, i)
+	}
+	if prev.Kind != scan.Ident || i < 2 {
+		return false
+	}
+	beforeName := toks[i-2].Text
+	return beforeName == "var" || beforeName == "type" || beforeName == "(" || beforeName == "{" || beforeName == ","
+}
+
+func isFunctionSignatureResult(toks []scan.Token, pos int) bool {
+	for i := pos - 2; i >= 0 && toks[i].Line == toks[pos].Line; i-- {
+		if toks[i].Text == "func" {
+			return true
+		}
+		if toks[i].Text == "{" || toks[i].Text == ";" {
+			return false
+		}
+	}
+	return false
 }
 
 func startsTypeAssertion(toks []scan.Token, i int) bool {
