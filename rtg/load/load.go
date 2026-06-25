@@ -58,7 +58,9 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 	g := &Graph{Module: module}
 	seen := map[string]bool{}
 	fileEntries := map[string][]string{}
-	for _, entry := range entries {
+	var fileDirs []string
+	for i := 0; i < len(entries); i++ {
+		entry := entries[i]
 		dir, files, err := entryInput(entry)
 		if err != nil {
 			return nil, err
@@ -70,6 +72,9 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 			return nil, fmt.Errorf("%s: entry is inside nested module root %s", dir, nested)
 		}
 		if len(files) > 0 {
+			if _, ok := fileEntries[dir]; !ok {
+				fileDirs = append(fileDirs, dir)
+			}
 			fileEntries[dir] = append(fileEntries[dir], files...)
 			continue
 		}
@@ -77,12 +82,9 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 			return nil, err
 		}
 	}
-	var fileDirs []string
-	for dir := range fileEntries {
-		fileDirs = append(fileDirs, dir)
-	}
 	sortStrings(fileDirs)
-	for _, dir := range fileDirs {
+	for i := 0; i < len(fileDirs); i++ {
+		dir := fileDirs[i]
 		files := fileEntries[dir]
 		if err := loadPackageFilesRecursive(g, opts, seen, dir, files); err != nil {
 			return nil, err
@@ -174,7 +176,8 @@ func loadPackageRecursiveAs(g *Graph, opts Options, seen map[string]bool, dir st
 		return err
 	}
 	g.Packages = append(g.Packages, pkg)
-	for _, imp := range pkg.Imports {
+	for i := 0; i < len(pkg.Imports); i++ {
+		imp := pkg.Imports[i]
 		next, ok, err := resolveImport(g.Module, opts, imp)
 		if err != nil {
 			return importResolutionError(pkg, imp, err)
@@ -199,7 +202,8 @@ func loadPackageFilesRecursiveAs(g *Graph, opts Options, seen map[string]bool, d
 		return err
 	}
 	g.Packages = append(g.Packages, pkg)
-	for _, imp := range pkg.Imports {
+	for i := 0; i < len(pkg.Imports); i++ {
+		imp := pkg.Imports[i]
 		next, ok, err := resolveImport(g.Module, opts, imp)
 		if err != nil {
 			return importResolutionError(pkg, imp, err)
@@ -233,7 +237,8 @@ func readPackageFiles(module mod.Module, dir string, importPath string, files []
 	files = uniqueStrings(files)
 	pkg := Package{Dir: dir, ImportPath: importPath, ImportPositions: map[string]ImportPosition{}}
 	importSet := map[string]bool{}
-	for _, path := range files {
+	for i := 0; i < len(files); i++ {
+		path := files[i]
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return Package{}, err
@@ -247,16 +252,17 @@ func readPackageFiles(module mod.Module, dir string, importPath string, files []
 		} else if pkg.Name != info.PackageName {
 			return Package{}, fmt.Errorf("%s: mixed package names %s and %s", dir, pkg.Name, info.PackageName)
 		}
-		for _, imp := range info.Imports {
-			importSet[imp.Path] = true
+		for j := 0; j < len(info.Imports); j++ {
+			imp := info.Imports[j]
+			if !importSet[imp.Path] {
+				importSet[imp.Path] = true
+				pkg.Imports = append(pkg.Imports, imp.Path)
+			}
 			if _, ok := pkg.ImportPositions[imp.Path]; !ok {
 				pkg.ImportPositions[imp.Path] = ImportPosition{Path: path, Line: imp.Line, Column: imp.Column}
 			}
 		}
 		pkg.Files = append(pkg.Files, File{Path: path, UnitPath: unitFilePath(module, importPath, path), Source: data})
-	}
-	for imp := range importSet {
-		pkg.Imports = append(pkg.Imports, imp)
 	}
 	sortStrings(pkg.Imports)
 	return pkg, nil
@@ -272,7 +278,8 @@ func importResolutionError(pkg Package, imp string, err error) error {
 
 func uniqueStrings(values []string) []string {
 	var out []string
-	for _, value := range values {
+	for i := 0; i < len(values); i++ {
+		value := values[i]
 		if len(out) > 0 && out[len(out)-1] == value {
 			continue
 		}
@@ -315,7 +322,8 @@ func goFiles(dir string, target string) ([]string, error) {
 	}
 	targetOS, targetArch := targetFileParts(target)
 	var files []string
-	for _, entry := range entries {
+	for i := 0; i < len(entries); i++ {
+		entry := entries[i]
 		if entry.IsDir() {
 			continue
 		}
@@ -447,7 +455,8 @@ func leadingPlusBuildLines(src string) []string {
 }
 
 func evalPlusBuildLines(lines []string, targetOS string, targetArch string) bool {
-	for _, line := range lines {
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		if !evalPlusBuildLine(line, targetOS, targetArch) {
 			return false
 		}
@@ -460,7 +469,8 @@ func evalPlusBuildLine(line string, targetOS string, targetArch string) bool {
 	if len(options) == 0 {
 		return false
 	}
-	for _, option := range options {
+	for i := 0; i < len(options); i++ {
+		option := options[i]
 		if evalPlusBuildOption(option, targetOS, targetArch) {
 			return true
 		}
@@ -473,7 +483,8 @@ func evalPlusBuildOption(option string, targetOS string, targetArch string) bool
 	if len(terms) == 0 {
 		return false
 	}
-	for _, term := range terms {
+	for i := 0; i < len(terms); i++ {
+		term := terms[i]
 		if term == "" {
 			return false
 		}
@@ -724,7 +735,8 @@ func isStandardImportPath(path string) bool {
 }
 
 func resolveReplacedImport(module mod.Module, imp string) (resolvedImport, bool, error) {
-	for _, repl := range module.Replaces {
+	for i := 0; i < len(module.Replaces); i++ {
+		repl := module.Replaces[i]
 		if imp != repl.Old && !strings.HasPrefix(imp, repl.Old+"/") {
 			continue
 		}
@@ -754,7 +766,8 @@ func resolveVendorImport(module mod.Module, req mod.Require, imp string) (resolv
 }
 
 func requiredModuleForImport(module mod.Module, imp string) (mod.Require, bool) {
-	for _, req := range module.Requires {
+	for i := 0; i < len(module.Requires); i++ {
+		req := module.Requires[i]
 		if imp == req.Path || strings.HasPrefix(imp, req.Path+"/") {
 			return req, true
 		}
