@@ -43,6 +43,37 @@ func TestHelloFixtureGoldenUnits(t *testing.T) {
 
 func TestHelloFixtureFrontendMatchesHostGo(t *testing.T) {
 	fixture := filepath.Join("testdata", "hello_module")
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
+func TestNestedCallArgumentFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/nested\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "example.com/nested/pkg/dep"
+
+func value() int {
+	return dep.Join(dep.First(), dep.Second())
+}
+
+func main() {
+	if value() == 12 {
+		print("PASS\n")
+	}
+}
+`)
+	writeFixtureFile(t, fixture, "pkg/dep/dep.go", `package dep
+
+func First() int { return 1 }
+func Second() int { return 2 }
+func Join(a int, b int) int { return a*10 + b }
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
+func runFrontendFixtureMatchesHostGo(t *testing.T, fixture string) {
+	t.Helper()
 	host := exec.Command("go", "run", "./cmd/app")
 	host.Dir = fixture
 	hostOut, err := host.CombinedOutput()
@@ -75,6 +106,17 @@ func TestHelloFixtureFrontendMatchesHostGo(t *testing.T) {
 				t.Fatalf("frontend output = %q, host output = %q", string(frontOut), string(hostOut))
 			}
 		})
+	}
+}
+
+func writeFixtureFile(t *testing.T, root string, path string, data string) {
+	t.Helper()
+	full := filepath.Join(root, path)
+	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+		t.Fatalf("MkdirAll %s failed: %v", filepath.Dir(full), err)
+	}
+	if err := os.WriteFile(full, []byte(data), 0644); err != nil {
+		t.Fatalf("WriteFile %s failed: %v", full, err)
 	}
 }
 

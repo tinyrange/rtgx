@@ -469,6 +469,94 @@ func appMain() int {
 	}
 }
 
+func TestPackageNormalizesNestedReturnCallArguments(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func first() int { return 1 }
+func second() int { return 2 }
+func join(a int, b int) int { return a*10 + b }
+func appMain() int { return join(first(), second()) }
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	if len(u.Decls) != 4 {
+		t.Fatalf("decls = %#v, want 4", u.Decls)
+	}
+	body := u.Decls[3].Body
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_first()") {
+		t.Fatalf("first call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_second()") {
+		t.Fatalf("second call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "return rtg_example_com_app_join(rtg_example_com_app_appMain_tmp_0, rtg_example_com_app_appMain_tmp_1)") {
+		t.Fatalf("return call did not use lifted temps: %q", body)
+	}
+}
+
+func TestPackageNormalizesNestedImportedReturnCallArguments(t *testing.T) {
+	mainPkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Imports:    []string{"example.com/app/dep"},
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+import "example.com/app/dep"
+
+func appMain() int { return dep.Join(dep.First(), dep.Second()) }
+`),
+			},
+		},
+	}
+	depPkg := load.Package{
+		ImportPath: "example.com/app/dep",
+		Name:       "dep",
+		Files: []load.File{
+			{
+				Path: "dep.go",
+				Source: []byte(`package dep
+
+func First() int { return 1 }
+func Second() int { return 2 }
+func Join(a int, b int) int { return a*10 + b }
+`),
+			},
+		},
+	}
+	graph := &load.Graph{Packages: []load.Package{mainPkg, depPkg}}
+	u, err := PackageWithGraph(mainPkg, graph)
+	if err != nil {
+		t.Fatalf("PackageWithGraph failed: %v", err)
+	}
+	if len(u.References) != 3 {
+		t.Fatalf("references = %#v, want First, Join, Second", u.References)
+	}
+	body := u.Decls[0].Body
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_dep_First()") {
+		t.Fatalf("first imported call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_dep_Second()") {
+		t.Fatalf("second imported call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "return rtg_example_com_app_dep_Join(rtg_example_com_app_appMain_tmp_0, rtg_example_com_app_appMain_tmp_1)") {
+		t.Fatalf("return call did not use imported lifted temps: %q", body)
+	}
+}
+
 func TestPackageWithGraphRewritesStdSelector(t *testing.T) {
 	mainPkg := load.Package{
 		ImportPath: "example.com/app",

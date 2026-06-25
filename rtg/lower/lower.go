@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 
 	"j5.nz/rtg/rtg/load"
 	"j5.nz/rtg/rtg/parse"
@@ -66,6 +67,9 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 		for _, decl := range parsed.Decls {
 			var refs []unit.Symbol
 			body := rewriteDecl(parsed, decl, topNames, importRefs, &refs)
+			if decl.Kind == "func" {
+				body = normalizeFunctionExpressions(body, topNames[decl.Name])
+			}
 			for _, ref := range refs {
 				key := ref.ImportPath + "\x00" + ref.Name
 				if !seenRefs[key] {
@@ -232,6 +236,244 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, i
 		out = append(out, file.Source[cursor:end]...)
 	}
 	return string(out)
+}
+
+type expressionTemp struct {
+	name string
+	expr string
+}
+
+type expressionReplacement struct {
+	start int
+	end   int
+	text  string
+}
+
+func normalizeFunctionExpressions(body string, unitName string) string {
+	toks, err := scan.Tokens([]byte(body))
+	if err != nil {
+		return body
+	}
+	var out []byte
+	cursor := 0
+	tempIndex := 0
+	for i := 0; i < len(toks); i++ {
+		if toks[i].Text != "return" {
+			continue
+		}
+		exprStart := i + 1
+		exprEnd := returnExpressionEnd(toks, i)
+		if exprEnd <= exprStart {
+			continue
+		}
+		temps, replacements := normalizeCallArgumentExpressions(body, toks, exprStart, exprEnd, unitName, &tempIndex)
+		if len(temps) == 0 {
+			continue
+		}
+		insertStart := statementInsertStart(body, toks[i].Start)
+		out = append(out, body[cursor:insertStart]...)
+		indent := statementIndent(body, toks[i].Start)
+		if insertStart == toks[i].Start {
+			out = append(out, '\n')
+		}
+		for _, temp := range temps {
+			out = append(out, indent...)
+			out = append(out, temp.name...)
+			out = append(out, " := "...)
+			out = append(out, temp.expr...)
+			out = append(out, '\n')
+		}
+		out = append(out, indent...)
+		out = append(out, "return "...)
+		out = append(out, applyExpressionReplacements(body, toks[exprStart].Start, toks[exprEnd-1].End, replacements)...)
+		cursor = toks[exprEnd-1].End
+	}
+	if len(out) == 0 {
+		return body
+	}
+	out = append(out, body[cursor:]...)
+	return string(out)
+}
+
+func returnExpressionEnd(toks []scan.Token, ret int) int {
+	paren := 0
+	brack := 0
+	brace := 0
+	for i := ret + 1; i < len(toks); i++ {
+		tok := toks[i]
+		if tok.Kind == scan.EOF {
+			return i
+		}
+		if paren == 0 && brack == 0 && brace == 0 {
+			if tok.Text == "}" || tok.Text == ";" {
+				return i
+			}
+			if tok.Line != toks[ret].Line {
+				return i
+			}
+		}
+		switch tok.Text {
+		case "(":
+			paren++
+		case ")":
+			if paren > 0 {
+				paren--
+			}
+		case "[":
+			brack++
+		case "]":
+			if brack > 0 {
+				brack--
+			}
+		case "{":
+			brace++
+		case "}":
+			if brace > 0 {
+				brace--
+			}
+		}
+	}
+	return len(toks)
+}
+
+func normalizeCallArgumentExpressions(body string, toks []scan.Token, start int, end int, unitName string, tempIndex *int) ([]expressionTemp, []expressionReplacement) {
+	var temps []expressionTemp
+	var replacements []expressionReplacement
+	paren := 0
+	brack := 0
+	brace := 0
+	for i := start; i+1 < end; i++ {
+		tok := toks[i]
+		if paren == 0 && brack == 0 && brace == 0 && tok.Kind == scan.Ident && toks[i+1].Text == "(" {
+			close := findClose(toks, i+1, "(", ")")
+			if close > i+1 && close < end {
+				callTemps, callReplacements := normalizeOneCallArguments(body, toks, i+2, close, unitName, tempIndex)
+				temps = append(temps, callTemps...)
+				replacements = append(replacements, callReplacements...)
+				i = close
+				continue
+			}
+		}
+		switch tok.Text {
+		case "(":
+			paren++
+		case ")":
+			if paren > 0 {
+				paren--
+			}
+		case "[":
+			brack++
+		case "]":
+			if brack > 0 {
+				brack--
+			}
+		case "{":
+			brace++
+		case "}":
+			if brace > 0 {
+				brace--
+			}
+		}
+	}
+	return temps, replacements
+}
+
+func normalizeOneCallArguments(body string, toks []scan.Token, start int, end int, unitName string, tempIndex *int) ([]expressionTemp, []expressionReplacement) {
+	var temps []expressionTemp
+	var replacements []expressionReplacement
+	argStart := start
+	paren := 0
+	brack := 0
+	brace := 0
+	for i := start; i <= end; i++ {
+		if i == end || (paren == 0 && brack == 0 && brace == 0 && toks[i].Text == ",") {
+			if argStart < i && expressionContainsCall(toks, argStart, i) {
+				name := unitName + "_tmp_" + strconv.Itoa(*tempIndex)
+				(*tempIndex)++
+				exprStart := toks[argStart].Start
+				exprEnd := toks[i-1].End
+				temps = append(temps, expressionTemp{name: name, expr: body[exprStart:exprEnd]})
+				replacements = append(replacements, expressionReplacement{start: exprStart, end: exprEnd, text: name})
+			}
+			argStart = i + 1
+			continue
+		}
+		switch toks[i].Text {
+		case "(":
+			paren++
+		case ")":
+			if paren > 0 {
+				paren--
+			}
+		case "[":
+			brack++
+		case "]":
+			if brack > 0 {
+				brack--
+			}
+		case "{":
+			brace++
+		case "}":
+			if brace > 0 {
+				brace--
+			}
+		}
+	}
+	return temps, replacements
+}
+
+func expressionContainsCall(toks []scan.Token, start int, end int) bool {
+	for i := start; i+1 < end; i++ {
+		if toks[i].Kind == scan.Ident && toks[i+1].Text == "(" {
+			return true
+		}
+	}
+	return false
+}
+
+func applyExpressionReplacements(body string, start int, end int, replacements []expressionReplacement) string {
+	var out []byte
+	cursor := start
+	for _, repl := range replacements {
+		if repl.start < cursor || repl.end > end {
+			continue
+		}
+		out = append(out, body[cursor:repl.start]...)
+		out = append(out, repl.text...)
+		cursor = repl.end
+	}
+	out = append(out, body[cursor:end]...)
+	return string(out)
+}
+
+func statementIndent(body string, pos int) string {
+	lineStart := pos
+	for lineStart > 0 && body[lineStart-1] != '\n' {
+		lineStart--
+	}
+	for i := lineStart; i < pos; i++ {
+		if body[i] != ' ' && body[i] != '\t' {
+			return "\t"
+		}
+	}
+	indent := body[lineStart:pos]
+	if indent == "" {
+		return "\t"
+	}
+	return indent
+}
+
+func statementInsertStart(body string, pos int) int {
+	lineStart := pos
+	for lineStart > 0 && body[lineStart-1] != '\n' {
+		lineStart--
+	}
+	for i := lineStart; i < pos; i++ {
+		if body[i] != ' ' && body[i] != '\t' {
+			return pos
+		}
+	}
+	return lineStart
 }
 
 func localRewriteNames(topNames map[string]string, importRefs map[string]map[string]unit.Symbol) map[string]string {
