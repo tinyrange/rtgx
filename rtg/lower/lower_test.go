@@ -160,6 +160,123 @@ func hidden() int { return 9 }
 	}
 }
 
+func TestPackageWithGraphUsesFileScopedImportAliases(t *testing.T) {
+	mainPkg := load.Package{
+		ImportPath: "example.com/app/cmd/app",
+		Name:       "main",
+		Imports:    []string{"example.com/app/pkg/answer"},
+		Files: []load.File{
+			{
+				Path: "a.go",
+				Source: []byte(`package main
+
+import first "example.com/app/pkg/answer"
+
+func A() int { return first.Value() }
+`),
+			},
+			{
+				Path: "b.go",
+				Source: []byte(`package main
+
+import second "example.com/app/pkg/answer"
+
+func appMain() int { return A() + second.Value() }
+`),
+			},
+		},
+	}
+	depPkg := load.Package{
+		ImportPath: "example.com/app/pkg/answer",
+		Name:       "answer",
+		Files: []load.File{
+			{
+				Path: "answer.go",
+				Source: []byte(`package answer
+
+func Value() int { return 7 }
+`),
+			},
+		},
+	}
+	graph := &load.Graph{Packages: []load.Package{mainPkg, depPkg}}
+	u, err := PackageWithGraph(mainPkg, graph)
+	if err != nil {
+		t.Fatalf("PackageWithGraph failed: %v", err)
+	}
+	if len(u.References) != 1 || u.References[0].Name != "Value" {
+		t.Fatalf("references = %#v, want one Value reference", u.References)
+	}
+	if !strings.Contains(u.Decls[0].Body, "return rtg_example_com_app_pkg_answer_Value()") {
+		t.Fatalf("first alias was not rewritten: %q", u.Decls[0].Body)
+	}
+	if !strings.Contains(u.Decls[1].Body, "return rtg_example_com_app_cmd_app_A() + rtg_example_com_app_pkg_answer_Value()") {
+		t.Fatalf("second alias was not rewritten: %q", u.Decls[1].Body)
+	}
+	if strings.Contains(u.Decls[0].Body, "first.") || strings.Contains(u.Decls[1].Body, "second.") {
+		t.Fatalf("alias selector leaked into lowered bodies: %#v", u.Decls)
+	}
+}
+
+func TestPackageWithGraphDoesNotLeakImportAliasAcrossFiles(t *testing.T) {
+	mainPkg := load.Package{
+		ImportPath: "example.com/app/cmd/app",
+		Name:       "main",
+		Imports:    []string{"example.com/app/pkg/answer"},
+		Files: []load.File{
+			{
+				Path: "a.go",
+				Source: []byte(`package main
+
+import answer "example.com/app/pkg/answer"
+
+func imported() int { return answer.Value() }
+`),
+			},
+			{
+				Path: "b.go",
+				Source: []byte(`package main
+
+type localAnswer struct { Value int }
+
+func appMain() int {
+	answer := localAnswer{Value: 3}
+	return answer.Value + imported()
+}
+`),
+			},
+		},
+	}
+	depPkg := load.Package{
+		ImportPath: "example.com/app/pkg/answer",
+		Name:       "answer",
+		Files: []load.File{
+			{
+				Path: "answer.go",
+				Source: []byte(`package answer
+
+func Value() int { return 7 }
+`),
+			},
+		},
+	}
+	graph := &load.Graph{Packages: []load.Package{mainPkg, depPkg}}
+	u, err := PackageWithGraph(mainPkg, graph)
+	if err != nil {
+		t.Fatalf("PackageWithGraph failed: %v", err)
+	}
+	if len(u.References) != 1 || u.References[0].Name != "Value" {
+		t.Fatalf("references = %#v, want only imported file reference", u.References)
+	}
+	body := u.Decls[2].Body
+	if !strings.Contains(body, "return answer.Value + rtg_example_com_app_cmd_app_imported()") {
+		t.Fatalf("local selector was rewritten by leaked import alias: %q", body)
+	}
+	if strings.Contains(body, "rtg_example_com_app_pkg_answer_Value") {
+		t.Fatalf("local selector contains imported symbol: %q", body)
+	}
+}
+
 func TestPackageWithGraphPreservesLocalImportNameShadow(t *testing.T) {
 	mainPkg := load.Package{
 		ImportPath:  "example.com/app/cmd/app",

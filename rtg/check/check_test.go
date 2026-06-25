@@ -514,6 +514,105 @@ func Value() int { return 1 }
 	}
 }
 
+func TestGraphUsesFileScopedImportAliases(t *testing.T) {
+	graph := &load.Graph{
+		Packages: []load.Package{
+			{
+				ImportPath: "example.com/app",
+				Name:       "main",
+				Imports:    []string{"example.com/app/dep"},
+				Files: []load.File{
+					{
+						Path: "a.go",
+						Source: []byte(`package main
+
+import first "example.com/app/dep"
+
+func A() int { return first.Value() }
+`),
+					},
+					{
+						Path: "b.go",
+						Source: []byte(`package main
+
+import second "example.com/app/dep"
+
+func appMain() int { return A() + second.Value() }
+`),
+					},
+				},
+			},
+			{
+				ImportPath: "example.com/app/dep",
+				Name:       "dep",
+				Files: []load.File{
+					{
+						Path: "dep.go",
+						Source: []byte(`package dep
+
+func Value() int { return 1 }
+`),
+					},
+				},
+			},
+		},
+	}
+	if err := Graph(graph); err != nil {
+		t.Fatalf("Graph rejected file-scoped import aliases: %v", err)
+	}
+}
+
+func TestGraphDoesNotLeakImportAliasesAcrossFiles(t *testing.T) {
+	graph := &load.Graph{
+		Packages: []load.Package{
+			{
+				ImportPath: "example.com/app",
+				Name:       "main",
+				Imports:    []string{"example.com/app/dep"},
+				Files: []load.File{
+					{
+						Path: "a.go",
+						Source: []byte(`package main
+
+import dep "example.com/app/dep"
+
+func A() int { return dep.Value() }
+`),
+					},
+					{
+						Path: "b.go",
+						Source: []byte(`package main
+
+type localDep struct { hidden int }
+
+func appMain() int {
+	dep := localDep{hidden: 1}
+	return dep.hidden + A()
+}
+`),
+					},
+				},
+			},
+			{
+				ImportPath: "example.com/app/dep",
+				Name:       "dep",
+				Files: []load.File{
+					{
+						Path: "dep.go",
+						Source: []byte(`package dep
+
+func Value() int { return 1 }
+`),
+					},
+				},
+			},
+		},
+	}
+	if err := Graph(graph); err != nil {
+		t.Fatalf("Graph rejected local selector through leaked import alias: %v", err)
+	}
+}
+
 func TestGraphAcceptsExportedImportedSelectors(t *testing.T) {
 	graph := &load.Graph{
 		Packages: []load.Package{

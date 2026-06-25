@@ -59,9 +59,10 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 	sort.Slice(u.Exports, func(i int, j int) bool {
 		return u.Exports[i].Name < u.Exports[j].Name
 	})
-	importRefs := importReferenceMap(pkg, graph)
+	depPackages := dependencyPackages(graph)
 	seenRefs := map[string]bool{}
 	for _, parsed := range parsedFiles {
+		importRefs := importReferenceMap(parsed, depPackages)
 		for _, decl := range parsed.Decls {
 			var refs []unit.Symbol
 			body := rewriteDecl(parsed, decl, topNames, importRefs, &refs)
@@ -433,16 +434,22 @@ func isStatementBoundary(text string) bool {
 	return text == "{" || text == "}" || text == ";" || text == "if" || text == "for" || text == "switch"
 }
 
-func importReferenceMap(pkg load.Package, graph *load.Graph) map[string]map[string]unit.Symbol {
-	refs := map[string]map[string]unit.Symbol{}
-	if graph == nil {
-		return refs
-	}
+func dependencyPackages(graph *load.Graph) map[string]load.Package {
 	packages := map[string]load.Package{}
+	if graph == nil {
+		return packages
+	}
 	for _, dep := range graph.Packages {
 		packages[dep.ImportPath] = dep
 	}
-	for importPath, localName := range pkg.ImportNames {
+	return packages
+}
+
+func importReferenceMap(file parse.File, packages map[string]load.Package) map[string]map[string]unit.Symbol {
+	refs := map[string]map[string]unit.Symbol{}
+	for _, imp := range file.Imports {
+		localName := importLocalName(imp)
+		importPath := imp.Path
 		dep, ok := packages[importPath]
 		if !ok || localName == "" {
 			continue
@@ -464,6 +471,13 @@ func importReferenceMap(pkg load.Package, graph *load.Graph) map[string]map[stri
 		refs[localName] = symbols
 	}
 	return refs
+}
+
+func importLocalName(imp parse.Import) string {
+	if imp.Alias != "" && imp.Alias != "." && imp.Alias != "_" {
+		return imp.Alias
+	}
+	return load.PackageNameFromImportPath(imp.Path)
 }
 
 func isExported(name string) bool {

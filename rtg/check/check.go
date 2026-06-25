@@ -54,7 +54,7 @@ func Graph(g *load.Graph) error {
 				continue
 			}
 			diags = append(diags, File(parsed)...)
-			diags = append(diags, importedSelectorDiagnostics(pkg, parsed, exported)...)
+			diags = append(diags, importedSelectorDiagnostics(parsed, exported)...)
 			for _, decl := range parsed.Decls {
 				for i, name := range declNames(decl) {
 					if name == "" || name == "_" {
@@ -122,12 +122,13 @@ func declNames(decl parse.Decl) []string {
 	return []string{decl.Name}
 }
 
-func importedSelectorDiagnostics(pkg load.Package, file parse.File, exported map[string]map[string]bool) Diagnostics {
+func importedSelectorDiagnostics(file parse.File, exported map[string]map[string]bool) Diagnostics {
 	localImports := map[string]string{}
 	importNames := map[string]bool{}
-	for importPath, localName := range pkg.ImportNames {
+	for _, imp := range file.Imports {
+		localName := importLocalName(imp)
 		if localName != "" {
-			localImports[localName] = importPath
+			localImports[localName] = imp.Path
 			importNames[localName] = true
 		}
 	}
