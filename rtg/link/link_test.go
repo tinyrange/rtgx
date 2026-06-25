@@ -307,6 +307,22 @@ func TestBuildRejectsMultipleEntrypoints(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsUnlinkableEntrypoint(t *testing.T) {
+	_, err := Build([]unit.Unit{{
+		ImportPath: "example.com/app/main",
+		Package:    "main",
+		Decls: []unit.Decl{
+			{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_main_appMain", Body: "func rtg_example_com_app_main_appMain int { return 0 }\n"},
+		},
+	}})
+	if err == nil {
+		t.Fatalf("Build succeeded with unlinkable appMain declaration")
+	}
+	if !strings.Contains(err.Error(), "example.com/app/main: appMain declaration cannot be linked") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestSourceCombinesUnitsAndAddsAppMainWrapper(t *testing.T) {
 	plan, err := Build([]unit.Unit{
 		{

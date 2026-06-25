@@ -192,6 +192,9 @@ func validateEntrypoint(units []unit.Unit) error {
 		}
 		for _, decl := range u.Decls {
 			if decl.Name == "appMain" && decl.UnitName != "" {
+				if appMainWrapper(decl) == "" {
+					return fmt.Errorf("%s: appMain declaration cannot be linked", u.ImportPath)
+				}
 				found = append(found, u.ImportPath)
 			}
 		}
