@@ -9,6 +9,10 @@ func ParseSource(path string, src []byte) (Unit, error) {
 	lines := strings.Split(string(src), "\n")
 	var u Unit
 	currentDecl := -1
+	seenUnit := false
+	seenImports := map[string]bool{}
+	seenExports := map[string]bool{}
+	seenRefs := map[string]bool{}
 	for _, line := range lines {
 		if strings.HasPrefix(line, "package ") && u.Package == "" {
 			u.Package = strings.TrimSpace(strings.TrimPrefix(line, "package "))
@@ -33,6 +37,10 @@ func ParseSource(path string, src []byte) (Unit, error) {
 		}
 		currentDecl = -1
 		if strings.HasPrefix(body, "unit ") {
+			if seenUnit {
+				return Unit{}, fmt.Errorf("%s: duplicate rtg unit metadata", path)
+			}
+			seenUnit = true
 			u.ImportPath = strings.TrimSpace(strings.TrimPrefix(body, "unit "))
 			continue
 		}
@@ -41,6 +49,10 @@ func ParseSource(path string, src []byte) (Unit, error) {
 			if err != nil {
 				return Unit{}, fmt.Errorf("%s: %w", path, err)
 			}
+			if seenImports[imp] {
+				return Unit{}, fmt.Errorf("%s: duplicate import metadata %q", path, imp)
+			}
+			seenImports[imp] = true
 			u.Imports = append(u.Imports, imp)
 			continue
 		}
@@ -50,6 +62,11 @@ func ParseSource(path string, src []byte) (Unit, error) {
 				return Unit{}, fmt.Errorf("%s: %w", path, err)
 			}
 			sym.ImportPath = u.ImportPath
+			key := sym.Name
+			if seenExports[key] {
+				return Unit{}, fmt.Errorf("%s: duplicate export metadata %s", path, sym.Name)
+			}
+			seenExports[key] = true
 			u.Exports = append(u.Exports, sym)
 			continue
 		}
@@ -58,6 +75,11 @@ func ParseSource(path string, src []byte) (Unit, error) {
 			if err != nil {
 				return Unit{}, fmt.Errorf("%s: %w", path, err)
 			}
+			key := sym.ImportPath + "\x00" + sym.Name
+			if seenRefs[key] {
+				return Unit{}, fmt.Errorf("%s: duplicate reference metadata %s.%s", path, sym.ImportPath, sym.Name)
+			}
+			seenRefs[key] = true
 			u.References = append(u.References, sym)
 			continue
 		}

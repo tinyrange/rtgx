@@ -39,6 +39,61 @@ func TestParseSourceRoundTripMetadata(t *testing.T) {
 	}
 }
 
+func TestParseSourceRejectsDuplicateMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "unit",
+			src: `// rtg:unit example.com/app
+// rtg:unit example.com/app
+package main
+`,
+			want: "duplicate rtg unit metadata",
+		},
+		{
+			name: "import",
+			src: `// rtg:unit example.com/app
+package main
+// rtg:import "example.com/app/dep"
+// rtg:import "example.com/app/dep"
+`,
+			want: `duplicate import metadata "example.com/app/dep"`,
+		},
+		{
+			name: "export",
+			src: `// rtg:unit example.com/app
+package main
+// rtg:export Value => rtg_example_com_app_Value
+// rtg:export Value => rtg_example_com_app_Value
+`,
+			want: "duplicate export metadata Value",
+		},
+		{
+			name: "reference",
+			src: `// rtg:unit example.com/app
+package main
+// rtg:ref example.com/app/dep Value => rtg_example_com_app_dep_Value
+// rtg:ref example.com/app/dep Value => rtg_example_com_app_dep_Value
+`,
+			want: "duplicate reference metadata example.com/app/dep.Value",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseSource(tt.name+".rtg.go", []byte(tt.src))
+			if err == nil {
+				t.Fatalf("ParseSource accepted duplicate %s metadata", tt.name)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func sourceForTest(u Unit) []byte {
 	var b strings.Builder
 	b.WriteString("//go:build rtg\n\n")
