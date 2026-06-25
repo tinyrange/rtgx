@@ -308,18 +308,40 @@ func TestBuildRejectsMultipleEntrypoints(t *testing.T) {
 }
 
 func TestBuildRejectsUnlinkableEntrypoint(t *testing.T) {
-	_, err := Build([]unit.Unit{{
-		ImportPath: "example.com/app/main",
-		Package:    "main",
-		Decls: []unit.Decl{
-			{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_main_appMain", Body: "func rtg_example_com_app_main_appMain int { return 0 }\n"},
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "invalid signature",
+			body: "func rtg_example_com_app_main_appMain int { return 0 }\n",
 		},
-	}})
-	if err == nil {
-		t.Fatalf("Build succeeded with unlinkable appMain declaration")
+		{
+			name: "unnamed parameter",
+			body: "func rtg_example_com_app_main_appMain([]string) int { return 0 }\n",
+		},
+		{
+			name: "blank parameter",
+			body: "func rtg_example_com_app_main_appMain(_ int) int { return 0 }\n",
+		},
 	}
-	if !strings.Contains(err.Error(), "example.com/app/main: appMain declaration cannot be linked") {
-		t.Fatalf("error = %q", err)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Build([]unit.Unit{{
+				ImportPath: "example.com/app/main",
+				Package:    "main",
+				Decls: []unit.Decl{
+					{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_main_appMain", Body: tt.body},
+				},
+			}})
+			if err == nil {
+				t.Fatalf("Build succeeded with unlinkable appMain declaration")
+			}
+			if !strings.Contains(err.Error(), "example.com/app/main: appMain declaration cannot be linked") {
+				t.Fatalf("error = %q", err)
+			}
+		})
 	}
 }
 
@@ -359,5 +381,30 @@ func TestSourceCombinesUnitsAndAddsAppMainWrapper(t *testing.T) {
 		if !strings.Contains(src, want) {
 			t.Fatalf("linked source missing %q:\n%s", want, src)
 		}
+	}
+}
+
+func TestSourceAddsAppMainWrapperForGroupedParameters(t *testing.T) {
+	plan, err := Build([]unit.Unit{
+		{
+			ImportPath: "example.com/app/main",
+			Package:    "main",
+			Decls: []unit.Decl{
+				{
+					Kind:     "func",
+					Name:     "appMain",
+					UnitName: "rtg_example_com_app_main_appMain",
+					Body:     "func rtg_example_com_app_main_appMain(a, b int, label string) int { return a + b }\n",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	src := string(Source(plan))
+	want := "func appMain(a, b int, label string) int {\n\treturn rtg_example_com_app_main_appMain(a, b, label)\n}\n"
+	if !strings.Contains(src, want) {
+		t.Fatalf("linked source missing grouped wrapper %q:\n%s", want, src)
 	}
 }

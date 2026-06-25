@@ -258,7 +258,10 @@ func appMainWrapper(decl unit.Decl) string {
 	}
 	params := signature[:close+1]
 	result := strings.TrimSpace(signature[close+1:])
-	args := argumentNames(params)
+	args, ok := argumentNames(params)
+	if !ok {
+		return ""
+	}
 	var out bytes.Buffer
 	out.WriteString("func appMain")
 	out.WriteString(signature)
@@ -290,21 +293,60 @@ func matchingParen(s string) int {
 	return -1
 }
 
-func argumentNames(params string) string {
+func argumentNames(params string) (string, bool) {
 	if len(params) < 2 {
-		return ""
+		return "", false
 	}
 	inner := strings.TrimSpace(params[1 : len(params)-1])
 	if inner == "" {
-		return ""
+		return "", true
 	}
 	parts := strings.Split(inner, ",")
 	var names []string
+	var pending []string
 	for _, part := range parts {
 		fields := strings.Fields(strings.TrimSpace(part))
-		if len(fields) > 1 {
-			names = append(names, fields[0])
+		if len(fields) == 0 {
+			return "", false
+		}
+		if len(fields) == 1 {
+			pending = append(pending, fields[0])
+			continue
+		}
+		for _, name := range pending {
+			if !isArgumentIdentifier(name) {
+				return "", false
+			}
+			names = append(names, name)
+		}
+		pending = nil
+		name := fields[0]
+		if !isArgumentIdentifier(name) {
+			return "", false
+		}
+		names = append(names, name)
+	}
+	if len(pending) > 0 {
+		return "", false
+	}
+	return strings.Join(names, ", "), true
+}
+
+func isArgumentIdentifier(name string) bool {
+	if name == "" || name == "_" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if i == 0 {
+			if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && c != '_' {
+				return false
+			}
+			continue
+		}
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
+			return false
 		}
 	}
-	return strings.Join(names, ", ")
+	return true
 }
