@@ -90,14 +90,26 @@ func exportedDecls(g *load.Graph) map[string]map[string]bool {
 				continue
 			}
 			for _, decl := range parsed.Decls {
-				if isExported(decl.Name) {
-					names[decl.Name] = true
+				for _, name := range declNames(decl) {
+					if isExported(name) {
+						names[name] = true
+					}
 				}
 			}
 		}
 		out[pkg.ImportPath] = names
 	}
 	return out
+}
+
+func declNames(decl parse.Decl) []string {
+	if len(decl.Names) > 0 {
+		return decl.Names
+	}
+	if decl.Name == "" {
+		return nil
+	}
+	return []string{decl.Name}
 }
 
 func importedSelectorDiagnostics(pkg load.Package, file parse.File, exported map[string]map[string]bool) Diagnostics {

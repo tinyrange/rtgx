@@ -25,6 +25,7 @@ type Import struct {
 type Decl struct {
 	Kind     string
 	Name     string
+	Names    []string
 	Tok      scan.Token
 	NameTok  scan.Token
 	Receiver bool
@@ -137,6 +138,7 @@ func parseDecl(file *File, pos int) int {
 		}
 		if namePos < len(toks) && toks[namePos].Kind == scan.Ident {
 			decl.Name = toks[namePos].Text
+			decl.Names = []string{decl.Name}
 			decl.NameTok = toks[namePos]
 		}
 		next := findNextTopLevel(toks, pos+1)
@@ -149,6 +151,7 @@ func parseDecl(file *File, pos int) int {
 		if namePos < len(toks) && toks[namePos].Text == "(" {
 			close := skipBalanced(toks, namePos, "(", ")")
 			if close > namePos {
+				decl.Names = groupedDeclNames(toks, namePos, close)
 				next := close + 1
 				decl.End = declEnd(file, next)
 				file.Decls = append(file.Decls, decl)
@@ -161,6 +164,7 @@ func parseDecl(file *File, pos int) int {
 		}
 		if namePos < len(toks) && toks[namePos].Kind == scan.Ident {
 			decl.Name = toks[namePos].Text
+			decl.Names = []string{decl.Name}
 			decl.NameTok = toks[namePos]
 		}
 		next := findNextTopLevel(toks, pos+1)
@@ -169,6 +173,64 @@ func parseDecl(file *File, pos int) int {
 		return next
 	}
 	return pos + 1
+}
+
+func groupedDeclNames(toks []scan.Token, open int, close int) []string {
+	var names []string
+	line := -1
+	expectName := true
+	paren := 0
+	brack := 0
+	brace := 0
+	for i := open + 1; i < close; i++ {
+		tok := toks[i]
+		if tok.Text == "(" {
+			paren++
+			continue
+		}
+		if tok.Text == ")" && paren > 0 {
+			paren--
+			continue
+		}
+		if tok.Text == "[" {
+			brack++
+			continue
+		}
+		if tok.Text == "]" && brack > 0 {
+			brack--
+			continue
+		}
+		if tok.Text == "{" {
+			brace++
+			continue
+		}
+		if tok.Text == "}" && brace > 0 {
+			brace--
+			continue
+		}
+		if paren > 0 || brack > 0 || brace > 0 {
+			continue
+		}
+		if tok.Line != line {
+			line = tok.Line
+			expectName = true
+		}
+		if tok.Text == "," {
+			expectName = true
+			continue
+		}
+		if tok.Text == "=" {
+			expectName = false
+			continue
+		}
+		if tok.Kind == scan.Ident && expectName {
+			names = append(names, tok.Text)
+			expectName = false
+			continue
+		}
+		expectName = false
+	}
+	return names
 }
 
 func DeclText(file File, decl Decl) string {

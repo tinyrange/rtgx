@@ -39,8 +39,10 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 		}
 		parsedFiles = append(parsedFiles, parsed)
 		for _, decl := range parsed.Decls {
-			if decl.Name != "" && decl.Name != "_" {
-				topNames[decl.Name] = SymbolName(pkg.ImportPath, decl.Name)
+			for _, name := range declNames(decl) {
+				if name != "" && name != "_" {
+					topNames[name] = SymbolName(pkg.ImportPath, name)
+				}
 			}
 		}
 	}
@@ -81,6 +83,16 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 		return u.References[i].ImportPath < u.References[j].ImportPath
 	})
 	return u, nil
+}
+
+func declNames(decl parse.Decl) []string {
+	if len(decl.Names) > 0 {
+		return decl.Names
+	}
+	if decl.Name == "" {
+		return nil
+	}
+	return []string{decl.Name}
 }
 
 func unitPathForDecl(files []load.File, path string) string {
@@ -380,8 +392,10 @@ func importReferenceMap(pkg load.Package, graph *load.Graph) map[string]map[stri
 				continue
 			}
 			for _, decl := range parsed.Decls {
-				if isExported(decl.Name) {
-					symbols[decl.Name] = unit.Symbol{ImportPath: importPath, Name: decl.Name, UnitName: SymbolName(importPath, decl.Name)}
+				for _, name := range declNames(decl) {
+					if isExported(name) {
+						symbols[name] = unit.Symbol{ImportPath: importPath, Name: name, UnitName: SymbolName(importPath, name)}
+					}
 				}
 			}
 		}

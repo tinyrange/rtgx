@@ -61,3 +61,46 @@ func (b box) Value() int { return b.value }
 		t.Fatalf("method decl = %#v, want receiver Value", method)
 	}
 }
+
+func TestFileSourceRecordsGroupedDeclNames(t *testing.T) {
+	file, err := FileSource("group.go", []byte(`package pkg
+
+const (
+	A = 1
+	B, C = 2, 3
+)
+
+type (
+	Box struct {
+		value int
+	}
+	Alias int
+)
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	if len(file.Decls) != 2 {
+		t.Fatalf("decls = %#v, want 2", file.Decls)
+	}
+	wantConst := []string{"A", "B", "C"}
+	if !sameStrings(file.Decls[0].Names, wantConst) {
+		t.Fatalf("const names = %#v, want %#v", file.Decls[0].Names, wantConst)
+	}
+	wantType := []string{"Box", "Alias"}
+	if !sameStrings(file.Decls[1].Names, wantType) {
+		t.Fatalf("type names = %#v, want %#v", file.Decls[1].Names, wantType)
+	}
+}
+
+func sameStrings(got []string, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}

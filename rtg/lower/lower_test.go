@@ -310,3 +310,63 @@ func PrintInt(v int) int { return v }
 		t.Fatalf("std selector was not rewritten: %q", u.Decls[0].Body)
 	}
 }
+
+func TestPackageWithGraphExportsGroupedDeclNames(t *testing.T) {
+	mainPkg := load.Package{
+		ImportPath:  "example.com/app",
+		Name:        "main",
+		Imports:     []string{"example.com/app/dep"},
+		ImportNames: map[string]string{"example.com/app/dep": "dep"},
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+import "example.com/app/dep"
+
+func appMain() int { return dep.Answer + dep.Next }
+`),
+			},
+		},
+	}
+	depPkg := load.Package{
+		ImportPath: "example.com/app/dep",
+		Name:       "dep",
+		Files: []load.File{
+			{
+				Path: "dep.go",
+				Source: []byte(`package dep
+
+const (
+	Answer = 41
+	Next = Answer + 1
+)
+`),
+			},
+		},
+	}
+	graph := &load.Graph{Packages: []load.Package{mainPkg, depPkg}}
+	depUnit, err := PackageWithGraph(depPkg, graph)
+	if err != nil {
+		t.Fatalf("PackageWithGraph dep failed: %v", err)
+	}
+	if len(depUnit.Exports) != 2 || depUnit.Exports[0].Name != "Answer" || depUnit.Exports[1].Name != "Next" {
+		t.Fatalf("dep exports = %#v", depUnit.Exports)
+	}
+	if !strings.Contains(depUnit.Decls[0].Body, "rtg_example_com_app_dep_Answer = 41") {
+		t.Fatalf("grouped const Answer was not rewritten: %q", depUnit.Decls[0].Body)
+	}
+	if !strings.Contains(depUnit.Decls[0].Body, "rtg_example_com_app_dep_Next = rtg_example_com_app_dep_Answer + 1") {
+		t.Fatalf("grouped const Next was not rewritten: %q", depUnit.Decls[0].Body)
+	}
+	mainUnit, err := PackageWithGraph(mainPkg, graph)
+	if err != nil {
+		t.Fatalf("PackageWithGraph main failed: %v", err)
+	}
+	if len(mainUnit.References) != 2 || mainUnit.References[0].Name != "Answer" || mainUnit.References[1].Name != "Next" {
+		t.Fatalf("main references = %#v", mainUnit.References)
+	}
+	if !strings.Contains(mainUnit.Decls[0].Body, "return rtg_example_com_app_dep_Answer + rtg_example_com_app_dep_Next") {
+		t.Fatalf("main body did not rewrite grouped refs: %q", mainUnit.Decls[0].Body)
+	}
+}
