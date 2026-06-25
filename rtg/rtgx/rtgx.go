@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	targetpkg "j5.nz/rtg/rtg/target"
 )
 
 type Options struct {
@@ -20,7 +22,10 @@ func CompileSource(source []byte, opts Options) error {
 	}
 	target := opts.Target
 	if target == "" {
-		target = "linux/amd64"
+		target = targetpkg.Default()
+	}
+	if !targetpkg.Supported(target) {
+		return fmt.Errorf("rtg: unsupported target: %s\nrtg: supported targets: %s", target, targetpkg.List())
 	}
 	output, err := filepath.Abs(opts.Output)
 	if err != nil {

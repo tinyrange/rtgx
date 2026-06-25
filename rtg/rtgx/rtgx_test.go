@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -43,5 +44,19 @@ func appMain() int {
 	}
 	if string(data) != "PASS\n" {
 		t.Fatalf("compiled app output = %q", string(data))
+	}
+}
+
+func TestCompileSourceRejectsUnsupportedTarget(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "app")
+	err := CompileSource([]byte("package main\n"), Options{Target: "linux/arm64", Output: out})
+	if err == nil {
+		t.Fatalf("CompileSource accepted unsupported target")
+	}
+	msg := err.Error()
+	for _, want := range []string{"rtg: unsupported target: linux/arm64", "linux/amd64", "linux/aarch64", "wasi/wasm32"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q missing %q", msg, want)
+		}
 	}
 }

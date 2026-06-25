@@ -12,6 +12,7 @@ import (
 	"j5.nz/rtg/rtg/link"
 	"j5.nz/rtg/rtg/load"
 	"j5.nz/rtg/rtg/rtgx"
+	"j5.nz/rtg/rtg/target"
 	"j5.nz/rtg/rtg/unit"
 )
 
@@ -186,7 +187,7 @@ func unitInputPaths(input string) ([]string, error) {
 }
 
 func parseArgs(args []string) (config, error) {
-	cfg := config{target: "linux/amd64"}
+	cfg := config{target: target.Default()}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "-t" {
@@ -194,7 +195,11 @@ func parseArgs(args []string) (config, error) {
 			if i >= len(args) {
 				return cfg, fmt.Errorf("rtg: missing argument for -t")
 			}
-			cfg.target = args[i]
+			targetArg := args[i]
+			if !target.Supported(targetArg) {
+				return cfg, fmt.Errorf("rtg: unsupported target: %s\nrtg: supported targets: %s", targetArg, target.List())
+			}
+			cfg.target = targetArg
 			continue
 		}
 		if arg == "-o" {
@@ -229,5 +234,5 @@ func parseArgs(args []string) (config, error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: rtg [-t target] [-check] [-emit-unit [-o output.rtg.go|dir]] [-link -o output] [package-or-files...]")
+	fmt.Fprintf(os.Stderr, "usage: rtg [-t target] [-check] [-emit-unit [-o output.rtg.go|dir]] [-link -o output] [package-or-files...]\nsupported targets: %s\n", target.List())
 }

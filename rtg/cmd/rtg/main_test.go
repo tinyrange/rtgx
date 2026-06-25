@@ -45,6 +45,29 @@ func appMain() int {
 	}
 }
 
+func TestParseArgsDefaultsToSupportedTarget(t *testing.T) {
+	cfg, err := parseArgs([]string{"-check", "."})
+	if err != nil {
+		t.Fatalf("parseArgs failed: %v", err)
+	}
+	if cfg.target == "" {
+		t.Fatalf("default target is empty")
+	}
+}
+
+func TestParseArgsRejectsUnsupportedTarget(t *testing.T) {
+	_, err := parseArgs([]string{"-t", "linux/arm64", "-check", "."})
+	if err == nil {
+		t.Fatalf("parseArgs accepted unsupported target")
+	}
+	msg := err.Error()
+	for _, want := range []string{"rtg: unsupported target: linux/arm64", "linux/amd64", "linux/aarch64", "wasi/wasm32"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q missing %q", msg, want)
+		}
+	}
+}
+
 func TestRunEmitUnitDefaultsToCacheDirectory(t *testing.T) {
 	root := t.TempDir()
 	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
