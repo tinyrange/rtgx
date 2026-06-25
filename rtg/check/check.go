@@ -364,7 +364,44 @@ func startsGenericInstantiation(toks []scan.Token, i int) bool {
 	if close < 0 || close+1 >= len(toks) {
 		return false
 	}
+	if toks[close+1].Text == "{" && isControlBlockOpen(toks, close+1) {
+		return false
+	}
 	return toks[close+1].Text == "{" || toks[close+1].Text == "("
+}
+
+func isControlBlockOpen(toks []scan.Token, open int) bool {
+	parenDepth := 0
+	brackDepth := 0
+	for i := open - 1; i >= 0; i-- {
+		text := toks[i].Text
+		if text == ")" {
+			parenDepth++
+			continue
+		}
+		if text == "(" && parenDepth > 0 {
+			parenDepth--
+			continue
+		}
+		if text == "]" {
+			brackDepth++
+			continue
+		}
+		if text == "[" && brackDepth > 0 {
+			brackDepth--
+			continue
+		}
+		if parenDepth != 0 || brackDepth != 0 {
+			continue
+		}
+		if text == "if" || text == "for" || text == "switch" || text == "select" {
+			return true
+		}
+		if text == "{" || text == "}" || text == "func" {
+			return false
+		}
+	}
+	return false
 }
 
 func isImaginaryLiteral(text string) bool {

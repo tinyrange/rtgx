@@ -530,6 +530,38 @@ func main() {
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
+func TestStdBytesHelpersFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/stdbyteshelpers\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "bytes"
+
+func main() {
+	value := []byte("prefix-body-suffix")
+	ok := bytes.Equal([]byte("PASS"), []byte("PASS"))
+	ok = ok && !bytes.Equal([]byte("PASS"), []byte("FAIL"))
+	ok = ok && bytes.HasPrefix(value, []byte("prefix"))
+	ok = ok && !bytes.HasPrefix(value, []byte("body"))
+	ok = ok && bytes.HasSuffix(value, []byte("suffix"))
+	ok = ok && !bytes.HasSuffix(value, []byte("prefix"))
+	ok = ok && bytes.Contains(value, []byte("body"))
+	ok = ok && !bytes.Contains(value, []byte("missing"))
+	ok = ok && bytes.Contains(value, []byte(""))
+	ok = ok && bytes.Index(value, []byte("body")) == 7
+	ok = ok && bytes.Index(value, []byte("missing")) == -1
+	ok = ok && bytes.IndexByte(value, '-') == 6
+	ok = ok && bytes.IndexByte(value, 'z') == -1
+	if ok {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
 func TestStdRuntimeFrontendMatchesHostGo(t *testing.T) {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		t.Skipf("native runtime fixture expects linux/amd64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)

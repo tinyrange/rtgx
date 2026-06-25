@@ -82,6 +82,29 @@ func appMain() int {
 	}
 }
 
+func TestFileAllowsIndexExpressionsInComparisons(t *testing.T) {
+	file, err := parse.FileSource("index.go", []byte(`package main
+
+func equal(a []byte, b []byte) bool {
+	i := 0
+	for i < len(a) {
+		if a[i] != b[i] {
+			return false
+		}
+		i = i + 1
+	}
+	return true
+}
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	diags := File(file)
+	if len(diags) != 0 {
+		t.Fatalf("File rejected index comparisons: %v", diags)
+	}
+}
+
 func TestFileRejectsTypeAssertionsAndSwitches(t *testing.T) {
 	file, err := parse.FileSource("assertions.go", []byte(`package main
 

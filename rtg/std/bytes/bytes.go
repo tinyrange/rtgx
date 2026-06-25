@@ -4,6 +4,71 @@ type Buffer struct {
 	buf []byte
 }
 
+func Equal(a []byte, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	i := 0
+	for i < len(a) {
+		if a[i] != b[i] {
+			return false
+		}
+		i = i + 1
+	}
+	return true
+}
+
+func HasPrefix(s []byte, prefix []byte) bool {
+	n := len(prefix)
+	if n > len(s) {
+		return false
+	}
+	return Equal(s[0:n], prefix)
+}
+
+func HasSuffix(s []byte, suffix []byte) bool {
+	n := len(suffix)
+	if n > len(s) {
+		return false
+	}
+	start := len(s) - n
+	return Equal(s[start:len(s)], suffix)
+}
+
+func Contains(s []byte, subslice []byte) bool {
+	return Index(s, subslice) >= 0
+}
+
+func Index(s []byte, subslice []byte) int {
+	n := len(subslice)
+	if n == 0 {
+		return 0
+	}
+	if n > len(s) {
+		return -1
+	}
+	limit := len(s) - n
+	i := 0
+	for i <= limit {
+		if Equal(s[i:i+n], subslice) {
+			return i
+		}
+		i = i + 1
+	}
+	return -1
+}
+
+func IndexByte(s []byte, c byte) int {
+	i := 0
+	for i < len(s) {
+		if s[i] == c {
+			return i
+		}
+		i = i + 1
+	}
+	return -1
+}
+
 func (b *Buffer) WriteString(s string) int {
 	i := 0
 	for i < len(s) {
