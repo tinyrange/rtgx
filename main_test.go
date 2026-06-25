@@ -38,6 +38,8 @@ type targetConfig struct {
 	arch string
 }
 
+const crossArchTestsEnv = "RTG_CROSS_ARCH_TESTS"
+
 func getCompilerFiles(config targetConfig) ([]string, error) {
 	var files []string
 
@@ -83,10 +85,14 @@ func supportedCompilerTargets(t *testing.T) []compilerTarget {
 	case "linux/amd64":
 		configs = []targetConfig{
 			{os: "linux", arch: "amd64"},
-			{os: "linux", arch: "386"},
-			{os: "linux", arch: "aarch64"},
-			{os: "linux", arch: "arm"},
-			{os: "wasi", arch: "wasm32"},
+		}
+		if crossArchTestsEnabled() {
+			configs = append(configs,
+				targetConfig{os: "linux", arch: "386"},
+				targetConfig{os: "linux", arch: "aarch64"},
+				targetConfig{os: "linux", arch: "arm"},
+				targetConfig{os: "wasi", arch: "wasm32"},
+			)
 		}
 	case "linux/arm64":
 		configs = []targetConfig{
@@ -118,6 +124,42 @@ func supportedCompilerTargets(t *testing.T) []compilerTarget {
 		targets = append(targets, target)
 	}
 	return targets
+}
+
+func crossArchTestsEnabled() bool {
+	return os.Getenv(crossArchTestsEnv) == "1"
+}
+
+func TestSupportedCompilerTargetsDefaultNativeOnly(t *testing.T) {
+	if runtime.GOOS+"/"+runtime.GOARCH != "linux/amd64" {
+		t.Skipf("target selection regression is linux/amd64-specific, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	t.Setenv(crossArchTestsEnv, "")
+
+	targets := supportedCompilerTargets(t)
+	if len(targets) != 1 {
+		t.Fatalf("default targets = %#v, want one native target", targets)
+	}
+	if targets[0].name != "linux/amd64" {
+		t.Fatalf("default target = %q, want linux/amd64", targets[0].name)
+	}
+}
+
+func TestSupportedCompilerTargetsCrossArchOptIn(t *testing.T) {
+	if runtime.GOOS+"/"+runtime.GOARCH != "linux/amd64" {
+		t.Skipf("target selection regression is linux/amd64-specific, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	t.Setenv(crossArchTestsEnv, "1")
+
+	targets := supportedCompilerTargets(t)
+	var names []string
+	for _, target := range targets {
+		names = append(names, target.name)
+	}
+	want := []string{"linux/amd64", "linux/386", "linux/aarch64", "linux/arm", "wasi/wasm32"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Fatalf("opt-in targets = %v, want %v", names, want)
+	}
 }
 
 func (target compilerTarget) safeName() string {
