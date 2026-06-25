@@ -17,6 +17,9 @@ func Build(units []unit.Unit) (Plan, error) {
 	if err := validateUniqueUnits(units); err != nil {
 		return Plan{}, err
 	}
+	if err := validateImports(units); err != nil {
+		return Plan{}, err
+	}
 	exports := map[string]unit.Symbol{}
 	for _, u := range units {
 		for _, sym := range u.Exports {
@@ -55,6 +58,21 @@ func validateUniqueUnits(units []unit.Unit) error {
 			return fmt.Errorf("duplicate unit: %s", u.ImportPath)
 		}
 		seen[u.ImportPath] = true
+	}
+	return nil
+}
+
+func validateImports(units []unit.Unit) error {
+	present := map[string]bool{}
+	for _, u := range units {
+		present[u.ImportPath] = true
+	}
+	for _, u := range units {
+		for _, imp := range u.Imports {
+			if !present[imp] {
+				return fmt.Errorf("%s: missing imported unit %s", u.ImportPath, imp)
+			}
+		}
 	}
 	return nil
 }

@@ -71,6 +71,23 @@ func TestBuildRejectsDuplicateUnits(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsMissingImportedUnit(t *testing.T) {
+	_, err := Build([]unit.Unit{{
+		ImportPath: "example.com/app/main",
+		Package:    "main",
+		Imports:    []string{"example.com/app/dep"},
+		Decls: []unit.Decl{
+			{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_main_appMain", Body: "func rtg_example_com_app_main_appMain() int { return 0 }\n"},
+		},
+	}})
+	if err == nil {
+		t.Fatalf("Build succeeded with missing imported unit")
+	}
+	if !strings.Contains(err.Error(), "example.com/app/main: missing imported unit example.com/app/dep") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestBuildRejectsMissingEntrypoint(t *testing.T) {
 	_, err := Build([]unit.Unit{{
 		ImportPath: "example.com/app/main",
