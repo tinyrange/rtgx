@@ -384,6 +384,45 @@ func TestSourceCombinesUnitsAndAddsAppMainWrapper(t *testing.T) {
 	}
 }
 
+func TestSourceOmitsUnreachableFunctions(t *testing.T) {
+	plan, err := Build([]unit.Unit{
+		{
+			ImportPath: "example.com/app/main",
+			Package:    "main",
+			Decls: []unit.Decl{
+				{
+					Kind:     "func",
+					Name:     "appMain",
+					UnitName: "rtg_example_com_app_main_appMain",
+					Body:     "func rtg_example_com_app_main_appMain() int { rtg_example_com_app_main_used(); return 0 }\n",
+				},
+				{
+					Kind:     "func",
+					Name:     "used",
+					UnitName: "rtg_example_com_app_main_used",
+					Body:     "func rtg_example_com_app_main_used() int { return 1 }\n",
+				},
+				{
+					Kind:     "func",
+					Name:     "unused",
+					UnitName: "rtg_example_com_app_main_unused",
+					Body:     "func rtg_example_com_app_main_unused(v int) int { print(v); return v }\n",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	src := string(Source(plan))
+	if !strings.Contains(src, "func rtg_example_com_app_main_used() int") {
+		t.Fatalf("linked source missing reachable function:\n%s", src)
+	}
+	if strings.Contains(src, "rtg_example_com_app_main_unused") {
+		t.Fatalf("linked source retained unreachable function:\n%s", src)
+	}
+}
+
 func TestSourceAddsAppMainWrapperForGroupedParameters(t *testing.T) {
 	plan, err := Build([]unit.Unit{
 		{

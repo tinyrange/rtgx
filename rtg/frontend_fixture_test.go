@@ -151,6 +151,23 @@ func Emit() int {
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
+func TestStdFmtPrintlnFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/stdprint\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "fmt"
+
+func main() {
+	fmt.Print("PA")
+	fmt.Print("SS")
+	fmt.Print("\n")
+	fmt.Println("PASS")
+}
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
 func runFrontendFixtureMatchesHostGo(t *testing.T, fixture string) {
 	t.Helper()
 	host := exec.Command("go", "run", "./cmd/app")
