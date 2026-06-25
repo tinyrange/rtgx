@@ -25,24 +25,20 @@ type frontendSmokeTarget struct {
 }
 
 func TestHelloFixtureGoldenUnits(t *testing.T) {
-	fixture := filepath.Join("testdata", "hello_module")
-	units := loadFixtureUnits(t, fixture)
-	for _, u := range units {
-		name := emit.FileName(u.ImportPath)
-		got := string(emit.Source(u))
-		wantPath := filepath.Join("testdata", "golden", "hello_module", name)
-		want, err := os.ReadFile(wantPath)
-		if err != nil {
-			t.Fatalf("ReadFile golden %s failed: %v", wantPath, err)
-		}
-		if got != string(want) {
-			t.Fatalf("golden mismatch for %s\n%s", name, diffText(string(want), got))
-		}
-	}
+	assertFixtureGoldenUnits(t, "hello_module")
 }
 
 func TestHelloFixtureFrontendMatchesHostGo(t *testing.T) {
 	fixture := filepath.Join("testdata", "hello_module")
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
+func TestStructFixtureGoldenUnits(t *testing.T) {
+	assertFixtureGoldenUnits(t, "struct_module")
+}
+
+func TestStructFixtureFrontendMatchesHostGo(t *testing.T) {
+	fixture := filepath.Join("testdata", "struct_module")
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
@@ -302,6 +298,24 @@ func unitsContainBody(units []unit.Unit, body string) bool {
 		}
 	}
 	return false
+}
+
+func assertFixtureGoldenUnits(t *testing.T, name string) {
+	t.Helper()
+	fixture := filepath.Join("testdata", name)
+	units := loadFixtureUnits(t, fixture)
+	for _, u := range units {
+		unitName := emit.FileName(u.ImportPath)
+		got := string(emit.Source(u))
+		wantPath := filepath.Join("testdata", "golden", name, unitName)
+		want, err := os.ReadFile(wantPath)
+		if err != nil {
+			t.Fatalf("ReadFile golden %s failed: %v", wantPath, err)
+		}
+		if got != string(want) {
+			t.Fatalf("golden mismatch for %s\n%s", unitName, diffText(string(want), got))
+		}
+	}
 }
 
 func writeFixtureFile(t *testing.T, root string, path string, data string) {
