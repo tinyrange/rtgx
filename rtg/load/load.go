@@ -14,7 +14,6 @@ type File struct {
 	Path     string
 	UnitPath string
 	Source   []byte
-	Body     string
 }
 
 type Package struct {
@@ -157,8 +156,7 @@ func readPackage(module mod.Module, dir string, importPath string) (Package, err
 		for _, imp := range info.Imports {
 			importSet[imp.Path] = true
 		}
-		body := string(data[info.BodyStart:])
-		pkg.Files = append(pkg.Files, File{Path: path, UnitPath: unitFilePath(module, importPath, path), Source: data, Body: strings.TrimLeft(body, " \t\r\n")})
+		pkg.Files = append(pkg.Files, File{Path: path, UnitPath: unitFilePath(module, importPath, path), Source: data})
 	}
 	for imp := range importSet {
 		pkg.Imports = append(pkg.Imports, imp)

@@ -182,7 +182,7 @@ func PrintInt(v int) int { return v }
 	}
 }
 
-func TestParseSourceInfoImportBlockAndBody(t *testing.T) {
+func TestParseSourceInfoImportBlock(t *testing.T) {
 	src := []byte(`package main
 
 import (
@@ -204,10 +204,6 @@ func appMain() int { return 0 }
 	}
 	if info.Imports[1].Alias != "alias" || info.Imports[1].Name != "alias" {
 		t.Fatalf("aliased import = %#v", info.Imports[1])
-	}
-	body := string(src[info.BodyStart:])
-	if body == "" || body[0] == 'i' {
-		t.Fatalf("body still starts in import block: %q", body)
 	}
 }
 

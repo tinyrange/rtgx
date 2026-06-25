@@ -9,7 +9,6 @@ import (
 type SourceInfo struct {
 	PackageName string
 	Imports     []ImportInfo
-	BodyStart   int
 }
 
 type ImportInfo struct {
@@ -26,7 +25,7 @@ func ParseSourceInfo(path string, src []byte) (SourceInfo, error) {
 	if len(toks) < 2 || toks[0].Text != "package" || toks[1].Kind != scan.Ident {
 		return SourceInfo{}, fmt.Errorf("%s: missing package declaration", path)
 	}
-	info := SourceInfo{PackageName: toks[1].Text, BodyStart: toks[1].End}
+	info := SourceInfo{PackageName: toks[1].Text}
 	pos := 2
 	for pos < len(toks) {
 		if toks[pos].Text != "import" {
@@ -48,7 +47,6 @@ func ParseSourceInfo(path string, src []byte) (SourceInfo, error) {
 			if pos >= len(toks) {
 				return SourceInfo{}, fmt.Errorf("%s: unterminated import block", path)
 			}
-			info.BodyStart = toks[pos].End
 			pos++
 			continue
 		}
@@ -61,7 +59,6 @@ func ParseSourceInfo(path string, src []byte) (SourceInfo, error) {
 				}
 				alias := importAliasBefore(toks, pos)
 				info.Imports = append(info.Imports, ImportInfo{Path: value, Alias: alias, Name: importLocalName(value, alias)})
-				info.BodyStart = toks[pos].End
 				pos++
 				found = true
 				break
