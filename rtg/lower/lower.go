@@ -42,8 +42,11 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 	sortFilesByPath(files)
 	parsedFiles := make([]parse.File, 0, len(files))
 	topNames := map[string]string{}
+	var topNameOrder []string
 	methods := map[string]methodInfo{}
-	for _, file := range files {
+	var methodOrder []string
+	for fileIndex := 0; fileIndex < len(files); fileIndex++ {
+		file := files[fileIndex]
 		parsed, err := parse.FileSource(file.Path, file.Source)
 		if err != nil {
 			return unit.Unit{}, err
@@ -52,32 +55,46 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 			return unit.Unit{}, fmt.Errorf("%s: package name %s does not match loaded package %s", file.Path, parsed.PackageName, pkg.Name)
 		}
 		parsedFiles = append(parsedFiles, parsed)
-		for _, decl := range parsed.Decls {
-			for _, name := range declTopNames(parsed, decl) {
+		for declIndex := 0; declIndex < len(parsed.Decls); declIndex++ {
+			decl := parsed.Decls[declIndex]
+			names := declTopNames(parsed, decl)
+			for nameIndex := 0; nameIndex < len(names); nameIndex++ {
+				name := names[nameIndex]
 				if name != "" && name != "_" {
+					if _, ok := topNames[name]; !ok {
+						topNameOrder = append(topNameOrder, name)
+					}
 					topNames[name] = SymbolName(pkg.ImportPath, name)
 				}
 			}
 		}
 	}
-	for _, parsed := range parsedFiles {
-		for _, decl := range parsed.Decls {
+	for fileIndex := 0; fileIndex < len(parsedFiles); fileIndex++ {
+		parsed := parsedFiles[fileIndex]
+		for declIndex := 0; declIndex < len(parsed.Decls); declIndex++ {
+			decl := parsed.Decls[declIndex]
 			if decl.Kind != "func" || !decl.Receiver {
 				continue
 			}
 			info := methodDeclInfo(parsed, decl)
 			if info.name != "" {
 				info.unitName = topNames[info.name]
+				if _, ok := methods[info.name]; !ok {
+					methodOrder = append(methodOrder, info.name)
+				}
 				methods[info.name] = info
 			}
 		}
 	}
 	syntheticEntrypoint := false
 	if pkg.Name == "main" && topNames["appMain"] == "" && topNames["main"] != "" && hasOrdinaryMain(parsedFiles) {
+		topNameOrder = append(topNameOrder, "appMain")
 		topNames["appMain"] = SymbolName(pkg.ImportPath, "appMain")
 		syntheticEntrypoint = true
 	}
-	for name, unitName := range topNames {
+	for i := 0; i < len(topNameOrder); i++ {
+		name := topNameOrder[i]
+		unitName := topNames[name]
 		if isExported(name) {
 			u.Exports = append(u.Exports, unit.Symbol{ImportPath: pkg.ImportPath, Name: name, UnitName: unitName})
 		}
@@ -85,16 +102,20 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 	sortSymbolsByName(u.Exports)
 	depPackages := dependencyPackages(graph)
 	seenRefs := map[string]bool{}
-	for _, parsed := range parsedFiles {
-		importRefs := importReferenceMap(parsed, depPackages)
-		importMethods := importMethodMap(parsed, depPackages)
-		for _, decl := range parsed.Decls {
+	for fileIndex := 0; fileIndex < len(parsedFiles); fileIndex++ {
+		parsed := parsedFiles[fileIndex]
+		importRefs, importRefNames := importReferenceMap(parsed, depPackages)
+		importMethods, importMethodOrder := importMethodMap(parsed, depPackages)
+		allMethods := mergedMethodMap(methods, methodOrder, importMethods, importMethodOrder)
+		for declIndex := 0; declIndex < len(parsed.Decls); declIndex++ {
+			decl := parsed.Decls[declIndex]
 			var refs []unit.Symbol
-			body := rewriteDecl(parsed, decl, topNames, importRefs, mergedMethodMap(methods, importMethods), &refs)
+			body := rewriteDecl(parsed, decl, topNames, topNameOrder, importRefs, importRefNames, allMethods, &refs)
 			if decl.Kind == "func" {
 				body = normalizeFunctionExpressions(body, unitDeclSymbol(decl, parsed, topNames))
 			}
-			for _, ref := range refs {
+			for refIndex := 0; refIndex < len(refs); refIndex++ {
+				ref := refs[refIndex]
 				key := ref.ImportPath + "\x00" + ref.Name
 				if !seenRefs[key] {
 					seenRefs[key] = true
@@ -250,8 +271,10 @@ func methodReceiverIsPointer(file parse.File, decl parse.Decl) bool {
 }
 
 func hasOrdinaryMain(files []parse.File) bool {
-	for _, file := range files {
-		for _, decl := range file.Decls {
+	for fileIndex := 0; fileIndex < len(files); fileIndex++ {
+		file := files[fileIndex]
+		for declIndex := 0; declIndex < len(file.Decls); declIndex++ {
+			decl := file.Decls[declIndex]
 			if isOrdinaryMainDecl(file, decl) {
 				return true
 			}
@@ -303,7 +326,8 @@ func declNames(decl parse.Decl) []string {
 }
 
 func unitPathForDecl(files []load.File, path string) string {
-	for _, file := range files {
+	for i := 0; i < len(files); i++ {
+		file := files[i]
 		if file.Path == path {
 			if file.UnitPath != "" {
 				return file.UnitPath
@@ -329,7 +353,7 @@ func SymbolName(importPath string, name string) string {
 	return string(out)
 }
 
-func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, importRefs map[string]map[string]unit.Symbol, methods map[string]methodInfo, refs *[]unit.Symbol) string {
+func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, topNameOrder []string, importRefs map[string]map[string]unit.Symbol, importRefNames []string, methods map[string]methodInfo, refs *[]unit.Symbol) string {
 	start := decl.Start
 	end := decl.End
 	if start < 0 {
@@ -342,7 +366,7 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, i
 		end--
 	}
 	var out []byte
-	localNames := localNamesForDecl(file, decl, localRewriteNames(topNames, importRefs))
+	localNames := localNamesForDecl(file, decl, localRewriteNames(topNames, topNameOrder, importRefs, importRefNames))
 	localTypes := localTypesForDecl(file, decl)
 	cursor := start
 	if decl.Kind == "func" && decl.Receiver {
@@ -569,7 +593,8 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 			condition := strings.TrimSpace(applyExpressionReplacements(body, toks[short.condStart].Start, toks[short.condEnd-1].End, condReplacements))
 			out = append(out, indent...)
 			out = append(out, "{\n"...)
-			for _, temp := range initTemps {
+			for j := 0; j < len(initTemps); j++ {
+				temp := initTemps[j]
 				out = append(out, innerIndent...)
 				out = append(out, temp.name...)
 				out = append(out, " := "...)
@@ -579,7 +604,8 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 			out = append(out, innerIndent...)
 			out = append(out, init...)
 			out = append(out, '\n')
-			for _, temp := range condTemps {
+			for j := 0; j < len(condTemps); j++ {
+				temp := condTemps[j]
 				out = append(out, innerIndent...)
 				out = append(out, temp.name...)
 				out = append(out, " := "...)
@@ -612,7 +638,8 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 				loopIndent := innerIndent + "\t"
 				out = append(out, indent...)
 				out = append(out, "{\n"...)
-				for _, temp := range initTemps {
+				for j := 0; j < len(initTemps); j++ {
+					temp := initTemps[j]
 					out = append(out, innerIndent...)
 					out = append(out, temp.name...)
 					out = append(out, " := "...)
@@ -629,7 +656,8 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 				out = append(out, "for {\n"...)
 				if post.condStart < post.condEnd {
 					condition := strings.TrimSpace(applyExpressionReplacements(body, toks[post.condStart].Start, toks[post.condEnd-1].End, condReplacements))
-					for _, temp := range condTemps {
+					for j := 0; j < len(condTemps); j++ {
+						temp := condTemps[j]
 						out = append(out, loopIndent...)
 						out = append(out, temp.name...)
 						out = append(out, " := "...)
@@ -649,7 +677,8 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 				if len(out) == 0 || out[len(out)-1] != '\n' {
 					out = append(out, '\n')
 				}
-				for _, temp := range postTemps {
+				for j := 0; j < len(postTemps); j++ {
+					temp := postTemps[j]
 					out = append(out, loopIndent...)
 					out = append(out, temp.name...)
 					out = append(out, " := "...)
@@ -679,7 +708,8 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 				indent := statementIndent(body, toks[classic.token].Start)
 				innerIndent := indent + "\t"
 				out = append(out, '\n')
-				for _, temp := range temps {
+				for j := 0; j < len(temps); j++ {
+					temp := temps[j]
 					out = append(out, innerIndent...)
 					out = append(out, temp.name...)
 					out = append(out, " := "...)
@@ -715,7 +745,8 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 			condition := applyExpressionReplacements(body, toks[stmt.exprStart].Start, toks[stmt.exprEnd-1].End, replacements)
 			out = append(out, body[insertStart:toks[stmt.token].Start]...)
 			out = append(out, "for {\n"...)
-			for _, temp := range temps {
+			for j := 0; j < len(temps); j++ {
+				temp := temps[j]
 				out = append(out, innerIndent...)
 				out = append(out, temp.name...)
 				out = append(out, " := "...)
@@ -737,7 +768,8 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 		if insertStart == toks[stmt.token].Start {
 			out = append(out, '\n')
 		}
-		for _, temp := range temps {
+		for j := 0; j < len(temps); j++ {
+			temp := temps[j]
 			out = append(out, indent...)
 			out = append(out, temp.name...)
 			out = append(out, " := "...)
@@ -1135,7 +1167,8 @@ func normalizeIndexBounds(body string, toks []scan.Token, start int, end int, un
 	var temps []expressionTemp
 	var replacements []expressionReplacement
 	bounds := indexBoundRanges(toks, start, end)
-	for _, bound := range bounds {
+	for i := 0; i < len(bounds); i++ {
+		bound := bounds[i]
 		if bound.start >= bound.end || !expressionContainsCall(toks, bound.start, bound.end) {
 			continue
 		}
@@ -1305,7 +1338,8 @@ func conditionalStatementEnd(toks []scan.Token, pos int, openBrace int) int {
 func applyExpressionReplacements(body string, start int, end int, replacements []expressionReplacement) string {
 	var out []byte
 	cursor := start
-	for _, repl := range replacements {
+	for i := 0; i < len(replacements); i++ {
+		repl := replacements[i]
 		if repl.start < cursor || repl.end > end {
 			continue
 		}
@@ -1347,12 +1381,15 @@ func statementInsertStart(body string, pos int) int {
 	return lineStart
 }
 
-func localRewriteNames(topNames map[string]string, importRefs map[string]map[string]unit.Symbol) map[string]string {
+func localRewriteNames(topNames map[string]string, topNameOrder []string, importRefs map[string]map[string]unit.Symbol, importRefNames []string) map[string]string {
 	names := map[string]string{}
-	for name, unitName := range topNames {
+	for i := 0; i < len(topNameOrder); i++ {
+		name := topNameOrder[i]
+		unitName := topNames[name]
 		names[name] = unitName
 	}
-	for name := range importRefs {
+	for i := 0; i < len(importRefNames); i++ {
+		name := importRefNames[i]
 		names[name] = name
 	}
 	return names
@@ -1566,7 +1603,9 @@ func typeRangeIsPointer(toks []scan.Token, start int, end int) bool {
 }
 
 func isLocalNameAt(names map[string][]localRange, name string, pos int) bool {
-	for _, scope := range names[name] {
+	scopes := names[name]
+	for i := 0; i < len(scopes); i++ {
+		scope := scopes[i]
 		if pos >= scope.start && pos < scope.end {
 			return true
 		}
@@ -1676,7 +1715,8 @@ func addLocalName(names map[string][]localRange, name string, start int, end int
 }
 
 func tokenIndexAt(toks []scan.Token, start int) int {
-	for i, tok := range toks {
+	for i := 0; i < len(toks); i++ {
+		tok := toks[i]
 		if tok.Start == start {
 			return i
 		}
@@ -1741,21 +1781,26 @@ func dependencyPackages(graph *load.Graph) map[string]load.Package {
 	if graph == nil {
 		return packages
 	}
-	for _, dep := range graph.Packages {
+	for i := 0; i < len(graph.Packages); i++ {
+		dep := graph.Packages[i]
 		packages[dep.ImportPath] = dep
 	}
 	return packages
 }
 
-func mergedMethodMap(local map[string]methodInfo, imported map[string]methodInfo) map[string]methodInfo {
+func mergedMethodMap(local map[string]methodInfo, localOrder []string, imported map[string]methodInfo, importedOrder []string) map[string]methodInfo {
 	if len(imported) == 0 {
 		return local
 	}
 	methods := map[string]methodInfo{}
-	for name, method := range local {
+	for i := 0; i < len(localOrder); i++ {
+		name := localOrder[i]
+		method := local[name]
 		methods[name] = method
 	}
-	for name, method := range imported {
+	for i := 0; i < len(importedOrder); i++ {
+		name := importedOrder[i]
+		method := imported[name]
 		if _, ok := methods[name]; !ok {
 			methods[name] = method
 		}
@@ -1763,9 +1808,11 @@ func mergedMethodMap(local map[string]methodInfo, imported map[string]methodInfo
 	return methods
 }
 
-func importReferenceMap(file parse.File, packages map[string]load.Package) map[string]map[string]unit.Symbol {
+func importReferenceMap(file parse.File, packages map[string]load.Package) (map[string]map[string]unit.Symbol, []string) {
 	refs := map[string]map[string]unit.Symbol{}
-	for _, imp := range file.Imports {
+	var refNames []string
+	for impIndex := 0; impIndex < len(file.Imports); impIndex++ {
+		imp := file.Imports[impIndex]
 		localName := importLocalName(imp)
 		importPath := imp.Path
 		dep, ok := packages[importPath]
@@ -1773,42 +1820,55 @@ func importReferenceMap(file parse.File, packages map[string]load.Package) map[s
 			continue
 		}
 		symbols := map[string]unit.Symbol{}
-		for _, depFile := range dep.Files {
+		for fileIndex := 0; fileIndex < len(dep.Files); fileIndex++ {
+			depFile := dep.Files[fileIndex]
 			parsed, err := parse.FileSource(depFile.Path, depFile.Source)
 			if err != nil {
 				continue
 			}
-			for _, decl := range parsed.Decls {
-				for _, name := range declNames(decl) {
+			for declIndex := 0; declIndex < len(parsed.Decls); declIndex++ {
+				decl := parsed.Decls[declIndex]
+				names := declNames(decl)
+				for nameIndex := 0; nameIndex < len(names); nameIndex++ {
+					name := names[nameIndex]
 					if isExported(name) {
 						symbols[name] = unit.Symbol{ImportPath: importPath, Name: name, UnitName: SymbolName(importPath, name)}
 					}
 				}
 			}
 		}
-		for name, intrinsic := range intrinsicImportSymbols(importPath) {
+		intrinsics := intrinsicImportSymbols(importPath)
+		intrinsicNames := intrinsicImportSymbolNames(importPath)
+		for i := 0; i < len(intrinsicNames); i++ {
+			name := intrinsicNames[i]
+			intrinsic := intrinsics[name]
 			symbols[name] = unit.Symbol{Name: name, UnitName: intrinsic}
 		}
+		refNames = append(refNames, localName)
 		refs[localName] = symbols
 	}
-	return refs
+	return refs, refNames
 }
 
-func importMethodMap(file parse.File, packages map[string]load.Package) map[string]methodInfo {
+func importMethodMap(file parse.File, packages map[string]load.Package) (map[string]methodInfo, []string) {
 	methods := map[string]methodInfo{}
-	for _, imp := range file.Imports {
+	var methodNames []string
+	for impIndex := 0; impIndex < len(file.Imports); impIndex++ {
+		imp := file.Imports[impIndex]
 		localName := importLocalName(imp)
 		importPath := imp.Path
 		dep, ok := packages[importPath]
 		if !ok || localName == "" {
 			continue
 		}
-		for _, file := range dep.Files {
-			parsed, err := parse.FileSource(file.Path, file.Source)
+		for fileIndex := 0; fileIndex < len(dep.Files); fileIndex++ {
+			depFile := dep.Files[fileIndex]
+			parsed, err := parse.FileSource(depFile.Path, depFile.Source)
 			if err != nil {
 				continue
 			}
-			for _, decl := range parsed.Decls {
+			for declIndex := 0; declIndex < len(parsed.Decls); declIndex++ {
+				decl := parsed.Decls[declIndex]
 				if decl.Kind != "func" || !decl.Receiver || !isExported(decl.Name) {
 					continue
 				}
@@ -1818,11 +1878,15 @@ func importMethodMap(file parse.File, packages map[string]load.Package) map[stri
 				}
 				info.unitName = SymbolName(importPath, info.name)
 				info.importPath = importPath
-				methods[localName+"."+info.name] = info
+				methodName := localName + "." + info.name
+				if _, ok := methods[methodName]; !ok {
+					methodNames = append(methodNames, methodName)
+				}
+				methods[methodName] = info
 			}
 		}
 	}
-	return methods
+	return methods, methodNames
 }
 
 func intrinsicImportSymbols(importPath string) map[string]string {
@@ -1844,6 +1908,13 @@ func intrinsicImportSymbols(importPath string) map[string]string {
 		"Stdout":   "1",
 		"Stderr":   "2",
 	}
+}
+
+func intrinsicImportSymbolNames(importPath string) []string {
+	if importPath != "os" {
+		return nil
+	}
+	return []string{"Open", "Close", "Read", "Write", "Chmod", "O_RDONLY"}
 }
 
 func importLocalName(imp parse.Import) string {
