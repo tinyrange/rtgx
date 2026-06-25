@@ -557,6 +557,154 @@ func Join(a int, b int) int { return a*10 + b }
 	}
 }
 
+func TestPackageNormalizesNestedAssignmentCallArguments(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func first() int { return 1 }
+func second() int { return 2 }
+func join(a int, b int) int { return a*10 + b }
+func appMain() int {
+	total := join(first(), second())
+	return total
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[3].Body
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_first()") {
+		t.Fatalf("first assignment call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_second()") {
+		t.Fatalf("second assignment call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "total := rtg_example_com_app_join(rtg_example_com_app_appMain_tmp_0, rtg_example_com_app_appMain_tmp_1)") {
+		t.Fatalf("assignment did not use lifted temps: %q", body)
+	}
+}
+
+func TestPackageNormalizesNestedIfConditionCallArguments(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func first() int { return 1 }
+func second() int { return 2 }
+func join(a int, b int) int { return a*10 + b }
+func appMain() int {
+	if join(first(), second()) == 12 {
+		return 0
+	}
+	return 1
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[3].Body
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_first()") {
+		t.Fatalf("first condition call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_second()") {
+		t.Fatalf("second condition call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "if rtg_example_com_app_join(rtg_example_com_app_appMain_tmp_0, rtg_example_com_app_appMain_tmp_1) == 12 {") {
+		t.Fatalf("condition did not use lifted temps: %q", body)
+	}
+}
+
+func TestPackageNormalizesNestedIfShortStatementCallArguments(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func first() int { return 1 }
+func second() int { return 2 }
+func join(a int, b int) int { return a*10 + b }
+func appMain() int {
+	if total := join(first(), second()); total == 12 {
+		return total
+	}
+	return 0
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[3].Body
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_first()") {
+		t.Fatalf("first short-statement call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_second()") {
+		t.Fatalf("second short-statement call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "if total := rtg_example_com_app_join(rtg_example_com_app_appMain_tmp_0, rtg_example_com_app_appMain_tmp_1); total == 12 {") {
+		t.Fatalf("if short statement did not use lifted temps: %q", body)
+	}
+}
+
+func TestPackageNormalizesWithNonCollidingTempNames(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func first() int { return 1 }
+func join(a int) int { return a }
+func appMain() int {
+	rtg_example_com_app_appMain_tmp_0 := 99
+	total := join(first())
+	return total + rtg_example_com_app_appMain_tmp_0
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[2].Body
+	if strings.Contains(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_first()") {
+		t.Fatalf("normalization reused an existing local name: %q", body)
+	}
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_first()") {
+		t.Fatalf("normalization did not skip colliding temp name: %q", body)
+	}
+	if !strings.Contains(body, "total := rtg_example_com_app_join(rtg_example_com_app_appMain_tmp_1)") {
+		t.Fatalf("assignment did not use non-colliding temp: %q", body)
+	}
+}
+
 func TestPackageWithGraphRewritesStdSelector(t *testing.T) {
 	mainPkg := load.Package{
 		ImportPath: "example.com/app",

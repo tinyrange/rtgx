@@ -54,7 +54,11 @@ func TestNestedCallArgumentFrontendMatchesHostGo(t *testing.T) {
 import "example.com/nested/pkg/dep"
 
 func value() int {
-	return dep.Join(dep.First(), dep.Second())
+	total := dep.Join(dep.First(), dep.Second())
+	if dep.Join(dep.First(), dep.Second()) == 12 {
+		return total
+	}
+	return 0
 }
 
 func main() {

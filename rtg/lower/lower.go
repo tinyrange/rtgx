@@ -5,6 +5,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 
 	"j5.nz/rtg/rtg/load"
 	"j5.nz/rtg/rtg/parse"
@@ -249,6 +250,12 @@ type expressionReplacement struct {
 	text  string
 }
 
+type expressionStatement struct {
+	token     int
+	exprStart int
+	exprEnd   int
+}
+
 func normalizeFunctionExpressions(body string, unitName string) string {
 	toks, err := scan.Tokens([]byte(body))
 	if err != nil {
@@ -258,22 +265,18 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 	cursor := 0
 	tempIndex := 0
 	for i := 0; i < len(toks); i++ {
-		if toks[i].Text != "return" {
+		stmt, ok := normalizationStatement(toks, i)
+		if !ok {
 			continue
 		}
-		exprStart := i + 1
-		exprEnd := returnExpressionEnd(toks, i)
-		if exprEnd <= exprStart {
-			continue
-		}
-		temps, replacements := normalizeCallArgumentExpressions(body, toks, exprStart, exprEnd, unitName, &tempIndex)
+		temps, replacements := normalizeCallArgumentExpressions(body, toks, stmt.exprStart, stmt.exprEnd, unitName, &tempIndex)
 		if len(temps) == 0 {
 			continue
 		}
-		insertStart := statementInsertStart(body, toks[i].Start)
+		insertStart := statementInsertStart(body, toks[stmt.token].Start)
 		out = append(out, body[cursor:insertStart]...)
-		indent := statementIndent(body, toks[i].Start)
-		if insertStart == toks[i].Start {
+		indent := statementIndent(body, toks[stmt.token].Start)
+		if insertStart == toks[stmt.token].Start {
 			out = append(out, '\n')
 		}
 		for _, temp := range temps {
@@ -283,10 +286,10 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 			out = append(out, temp.expr...)
 			out = append(out, '\n')
 		}
-		out = append(out, indent...)
-		out = append(out, "return "...)
-		out = append(out, applyExpressionReplacements(body, toks[exprStart].Start, toks[exprEnd-1].End, replacements)...)
-		cursor = toks[exprEnd-1].End
+		out = append(out, body[insertStart:toks[stmt.exprStart].Start]...)
+		out = append(out, applyExpressionReplacements(body, toks[stmt.exprStart].Start, toks[stmt.exprEnd-1].End, replacements)...)
+		cursor = toks[stmt.exprEnd-1].End
+		i = stmt.exprEnd - 1
 	}
 	if len(out) == 0 {
 		return body
@@ -295,11 +298,57 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 	return string(out)
 }
 
-func returnExpressionEnd(toks []scan.Token, ret int) int {
+func normalizationStatement(toks []scan.Token, pos int) (expressionStatement, bool) {
+	if toks[pos].Text == "return" {
+		exprStart := pos + 1
+		exprEnd := lineExpressionEnd(toks, pos)
+		if exprEnd <= exprStart {
+			return expressionStatement{}, false
+		}
+		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd}, true
+	}
+	if toks[pos].Text == "if" {
+		exprStart := pos + 1
+		exprEnd := conditionExpressionEnd(toks, pos)
+		if exprEnd <= exprStart {
+			return expressionStatement{}, false
+		}
+		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd}, true
+	}
+	if !isAssignmentOperator(toks[pos].Text) {
+		return expressionStatement{}, false
+	}
+	exprStart := pos + 1
+	exprEnd := lineExpressionEnd(toks, pos)
+	if exprEnd <= exprStart {
+		return expressionStatement{}, false
+	}
+	stmtStart := statementStartToken(toks, pos)
+	return expressionStatement{token: stmtStart, exprStart: exprStart, exprEnd: exprEnd}, true
+}
+
+func conditionExpressionEnd(toks []scan.Token, start int) int {
 	paren := 0
 	brack := 0
 	brace := 0
-	for i := ret + 1; i < len(toks); i++ {
+	for i := start + 1; i < len(toks); i++ {
+		tok := toks[i]
+		if tok.Kind == scan.EOF {
+			return i
+		}
+		if paren == 0 && brack == 0 && brace == 0 && tok.Text == "{" {
+			return i
+		}
+		updateExpressionDepth(tok.Text, &paren, &brack, &brace)
+	}
+	return len(toks)
+}
+
+func lineExpressionEnd(toks []scan.Token, start int) int {
+	paren := 0
+	brack := 0
+	brace := 0
+	for i := start + 1; i < len(toks); i++ {
 		tok := toks[i]
 		if tok.Kind == scan.EOF {
 			return i
@@ -308,32 +357,27 @@ func returnExpressionEnd(toks []scan.Token, ret int) int {
 			if tok.Text == "}" || tok.Text == ";" {
 				return i
 			}
-			if tok.Line != toks[ret].Line {
+			if tok.Line != toks[start].Line {
 				return i
 			}
 		}
-		switch tok.Text {
-		case "(":
-			paren++
-		case ")":
-			if paren > 0 {
-				paren--
-			}
-		case "[":
-			brack++
-		case "]":
-			if brack > 0 {
-				brack--
-			}
-		case "{":
-			brace++
-		case "}":
-			if brace > 0 {
-				brace--
-			}
-		}
+		updateExpressionDepth(tok.Text, &paren, &brack, &brace)
 	}
 	return len(toks)
+}
+
+func statementStartToken(toks []scan.Token, pos int) int {
+	line := toks[pos].Line
+	for i := pos - 1; i >= 0; i-- {
+		if toks[i].Line != line || toks[i].Text == ";" || toks[i].Text == "{" || toks[i].Text == "}" {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func isAssignmentOperator(text string) bool {
+	return text == "=" || text == ":="
 }
 
 func normalizeCallArgumentExpressions(body string, toks []scan.Token, start int, end int, unitName string, tempIndex *int) ([]expressionTemp, []expressionReplacement) {
@@ -354,26 +398,7 @@ func normalizeCallArgumentExpressions(body string, toks []scan.Token, start int,
 				continue
 			}
 		}
-		switch tok.Text {
-		case "(":
-			paren++
-		case ")":
-			if paren > 0 {
-				paren--
-			}
-		case "[":
-			brack++
-		case "]":
-			if brack > 0 {
-				brack--
-			}
-		case "{":
-			brace++
-		case "}":
-			if brace > 0 {
-				brace--
-			}
-		}
+		updateExpressionDepth(tok.Text, &paren, &brack, &brace)
 	}
 	return temps, replacements
 }
@@ -388,7 +413,7 @@ func normalizeOneCallArguments(body string, toks []scan.Token, start int, end in
 	for i := start; i <= end; i++ {
 		if i == end || (paren == 0 && brack == 0 && brace == 0 && toks[i].Text == ",") {
 			if argStart < i && expressionContainsCall(toks, argStart, i) {
-				name := unitName + "_tmp_" + strconv.Itoa(*tempIndex)
+				name := nextExpressionTempName(body, unitName, tempIndex)
 				(*tempIndex)++
 				exprStart := toks[argStart].Start
 				exprEnd := toks[i-1].End
@@ -398,28 +423,42 @@ func normalizeOneCallArguments(body string, toks []scan.Token, start int, end in
 			argStart = i + 1
 			continue
 		}
-		switch toks[i].Text {
-		case "(":
-			paren++
-		case ")":
-			if paren > 0 {
-				paren--
-			}
-		case "[":
-			brack++
-		case "]":
-			if brack > 0 {
-				brack--
-			}
-		case "{":
-			brace++
-		case "}":
-			if brace > 0 {
-				brace--
-			}
-		}
+		updateExpressionDepth(toks[i].Text, &paren, &brack, &brace)
 	}
 	return temps, replacements
+}
+
+func nextExpressionTempName(body string, unitName string, tempIndex *int) string {
+	for {
+		name := unitName + "_tmp_" + strconv.Itoa(*tempIndex)
+		if !strings.Contains(body, name) {
+			return name
+		}
+		(*tempIndex)++
+	}
+}
+
+func updateExpressionDepth(text string, paren *int, brack *int, brace *int) {
+	switch text {
+	case "(":
+		(*paren)++
+	case ")":
+		if *paren > 0 {
+			(*paren)--
+		}
+	case "[":
+		(*brack)++
+	case "]":
+		if *brack > 0 {
+			(*brack)--
+		}
+	case "{":
+		(*brace)++
+	case "}":
+		if *brace > 0 {
+			(*brace)--
+		}
+	}
 }
 
 func expressionContainsCall(toks []scan.Token, start int, end int) bool {
