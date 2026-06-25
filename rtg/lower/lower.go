@@ -945,12 +945,20 @@ func normalizeOneCallArguments(body string, toks []scan.Token, start int, end in
 	brace := 0
 	for i := start; i <= end; i++ {
 		if i == end || (paren == 0 && brack == 0 && brace == 0 && toks[i].Text == ",") {
-			if argStart < i && expressionContainsCall(toks, argStart, i) {
-				name := nextExpressionTempName(body, unitName, tempIndex)
-				(*tempIndex)++
+			if argStart < i {
+				argTemps, argReplacements := normalizeExpression(body, toks, argStart, i, unitName, tempIndex)
+				temps = append(temps, argTemps...)
 				exprStart := toks[argStart].Start
 				exprEnd := toks[i-1].End
-				temps = append(temps, expressionTemp{name: name, expr: body[exprStart:exprEnd]})
+				expr := applyExpressionReplacements(body, exprStart, exprEnd, argReplacements)
+				if !expressionContainsCall(toks, argStart, i) {
+					replacements = append(replacements, argReplacements...)
+					argStart = i + 1
+					continue
+				}
+				name := nextExpressionTempName(body, unitName, tempIndex)
+				(*tempIndex)++
+				temps = append(temps, expressionTemp{name: name, expr: expr})
 				replacements = append(replacements, expressionReplacement{start: exprStart, end: exprEnd, text: name})
 			}
 			argStart = i + 1

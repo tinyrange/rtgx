@@ -545,6 +545,39 @@ func appMain() int { return join(first(), second()) }
 	}
 }
 
+func TestPackageNormalizesDeepNestedReturnCallArguments(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func first() int { return 1 }
+func inner(v int) int { return v + 1 }
+func outer(v int) int { return v + 1 }
+func appMain() int { return outer(inner(first())) }
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[3].Body
+	first := strings.Index(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_first()")
+	inner := strings.Index(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_inner(rtg_example_com_app_appMain_tmp_0)")
+	ret := strings.Index(body, "return rtg_example_com_app_outer(rtg_example_com_app_appMain_tmp_1)")
+	if first < 0 || inner < 0 || ret < 0 {
+		t.Fatalf("deep nested calls were not fully normalized: %q", body)
+	}
+	if !(first < inner && inner < ret) {
+		t.Fatalf("deep nested call temps emitted in wrong order: %q", body)
+	}
+}
+
 func TestPackageNormalizesNestedImportedReturnCallArguments(t *testing.T) {
 	mainPkg := load.Package{
 		ImportPath: "example.com/app",
@@ -732,6 +765,44 @@ func appMain() string {
 	}
 	if !strings.Contains(body, "return text[rtg_example_com_app_appMain_tmp_0:rtg_example_com_app_appMain_tmp_1]") {
 		t.Fatalf("slice expression did not use lifted temps: %q", body)
+	}
+}
+
+func TestPackageNormalizesSliceBoundCallsInsideCallArgument(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func start() int { return 1 }
+func end() int { return 5 }
+func consume(text string) {}
+func appMain() int {
+	text := "xPASSx"
+	consume(text[start():end()])
+	return 0
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[3].Body
+	start := strings.Index(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_start()")
+	end := strings.Index(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_end()")
+	arg := strings.Index(body, "rtg_example_com_app_appMain_tmp_2 := text[rtg_example_com_app_appMain_tmp_0:rtg_example_com_app_appMain_tmp_1]")
+	call := strings.Index(body, "rtg_example_com_app_consume(rtg_example_com_app_appMain_tmp_2)")
+	if start < 0 || end < 0 || arg < 0 || call < 0 {
+		t.Fatalf("slice bound calls inside call argument were not fully normalized: %q", body)
+	}
+	if !(start < end && end < arg && arg < call) {
+		t.Fatalf("slice bound call argument temps emitted in wrong order: %q", body)
 	}
 }
 
