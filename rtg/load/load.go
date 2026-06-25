@@ -46,12 +46,28 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 	}
 	g := &Graph{Module: module}
 	seen := map[string]bool{}
+	fileEntries := map[string][]string{}
 	for _, entry := range entries {
-		dir, err := entryDir(entry)
+		dir, files, err := entryInput(entry)
 		if err != nil {
 			return nil, err
 		}
+		if len(files) > 0 {
+			fileEntries[dir] = append(fileEntries[dir], files...)
+			continue
+		}
 		if err := loadPackageRecursive(g, opts, seen, dir); err != nil {
+			return nil, err
+		}
+	}
+	var fileDirs []string
+	for dir := range fileEntries {
+		fileDirs = append(fileDirs, dir)
+	}
+	sort.Strings(fileDirs)
+	for _, dir := range fileDirs {
+		files := fileEntries[dir]
+		if err := loadPackageFilesRecursive(g, opts, seen, dir, files); err != nil {
 			return nil, err
 		}
 	}
@@ -89,19 +105,28 @@ func findStdRootUpward(start string) (string, bool) {
 	}
 }
 
-func entryDir(entry string) (string, error) {
+func entryInput(entry string) (string, []string, error) {
 	info, err := os.Stat(entry)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if info.IsDir() {
-		return filepath.Abs(entry)
+		dir, err := filepath.Abs(entry)
+		return dir, nil, err
 	}
-	return filepath.Abs(filepath.Dir(entry))
+	path, err := filepath.Abs(entry)
+	if err != nil {
+		return "", nil, err
+	}
+	return filepath.Dir(path), []string{path}, nil
 }
 
 func loadPackageRecursive(g *Graph, opts Options, seen map[string]bool, dir string) error {
 	return loadPackageRecursiveAs(g, opts, seen, dir, importPathForDir(g.Module, dir))
+}
+
+func loadPackageFilesRecursive(g *Graph, opts Options, seen map[string]bool, dir string, files []string) error {
+	return loadPackageFilesRecursiveAs(g, opts, seen, dir, importPathForDir(g.Module, dir), files)
 }
 
 func loadPackageRecursiveAs(g *Graph, opts Options, seen map[string]bool, dir string, importPath string) error {
@@ -129,6 +154,31 @@ func loadPackageRecursiveAs(g *Graph, opts Options, seen map[string]bool, dir st
 	return nil
 }
 
+func loadPackageFilesRecursiveAs(g *Graph, opts Options, seen map[string]bool, dir string, importPath string, files []string) error {
+	dir = filepath.Clean(dir)
+	if seen[dir] {
+		return nil
+	}
+	seen[dir] = true
+	pkg, err := readPackageFiles(g.Module, dir, importPath, files)
+	if err != nil {
+		return err
+	}
+	g.Packages = append(g.Packages, pkg)
+	for _, imp := range pkg.Imports {
+		next, ok, err := resolveImport(g.Module, opts, imp)
+		if err != nil {
+			return err
+		}
+		if ok {
+			if err := loadPackageRecursiveAs(g, opts, seen, next.Dir, next.ImportPath); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func readPackage(module mod.Module, dir string, importPath string) (Package, error) {
 	files, err := goFiles(dir)
 	if err != nil {
@@ -137,6 +187,15 @@ func readPackage(module mod.Module, dir string, importPath string) (Package, err
 	if len(files) == 0 {
 		return Package{}, fmt.Errorf("%s: no Go source files", dir)
 	}
+	return readPackageFiles(module, dir, importPath, files)
+}
+
+func readPackageFiles(module mod.Module, dir string, importPath string, files []string) (Package, error) {
+	if len(files) == 0 {
+		return Package{}, fmt.Errorf("%s: no Go source files", dir)
+	}
+	files = append([]string(nil), files...)
+	sort.Strings(files)
 	pkg := Package{Dir: dir, ImportPath: importPath}
 	importSet := map[string]bool{}
 	for _, path := range files {

@@ -49,6 +49,41 @@ func Value() int {
 	}
 }
 
+func TestLoadEntriesGroupsExplicitFilesWithoutReadingWholeDirectory(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "pkg/a.go", `package pkg
+
+const A = 1
+`)
+	writeFile(t, root, "pkg/b.go", `package pkg
+
+const B = A + 1
+`)
+	writeFile(t, root, "pkg/ignored.go", `package other
+
+const C = 3
+`)
+
+	graph, err := LoadEntries([]string{filepath.Join(root, "pkg", "b.go"), filepath.Join(root, "pkg", "a.go")}, Options{})
+	if err != nil {
+		t.Fatalf("LoadEntries explicit files failed: %v", err)
+	}
+	if len(graph.Packages) != 1 {
+		t.Fatalf("loaded %d packages, want one", len(graph.Packages))
+	}
+	pkg := graph.Packages[0]
+	if pkg.ImportPath != "example.com/app/pkg" || pkg.Name != "pkg" {
+		t.Fatalf("package identity = %#v", pkg)
+	}
+	if len(pkg.Files) != 2 {
+		t.Fatalf("files = %#v, want selected files only", pkg.Files)
+	}
+	if filepath.Base(pkg.Files[0].Path) != "a.go" || filepath.Base(pkg.Files[1].Path) != "b.go" {
+		t.Fatalf("file order = %#v, want a.go then b.go", pkg.Files)
+	}
+}
+
 func TestLoadEntriesRejectsMissingStdPackage(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n")

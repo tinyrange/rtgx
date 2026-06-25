@@ -45,6 +45,48 @@ func appMain() int {
 	}
 }
 
+func TestRunEmitUnitWithExplicitFiles(t *testing.T) {
+	root := t.TempDir()
+	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
+	writeCLIFile(t, root, "pkg/a.go", `package pkg
+
+const A = 1
+`)
+	writeCLIFile(t, root, "pkg/b.go", `package pkg
+
+func Value() int {
+	return A + 1
+}
+`)
+	writeCLIFile(t, root, "pkg/ignored.go", `package other
+
+func Broken() {}
+`)
+	out := filepath.Join(root, "pkg.rtg.go")
+	cfg := config{output: out, emitUnit: true, inputs: []string{filepath.Join(root, "pkg", "b.go"), filepath.Join(root, "pkg", "a.go")}}
+	if err := run(cfg); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	src := string(data)
+	for _, want := range []string{
+		"// rtg:unit example.com/app/pkg\n",
+		"// rtg:decl const A => rtg_example_com_app_pkg_A pkg/a.go\n",
+		"// rtg:decl func Value => rtg_example_com_app_pkg_Value pkg/b.go\n",
+		"return rtg_example_com_app_pkg_A + 1",
+	} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("emitted explicit-file unit missing %q:\n%s", want, src)
+		}
+	}
+	if strings.Contains(src, "Broken") || strings.Contains(src, "ignored.go") {
+		t.Fatalf("explicit-file emit included unlisted file:\n%s", src)
+	}
+}
+
 func TestParseArgsDefaultsToSupportedTarget(t *testing.T) {
 	cfg, err := parseArgs([]string{"-check", "."})
 	if err != nil {
