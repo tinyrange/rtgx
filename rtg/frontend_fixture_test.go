@@ -415,6 +415,29 @@ func main() {
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
+func TestStdStrconvFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/stdstrconv\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "strconv"
+
+func main() {
+	ok := strconv.Itoa(0) == "0"
+	ok = ok && strconv.Itoa(12345) == "12345"
+	ok = ok && strconv.Itoa(-42) == "-42"
+	ok = ok && strconv.Quote("PASS\n") == "\"PASS\\n\""
+	ok = ok && strconv.Quote("a\\b") == "\"a\\\\b\""
+	if ok {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
 func TestTopLevelNameListsFrontendMatchesHostGo(t *testing.T) {
 	fixture := t.TempDir()
 	writeFixtureFile(t, fixture, "go.mod", "module example.com/namelists\n")
