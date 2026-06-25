@@ -11,6 +11,7 @@ func TestBuildResolvesReferences(t *testing.T) {
 	mainUnit := unit.Unit{
 		ImportPath: "example.com/app/main",
 		Package:    "main",
+		Imports:    []string{"example.com/app/pkg/answer"},
 		References: []unit.Symbol{
 			{ImportPath: "example.com/app/pkg/answer", Name: "Value", UnitName: "rtg_example_com_app_pkg_answer_Value"},
 		},
@@ -34,20 +35,53 @@ func TestBuildResolvesReferences(t *testing.T) {
 }
 
 func TestBuildRejectsUnresolvedReference(t *testing.T) {
-	_, err := Build([]unit.Unit{{
-		ImportPath: "example.com/app/main",
-		Package:    "main",
-		References: []unit.Symbol{
-			{ImportPath: "example.com/app/pkg/missing", Name: "Value", UnitName: "rtg_example_com_app_pkg_missing_Value"},
+	_, err := Build([]unit.Unit{
+		{
+			ImportPath: "example.com/app/main",
+			Package:    "main",
+			Imports:    []string{"example.com/app/pkg/missing"},
+			References: []unit.Symbol{
+				{ImportPath: "example.com/app/pkg/missing", Name: "Value", UnitName: "rtg_example_com_app_pkg_missing_Value"},
+			},
+			Decls: []unit.Decl{
+				{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_main_appMain", Body: "func rtg_example_com_app_main_appMain() int { return rtg_example_com_app_pkg_missing_Value() }\n"},
+			},
 		},
-		Decls: []unit.Decl{
-			{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_main_appMain", Body: "func rtg_example_com_app_main_appMain() int { return rtg_example_com_app_pkg_missing_Value() }\n"},
+		{
+			ImportPath: "example.com/app/pkg/missing",
+			Package:    "missing",
 		},
-	}})
+	})
 	if err == nil {
 		t.Fatalf("Build succeeded with unresolved reference")
 	}
 	if !strings.Contains(err.Error(), "unresolved reference") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestBuildRejectsReferenceWithoutImportMetadata(t *testing.T) {
+	_, err := Build([]unit.Unit{
+		{
+			ImportPath: "example.com/app/main",
+			Package:    "main",
+			References: []unit.Symbol{
+				{ImportPath: "example.com/app/dep", Name: "Value", UnitName: "rtg_example_com_app_dep_Value"},
+			},
+			Decls: []unit.Decl{
+				{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_main_appMain", Body: "func rtg_example_com_app_main_appMain() int { return rtg_example_com_app_dep_Value() }\n"},
+			},
+		},
+		{
+			ImportPath: "example.com/app/dep",
+			Package:    "dep",
+			Exports:    []unit.Symbol{{ImportPath: "example.com/app/dep", Name: "Value", UnitName: "rtg_example_com_app_dep_Value"}},
+		},
+	})
+	if err == nil {
+		t.Fatalf("Build succeeded with reference missing import metadata")
+	}
+	if !strings.Contains(err.Error(), "example.com/app/main: reference example.com/app/dep.Value missing import metadata") {
 		t.Fatalf("error = %q", err)
 	}
 }
@@ -134,6 +168,7 @@ func TestSourceCombinesUnitsAndAddsAppMainWrapper(t *testing.T) {
 		{
 			ImportPath: "example.com/app/main",
 			Package:    "main",
+			Imports:    []string{"example.com/app/dep"},
 			Decls: []unit.Decl{
 				{
 					Kind:     "func",

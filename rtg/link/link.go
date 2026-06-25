@@ -20,6 +20,9 @@ func Build(units []unit.Unit) (Plan, error) {
 	if err := validateImports(units); err != nil {
 		return Plan{}, err
 	}
+	if err := validateReferencesDeclared(units); err != nil {
+		return Plan{}, err
+	}
 	exports := map[string]unit.Symbol{}
 	for _, u := range units {
 		for _, sym := range u.Exports {
@@ -71,6 +74,21 @@ func validateImports(units []unit.Unit) error {
 		for _, imp := range u.Imports {
 			if !present[imp] {
 				return fmt.Errorf("%s: missing imported unit %s", u.ImportPath, imp)
+			}
+		}
+	}
+	return nil
+}
+
+func validateReferencesDeclared(units []unit.Unit) error {
+	for _, u := range units {
+		imports := map[string]bool{}
+		for _, imp := range u.Imports {
+			imports[imp] = true
+		}
+		for _, ref := range u.References {
+			if !imports[ref.ImportPath] {
+				return fmt.Errorf("%s: reference %s.%s missing import metadata", u.ImportPath, ref.ImportPath, ref.Name)
 			}
 		}
 	}
