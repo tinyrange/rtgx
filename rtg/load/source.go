@@ -51,7 +51,7 @@ func ParseSourceInfo(path string, src []byte) (SourceInfo, error) {
 			for pos < len(toks) && toks[pos].Text != ")" && toks[pos].Kind != scan.EOF {
 				alias := ""
 				if toks[pos].Kind == scan.Ident || toks[pos].Text == "." || toks[pos].Text == "_" {
-					if pos+1 < len(toks) && toks[pos+1].Kind == scan.String {
+					if pos+1 < len(toks) && toks[pos+1].Kind == scan.String && toks[pos].Line == toks[pos+1].Line {
 						alias = toks[pos].Text
 						pos++
 					}
@@ -76,28 +76,24 @@ func ParseSourceInfo(path string, src []byte) (SourceInfo, error) {
 			pos++
 			continue
 		}
-		found := false
-		for pos < len(toks) {
-			if toks[pos].Kind == scan.String {
-				value, err := scan.UnquoteString(toks[pos].Text)
-				if err != nil {
-					return SourceInfo{}, sourceError{path: path, line: toks[pos].Line, column: toks[pos].Column, message: err.Error()}
-				}
-				alias := importAliasBefore(toks, pos)
-				info.Imports = append(info.Imports, ImportInfo{Path: value, Alias: alias, Line: toks[pos].Line, Column: toks[pos].Column})
-				pos++
-				found = true
-				break
+		alias := ""
+		if pos < len(toks) && (toks[pos].Kind == scan.Ident || toks[pos].Text == "." || toks[pos].Text == "_") {
+			if pos+1 >= len(toks) || toks[pos+1].Kind != scan.String || toks[pos].Line != toks[pos+1].Line {
+				return SourceInfo{}, sourceError{path: path, line: toks[pos].Line, column: toks[pos].Column, message: "malformed import declaration"}
 			}
-			if toks[pos].Text == "import" || toks[pos].Text == "func" || toks[pos].Text == "var" || toks[pos].Text == "const" || toks[pos].Text == "type" {
-				break
-			}
+			alias = toks[pos].Text
 			pos++
 		}
-		if !found {
+		if pos >= len(toks) || toks[pos].Kind != scan.String {
 			tok := toks[pos]
 			return SourceInfo{}, sourceError{path: path, line: tok.Line, column: tok.Column, message: "malformed import declaration"}
 		}
+		value, err := scan.UnquoteString(toks[pos].Text)
+		if err != nil {
+			return SourceInfo{}, sourceError{path: path, line: toks[pos].Line, column: toks[pos].Column, message: err.Error()}
+		}
+		info.Imports = append(info.Imports, ImportInfo{Path: value, Alias: alias, Line: toks[pos].Line, Column: toks[pos].Column})
+		pos++
 	}
 	return info, nil
 }
@@ -129,18 +125,4 @@ func splitPositionMessage(message string) (int, int, string, bool) {
 		return 0, 0, "", false
 	}
 	return line, column, strings.TrimSpace(message[second+1:]), true
-}
-
-func aliasBefore(toks []scan.Token, pos int) string {
-	if pos > 0 && (toks[pos-1].Kind == scan.Ident || toks[pos-1].Text == "." || toks[pos-1].Text == "_") {
-		if toks[pos-1].Text == "import" {
-			return ""
-		}
-		return toks[pos-1].Text
-	}
-	return ""
-}
-
-func importAliasBefore(toks []scan.Token, pos int) string {
-	return aliasBefore(toks, pos)
 }

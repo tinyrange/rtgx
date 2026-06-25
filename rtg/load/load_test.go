@@ -890,6 +890,50 @@ func appMain() int { return 0 }
 	}
 }
 
+func TestParseSourceInfoRejectsSplitImportAliases(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "single",
+			src: `package main
+
+import alias
+"example.com/dep"
+
+func appMain() int { return 0 }
+`,
+			want: "input.go:3:8: malformed import declaration",
+		},
+		{
+			name: "block",
+			src: `package main
+
+import (
+	alias
+	"example.com/dep"
+)
+
+func appMain() int { return 0 }
+`,
+			want: "input.go:4:2: malformed import declaration",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseSourceInfo("input.go", []byte(tt.src))
+			if err == nil {
+				t.Fatalf("ParseSourceInfo accepted split import alias")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseSourceInfoRejectsUnterminatedImportBlock(t *testing.T) {
 	src := []byte(`package main
 
