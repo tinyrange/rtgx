@@ -38,6 +38,9 @@ func main() {
 }
 
 func run(cfg config) error {
+	if err := validateConfig(cfg); err != nil {
+		return err
+	}
 	if cfg.link {
 		return runLink(cfg)
 	}
@@ -220,7 +223,27 @@ func parseArgs(args []string) (config, error) {
 	if len(cfg.inputs) == 0 && !cfg.link {
 		cfg.inputs = append(cfg.inputs, ".")
 	}
+	if err := validateConfig(cfg); err != nil {
+		return cfg, err
+	}
 	return cfg, nil
+}
+
+func validateConfig(cfg config) error {
+	modes := 0
+	if cfg.check {
+		modes++
+	}
+	if cfg.emitUnit {
+		modes++
+	}
+	if cfg.link {
+		modes++
+	}
+	if modes > 1 {
+		return fmt.Errorf("rtg: choose only one of -check, -emit-unit, or -link")
+	}
+	return nil
 }
 
 func usage() {

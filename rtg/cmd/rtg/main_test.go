@@ -150,6 +150,36 @@ func TestParseArgsRejectsUnsupportedTarget(t *testing.T) {
 	}
 }
 
+func TestParseArgsRejectsConflictingModes(t *testing.T) {
+	tests := [][]string{
+		{"-check", "-emit-unit", "."},
+		{"-check", "-link", "-o", "out", "main.rtg.go"},
+		{"-emit-unit", "-link", "-o", "out", "main.rtg.go"},
+	}
+	for _, args := range tests {
+		args := args
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			_, err := parseArgs(args)
+			if err == nil {
+				t.Fatalf("parseArgs accepted conflicting modes %v", args)
+			}
+			if !strings.Contains(err.Error(), "choose only one of -check, -emit-unit, or -link") {
+				t.Fatalf("error = %q", err)
+			}
+		})
+	}
+}
+
+func TestRunRejectsConflictingModes(t *testing.T) {
+	err := run(config{check: true, emitUnit: true})
+	if err == nil {
+		t.Fatalf("run accepted conflicting modes")
+	}
+	if !strings.Contains(err.Error(), "choose only one of -check, -emit-unit, or -link") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestRunEmitUnitDefaultsToCacheDirectory(t *testing.T) {
 	root := t.TempDir()
 	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
