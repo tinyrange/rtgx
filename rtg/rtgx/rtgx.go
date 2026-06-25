@@ -104,6 +104,10 @@ func writeOutput(data []byte, outputPath string) error {
 	if outputPath == "" {
 		return fmt.Errorf("rtg: missing output path (-o)")
 	}
+	if outputPath == "-" {
+		_, err := os.Stdout.Write(data)
+		return err
+	}
 	output, err := filepath.Abs(outputPath)
 	if err != nil {
 		return err

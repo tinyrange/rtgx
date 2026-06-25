@@ -1,6 +1,7 @@
 package rtgx
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -114,6 +115,64 @@ func appMain() int {
 				t.Fatalf("compiled bytes for %s have unexpected magic: % x", target, leadingBytes(data, 8))
 			}
 		})
+	}
+}
+
+func TestCompileSourceWritesDashOutputToStdout(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skipf("linux/amd64 stdout smoke requires linux/amd64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	root, ok := findBackendRootUpward(".")
+	if !ok {
+		t.Skip("backend root not found")
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd failed: %v", err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatalf("Chdir failed: %v", err)
+	}
+	defer os.Chdir(cwd)
+	src := []byte(`//go:build rtg
+
+package main
+
+func appMain() int {
+	print("PASS\n")
+	return 0
+}
+`)
+	stdout := os.Stdout
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("Pipe failed: %v", err)
+	}
+	outCh := make(chan []byte, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		data, err := io.ReadAll(read)
+		outCh <- data
+		errCh <- err
+	}()
+	os.Stdout = write
+	err = CompileSource(src, Options{Target: "linux/amd64", Output: "-", BackendRoot: root})
+	os.Stdout = stdout
+	if closeErr := write.Close(); closeErr != nil {
+		t.Fatalf("stdout pipe close failed: %v", closeErr)
+	}
+	data := <-outCh
+	if readErr := <-errCh; readErr != nil {
+		t.Fatalf("stdout pipe read failed: %v", readErr)
+	}
+	if err != nil {
+		t.Fatalf("CompileSource failed: %v", err)
+	}
+	if !hasTargetMagic("linux/amd64", data) {
+		t.Fatalf("stdout output has unexpected magic: % x", leadingBytes(data, 8))
+	}
+	if _, statErr := os.Stat("-"); !os.IsNotExist(statErr) {
+		t.Fatalf("CompileSource created output file named '-': %v", statErr)
 	}
 }
 
