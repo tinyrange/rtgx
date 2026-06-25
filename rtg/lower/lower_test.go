@@ -183,6 +183,45 @@ func appMain() int {
 	}
 }
 
+func TestPackageRewritesPackageNameBeforeLocalShadow(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+const answer = 7
+
+func appMain() int {
+	before := answer
+	answer := 1
+	return before + answer
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	if len(u.Decls) != 2 {
+		t.Fatalf("decls = %#v, want 2", u.Decls)
+	}
+	body := u.Decls[1].Body
+	if !strings.Contains(body, "before := rtg_example_com_app_answer") {
+		t.Fatalf("package reference before local shadow was not rewritten: %q", body)
+	}
+	if !strings.Contains(body, "answer := 1") {
+		t.Fatalf("local short declaration was rewritten: %q", body)
+	}
+	if !strings.Contains(body, "return before + answer") {
+		t.Fatalf("local reference after shadow was rewritten: %q", body)
+	}
+}
+
 func TestPackageWithGraphRewritesStdSelector(t *testing.T) {
 	mainPkg := load.Package{
 		ImportPath:  "example.com/app",

@@ -147,7 +147,7 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, i
 				}
 			}
 		}
-		if tok.Kind == scan.Ident && prevText != "." && !localNames[tok.Text] {
+		if tok.Kind == scan.Ident && prevText != "." && !isLocalNameAt(localNames, tok.Text, tok.Start) {
 			replacement = topNames[tok.Text]
 		}
 		if replacement != "" {
@@ -164,8 +164,8 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, i
 	return string(out)
 }
 
-func localNamesForDecl(file parse.File, decl parse.Decl, topNames map[string]string) map[string]bool {
-	names := map[string]bool{}
+func localNamesForDecl(file parse.File, decl parse.Decl, topNames map[string]string) map[string]int {
+	names := map[string]int{}
 	if decl.Kind != "func" {
 		return names
 	}
@@ -191,7 +191,12 @@ func localNamesForDecl(file parse.File, decl parse.Decl, topNames map[string]str
 	return names
 }
 
-func collectFuncSignatureLocals(toks []scan.Token, start int, end int, topNames map[string]string, names map[string]bool) {
+func isLocalNameAt(names map[string]int, name string, pos int) bool {
+	start, ok := names[name]
+	return ok && pos >= start
+}
+
+func collectFuncSignatureLocals(toks []scan.Token, start int, end int, topNames map[string]string, names map[string]int) {
 	for i := start; i < end; i++ {
 		if toks[i].Text != "(" {
 			continue
@@ -205,33 +210,37 @@ func collectFuncSignatureLocals(toks []scan.Token, start int, end int, topNames 
 	}
 }
 
-func collectParameterListLocals(toks []scan.Token, start int, end int, topNames map[string]string, names map[string]bool) {
+func collectParameterListLocals(toks []scan.Token, start int, end int, topNames map[string]string, names map[string]int) {
 	for i := start; i < end; i++ {
 		if toks[i].Kind != scan.Ident || topNames[toks[i].Text] == "" {
 			continue
 		}
 		if i+1 < end && isTypeStart(toks[i+1]) {
-			names[toks[i].Text] = true
+			addLocalName(names, toks[i].Text, 0)
 			continue
 		}
 		if i+2 < end && toks[i+1].Text == "," && toks[i+2].Kind == scan.Ident && isTypeStartAfterName(toks, i+2, end) {
-			names[toks[i].Text] = true
+			addLocalName(names, toks[i].Text, 0)
 		}
 	}
 }
 
-func collectShortDeclLocals(toks []scan.Token, assign int, topNames map[string]string, names map[string]bool) {
+func collectShortDeclLocals(toks []scan.Token, assign int, topNames map[string]string, names map[string]int) {
+	line := toks[assign].Line
 	for i := assign - 1; i >= 0; i-- {
+		if toks[i].Line != line {
+			return
+		}
 		if isStatementBoundary(toks[i].Text) {
 			return
 		}
 		if toks[i].Kind == scan.Ident && topNames[toks[i].Text] != "" && (i == 0 || toks[i-1].Text != ".") {
-			names[toks[i].Text] = true
+			addLocalName(names, toks[i].Text, toks[i].Start)
 		}
 	}
 }
 
-func collectVarLocals(toks []scan.Token, pos int, end int, topNames map[string]string, names map[string]bool) {
+func collectVarLocals(toks []scan.Token, pos int, end int, topNames map[string]string, names map[string]int) {
 	if pos+1 < len(toks) && toks[pos+1].Text == "(" {
 		for i := pos + 2; i < len(toks) && toks[i].Start < end; i++ {
 			if toks[i].Text == ")" || toks[i].Text == "}" {
@@ -241,7 +250,7 @@ func collectVarLocals(toks []scan.Token, pos int, end int, topNames map[string]s
 				continue
 			}
 			if toks[i-1].Text == "(" || toks[i-1].Text == "," || toks[i-1].Line != toks[i].Line {
-				names[toks[i].Text] = true
+				addLocalName(names, toks[i].Text, toks[i].Start)
 			}
 		}
 		return
@@ -258,8 +267,15 @@ func collectVarLocals(toks []scan.Token, pos int, end int, topNames map[string]s
 			continue
 		}
 		if i == pos+1 || toks[i-1].Text == "," {
-			names[toks[i].Text] = true
+			addLocalName(names, toks[i].Text, toks[i].Start)
 		}
+	}
+}
+
+func addLocalName(names map[string]int, name string, pos int) {
+	existing, ok := names[name]
+	if !ok || pos < existing {
+		names[name] = pos
 	}
 }
 
