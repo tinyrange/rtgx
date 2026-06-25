@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RTG Frontend Plan</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f8;
+      --panel: #ffffff;
+      --ink: #1f2328;
+      --muted: #58606b;
+      --line: #d8dee4;
+      --accent: #0969da;
+      --accent-soft: #ddf4ff;
+      --ok: #1a7f37;
+      --warn: #9a6700;
+      --bad: #cf222e;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+      padding: 34px clamp(20px, 5vw, 64px);
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(30px, 5vw, 52px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 22px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 18px 0 8px;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    code {
+      background: #f3f4f6;
+      border: 1px solid #e5e7eb;
+      border-radius: 5px;
+      padding: 1px 5px;
+      font: 0.92em ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    }
+
+    pre {
+      margin: 12px 0 0;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+      padding: 14px;
+      font: 13px/1.45 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    }
+
+    main {
+      padding: 24px clamp(20px, 5vw, 64px) 48px;
+    }
+
+    section {
+      max-width: 1180px;
+      margin: 0 0 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 20px;
+    }
+
+    ul,
+    ol {
+      margin: 0;
+      padding-left: 22px;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    .summary {
+      max-width: 980px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 12px;
+    }
+
+    .tile {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 14px;
+    }
+
+    .tile h3 {
+      margin-top: 0;
+    }
+
+    .tag {
+      display: inline-block;
+      margin: 0 6px 6px 0;
+      border: 1px solid #b6d7ff;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: #0550ae;
+      padding: 3px 8px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .status {
+      display: inline-block;
+      min-width: 86px;
+      border-radius: 5px;
+      padding: 2px 7px;
+      font-size: 12px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .now {
+      background: #dafbe1;
+      color: var(--ok);
+    }
+
+    .later {
+      background: #fff8c5;
+      color: var(--warn);
+    }
+
+    .blocked {
+      background: #ffebe9;
+      color: var(--bad);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+
+    th,
+    td {
+      border-top: 1px solid var(--line);
+      padding: 10px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>RTG Frontend Plan</h1>
+    <p class="summary">
+      Add a source-to-source compiler under <code>rtg/</code> that accepts ordinary
+      Go source within an intentionally restricted feature set, parses complete
+      packages into RTG-owned ASTs, lowers each package into a stable
+      platform-independent unit, and then compiles and links those units with
+      the existing retargetable <code>rtgx</code> backend.
+    </p>
+  </header>
+
+  <main>
+    <section>
+      <h2>Goal</h2>
+      <p>
+        The current compiler is a backend for a small Go-like subset. The new
+        <code>rtg/</code> frontend should become the user-facing compiler layer:
+        it reads normal Go files, understands multiple source files and
+        packages, performs frontend validation and lowering, and emits
+        backend-compatible RTG units that can be compiled in memory or
+        distributed as stable artifacts.
+      </p>
+      <div>
+        <span class="tag">source to source</span>
+        <span class="tag">package units</span>
+        <span class="tag">stable unit artifacts</span>
+        <span class="tag">in-memory rtgx backend</span>
+        <span class="tag">separate linker</span>
+        <span class="tag">self-hosting frontend</span>
+      </div>
+    </section>
+
+    <section>
+      <h2>Non-Goals For The First Frontend</h2>
+      <div class="grid">
+        <div class="tile">
+          <h3>Still Excluded</h3>
+          <ul>
+            <li>Generics</li>
+            <li>Goroutines and the <code>go</code> statement</li>
+            <li>Channels and <code>select</code></li>
+            <li>Interfaces, type assertions, and type switches</li>
+            <li>Reflection and dynamic dispatch</li>
+            <li>Full standard library compatibility</li>
+          </ul>
+        </div>
+        <div class="tile">
+          <h3>Deferred</h3>
+          <ul>
+            <li>Closures and function values</li>
+            <li>Maps</li>
+            <li><code>defer</code>, panic, and recover</li>
+            <li>Package dependency graphs beyond explicit input files</li>
+            <li>Garbage collection or general heap object tracing</li>
+          </ul>
+        </div>
+        <div class="tile">
+          <h3>Allowed Direction</h3>
+          <ul>
+            <li>Reject unsupported Go with precise diagnostics.</li>
+            <li>Desugar supported Go into RTG subset source.</li>
+            <li>Keep emitted units independent of target OS and architecture.</li>
+            <li>Keep the frontend implementation self-hostable and avoid standard library dependencies.</li>
+            <li>Let the backend own machine code and the linker own executable formats.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Proposed Directory Layout</h2>
+      <pre>rtg/
+  cmd/rtg/             command line frontend
+  scan/                self-hostable Go lexer for the supported source surface
+  parse/               hand-written parser that builds RTG-owned ASTs
+  mod/                 simple first-stage go.mod parsing and import resolution
+  load/                package/file grouping and module-aware source loading
+  check/               subset validation and name/type checking
+  lower/               AST-to-unit normalization and desugaring
+  unit/                stable platform-independent unit model and encoder
+  link/                package-unit linker and entrypoint/runtime assembly
+  std/                 RTG-compatible parallel standard tree
+  rtgx/                in-memory backend API and command wrapper
+  testdata/            frontend fixture programs and golden lowered output</pre>
+      <p>
+        The directory names are intentionally boring: each package has one job,
+        and the existing backend remains the code generator used by
+        <code>rtg/rtgx</code>.
+      </p>
+    </section>
+
+    <section>
+      <h2>Pipeline</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Stage</th>
+            <th>Responsibility</th>
+            <th>Output</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Load</td>
+            <td>Implement simple module-aware loading: parse the module path from <code>go.mod</code>, resolve local module imports, group files by package, and load needed dependencies from <code>rtg/std</code>.</td>
+            <td>Loaded package graph with stable paths and byte content.</td>
+          </tr>
+          <tr>
+            <td>Parse</td>
+            <td>Use a hand-written lexer and parser so the frontend can self-host without depending on <code>go/parser</code>, <code>go/ast</code>, or <code>go/types</code>.</td>
+            <td>RTG-owned AST files and source positions.</td>
+          </tr>
+          <tr>
+            <td>Check</td>
+            <td>Perform name/type validation for the supported subset and produce diagnostics for excluded features.</td>
+            <td>Typed AST metadata and package export metadata, or a diagnostic list.</td>
+          </tr>
+          <tr>
+            <td>Lower</td>
+            <td>Normalize each package into backend-shaped constructs: explicit temporaries, stable symbol names, package export records, and simple control flow where useful.</td>
+            <td>One platform-independent unit per package.</td>
+          </tr>
+          <tr>
+            <td>Emit</td>
+            <td>Print deterministic RTG subset source units that are stable enough to cache, distribute, diff, and feed back into the linker.</td>
+            <td>One distributable RTG subset source unit per package.</td>
+          </tr>
+          <tr>
+            <td>Compile</td>
+            <td>Hand package units to <code>rtgx</code> through an in-memory API and compile target-independent units into target-specific objects.</td>
+            <td>Target object records with symbols and relocations.</td>
+          </tr>
+          <tr>
+            <td>Link</td>
+            <td>Resolve package symbols, add runtime/startup code, lay out data/code, and write the final executable or WASI module.</td>
+            <td>Target executable or WASI module.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Compile Unit Model</h2>
+      <ul>
+        <li>A package unit is all supported files belonging to one package.</li>
+        <li>Each package is lowered into exactly one RTG unit artifact.</li>
+        <li>All files in a package share one namespace after Go name resolution.</li>
+        <li>Top-level declarations can be spread across files and referenced before declaration.</li>
+        <li>Package imports resolve through the module system to other RTG package units.</li>
+        <li>Standard-library imports resolve to RTG-compatible packages in <code>rtg/std</code>.</li>
+        <li>The emitted unit must not depend on original file order except for deterministic output.</li>
+        <li>The linker combines package units and owns cross-package symbol resolution.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>In-Memory Backend</h2>
+      <p>
+        Using <code>rtgx</code> in memory is feasible and should be the preferred
+        path. The current command-line backend can remain as a wrapper, but the
+        core should expose an API that accepts already-loaded RTG subset source
+        units and returns target object records without requiring temporary
+        source files.
+      </p>
+      <pre>RTG subset source unit + target
+  -> rtgx compile
+  -> object { code, data, symbols, relocations, target metadata }
+  -> linker
+  -> executable or module bytes</pre>
+      <ul>
+        <li>The frontend can still emit RTG subset source unit files with <code>-emit-unit</code> for caching and distribution.</li>
+        <li>The normal compile path should keep units in memory and avoid extra filesystem round trips.</li>
+        <li>The backend API should be deterministic for the same unit source, target, and compiler version.</li>
+        <li>The CLI should use the same API as tests, so in-memory and file-backed builds cannot drift.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Lowering Rules</h2>
+      <div class="grid">
+        <div class="tile">
+          <h3>Names</h3>
+          <ul>
+            <li>Give every package-level symbol a stable package-qualified unit name.</li>
+            <li>Preserve exported/unexported spelling only when it matters for diagnostics.</li>
+            <li>Generate stable temporary names that cannot collide with user names.</li>
+          </ul>
+        </div>
+        <div class="tile">
+          <h3>Types</h3>
+          <ul>
+            <li>Map supported Go scalar, pointer, slice, string, and struct types into RTG subset types.</li>
+            <li>Reject unsupported array, map, interface, channel, and function value types.</li>
+            <li>Preserve named types where the backend already supports them.</li>
+          </ul>
+        </div>
+        <div class="tile">
+          <h3>Expressions</h3>
+          <ul>
+            <li>Lower complex expressions into temporaries when backend evaluation order is fragile.</li>
+            <li>Rewrite supported builtins such as <code>len</code>, <code>append</code>, <code>copy</code>, and <code>make</code> into backend-compatible forms.</li>
+            <li>Hide runtime intrinsics behind ordinary-looking frontend constructs and <code>rtg/std</code> packages.</li>
+            <li>Reject unsupported builtins with source positions.</li>
+          </ul>
+        </div>
+        <div class="tile">
+          <h3>Statements</h3>
+          <ul>
+            <li>Keep ordinary <code>if</code>, <code>for</code>, <code>switch</code>, <code>break</code>, <code>continue</code>, and <code>goto</code> when they fit the backend.</li>
+            <li>Lower <code>range</code> only after explicit support is planned; reject it in phase one.</li>
+            <li>Reject <code>defer</code>, <code>go</code>, and <code>select</code>.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Command Line Shape</h2>
+      <pre>rtg -t linux/amd64 -o out ./cmd/app
+rtg -emit-unit -o pkg.rtg.go ./pkg/a.go ./pkg/b.go
+rtg -link -t wasi/wasm32 -o app.wasm main.rtg.go dep.rtg.go
+rtg -check ./input.go</pre>
+      <ul>
+        <li><code>-t</code> selects the backend target and defaults to the host-compatible target.</li>
+        <li><code>-emit-unit</code> stops after emitting stable RTG subset source unit artifacts.</li>
+        <li><code>-link</code> links previously emitted unit artifacts for a target.</li>
+        <li><code>-check</code> validates frontend support without invoking the backend.</li>
+        <li>A package directory argument such as <code>rtg ./cmd/app</code> should behave like the normal build entrypoint.</li>
+        <li>The frontend should print diagnostics against original file paths and line numbers.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Host Go Safety</h2>
+      <ul>
+        <li>Generated unit files use the <code>.rtg.go</code> suffix by convention.</li>
+        <li>The frontend should emit units into a build/cache directory by default, not beside user source files.</li>
+        <li>When unit files are written as files, they should include a restrictive build constraint such as <code>//go:build rtg</code> so the host Go toolchain ignores them by default.</li>
+        <li><code>rtgx</code> should ignore that build constraint comment and treat the file as RTG subset source.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Milestones</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Milestone</th>
+            <th>Acceptance Criteria</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="status now">first</span></td>
+            <td>Skeleton CLI and loader</td>
+            <td>Can build <code>rtg ./cmd/app</code>, parse the local module path from <code>go.mod</code>, group files into packages, resolve simple local imports and needed <code>rtg/std</code> packages, and emit structured diagnostics for unsupported layouts.</td>
+          </tr>
+          <tr>
+            <td><span class="status now">first</span></td>
+            <td>Self-hostable parser</td>
+            <td>Can lex and parse the supported Go syntax into RTG-owned ASTs without using Go standard library parser packages.</td>
+          </tr>
+          <tr>
+            <td><span class="status now">first</span></td>
+            <td>Subset checker</td>
+            <td>Rejects generics, goroutines, channels, interfaces, maps, function values, and imports with useful source positions.</td>
+          </tr>
+          <tr>
+            <td><span class="status now">first</span></td>
+            <td>Stable package unit emitter</td>
+            <td>Emits one deterministic distributable RTG subset source unit per package for simple programs with globals, functions, structs, and calls across files.</td>
+          </tr>
+          <tr>
+            <td><span class="status later">next</span></td>
+            <td>Expression normalization</td>
+            <td>Introduces temporaries to preserve Go evaluation order before handing code to the backend.</td>
+          </tr>
+          <tr>
+            <td><span class="status later">next</span></td>
+            <td>In-memory backend integration</td>
+            <td>Can compile package unit source through <code>rtgx</code> without temporary files for every supported target.</td>
+          </tr>
+          <tr>
+            <td><span class="status later">next</span></td>
+            <td>Linker stage</td>
+            <td>Can link multiple package objects, resolve symbols, include runtime/startup code, and produce final target binaries.</td>
+          </tr>
+          <tr>
+            <td><span class="status later">next</span></td>
+            <td>Self-hosting frontend</td>
+            <td>The frontend source compiles through <code>rtgx</code> and uses <code>rtgx</code> as its backend.</td>
+          </tr>
+          <tr>
+            <td><span class="status later">next</span></td>
+            <td>Parallel standard tree</td>
+            <td>Provides only the initial <code>rtg/std</code> packages needed by the frontend and early fixtures, expanding later as required.</td>
+          </tr>
+          <tr>
+            <td><span class="status later">next</span></td>
+            <td>Frontend fixture suite</td>
+            <td>Golden lowered output plus end-to-end tests that compare host Go behavior against emitted backend binaries.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Testing Strategy</h2>
+      <ul>
+        <li>Unit tests for loader grouping, diagnostics, and declaration ordering.</li>
+        <li>Golden tests for package unit artifacts so frontend changes are reviewable and distributable units remain stable.</li>
+        <li>End-to-end tests that compile package units through in-memory <code>rtgx</code>, link them, and compare output with host Go for supported programs.</li>
+        <li>Negative tests for every explicitly excluded feature.</li>
+        <li>Cross-target smoke tests should reuse the existing backend target matrix once the frontend can call <code>rtgx</code> in memory.</li>
+        <li>Self-hosting tests should build the frontend with <code>rtgx</code> and use the result to compile a small multi-package program.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Settled Direction</h2>
+      <ul>
+        <li>The frontend should grow into full Go module support; stage one keeps module handling simple and starts with the local module path plus local imports.</li>
+        <li>The project will provide its own parallel standard tree in <code>rtg/std</code>, initially limited to what the frontend and early programs need.</li>
+        <li>Each package lowers into one stable platform-independent unit.</li>
+        <li>The stable unit artifact format is RTG subset source with the <code>.rtg.go</code> suffix.</li>
+        <li>Package dependencies remain separate until a linker stage combines them.</li>
+        <li>Stage one should keep existing Go compatibility intentionally simple while preserving the module/package shape.</li>
+        <li>The normal package build form should be <code>rtg ./cmd/app</code>.</li>
+        <li>The frontend should be written in the RTG-supported subset and self-host with <code>rtgx</code> as the backend.</li>
+        <li>The frontend should use hand-written parsing and checking code, avoiding Go standard library compiler packages.</li>
+        <li>Runtime intrinsics should be hidden from user code and may be expanded as long as each intrinsic is implemented on every supported backend target.</li>
+        <li>Emitted RTG subset source units should be stable enough to cache, commit in golden tests, and distribute.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

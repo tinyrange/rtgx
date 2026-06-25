@@ -7,15 +7,34 @@ listed here should be treated as unsupported until this file is updated.
 ## Program Shape
 
 - A program is one or more files in package `main`.
-- Tests define `func appMain(args []string) int`.
-- The runtime provides `main`, calls `appMain(os.Args)`, and exits with its
-  return value.
+- Tests define one of:
+  - `func appMain() int`
+  - `func appMain(args []string) int`
+  - `func appMain(args []string, env []string) int`
+- The runtime provides `main`, calls `appMain` with `os.Args` and optionally
+  `os.Environ()`, and exits with its return value.
 - Source files may contain top-level `const`, `var`, `type`, and `func`
   declarations.
 - Grouped `const (...)` declarations may use `iota` for integer-like enum
   constants.
 - Imports are not part of the compiled subset. Runtime functions and constants
   are provided by `rtg_main.go`.
+
+## Compiler Targets
+
+The compiler accepts `-t <target>` for cross-compilation. Currently recognized
+targets are:
+
+- `linux/amd64`
+- `linux/386`
+- `linux/aarch64`
+- `linux/arm`
+- `windows/amd64`
+- `windows/386`
+- `wasi/wasm32`
+
+The full test harness runs the targets supported by the current host and
+available emulators/runtimes.
 
 ## Types
 
@@ -54,9 +73,14 @@ Required:
 - character literals for byte-sized values, for example `'a'` and `'\n'`
 - interpreted string literals with common escapes such as `\n`, `\"`, and `\\`
 - boolean literals `true` and `false`
+- `nil` for zero pointer and slice values
 - composite literals for structs and supported aggregate values
+- keyed and positional struct literals
+- empty, nested, and implicit composite literals where the surrounding type is
+  known
 - slice literals for supported element types, for example `[]byte{1, 2, 3}`
   and `[]int{1, 2, 3}`
+- global composite literals and literals using named supported types
 
 Unsupported:
 
@@ -81,6 +105,7 @@ Required:
 - struct field selection, for example `x.y` and `p.y`
 - string indexing, for example `s[i]`
 - slice indexing and assignment, for example `buf[i] = 65`
+- two-bound slicing expressions `x[a:b]`
 - slice length with `len(x)`
 - function calls
 - method calls on concrete receiver values or pointers
@@ -98,8 +123,8 @@ unless the compiler source needs it.
 
 Unsupported:
 
-- slicing expressions `x[a:b]`
 - `cap`
+- full slice expressions `x[a:b:c]`
 - type assertions and type switches
 
 ## Statements
@@ -109,12 +134,16 @@ Required:
 - `var` declarations with explicit type, initializer, or both
 - short variable declarations `:=`, including multiple variables
 - assignment `=`, including multiple assignment
+- multiple assignment from multi-result calls and ordinary expressions, with
+  Go-style right-hand side evaluation before assignment
 - compound assignment for arithmetic operators: `+=`, `-=`, `*=`, `/=`, `%=`
 - expression statements for function calls and append assignments
 - `return` with the number of values required by the function result type
 - `if`, `else if`, and `else`
 - `switch` statements over supported integer-like, boolean, and string
   expressions, without fallthrough
+- `switch` cases with one or more values, optional `default`, `break` that exits
+  only the switch, and `continue` when the switch is inside a loop
 - `for` loops in Go's three common forms:
   - `for condition { ... }`
   - `for init; condition; post { ... }`
@@ -138,6 +167,7 @@ Required:
 - methods with concrete value or pointer receivers
 - zero or more parameters
 - zero or more return values
+- multiple return values and direct propagation of multi-result calls
 - variadic parameters on functions and methods, for example `func emit(xs ...byte)`
 - recursion
 - calls before declarations
