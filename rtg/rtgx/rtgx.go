@@ -76,35 +76,28 @@ func CompileSourceBytes(source []byte, opts Options) ([]byte, error) {
 	if !targetpkg.Supported(target) {
 		return nil, fmt.Errorf("rtg: unsupported target: %s\nrtg: supported targets: %s", target, targetpkg.List())
 	}
-	outDir, err := os.MkdirTemp("", "rtgx-out-")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(outDir)
-	output := filepath.Join(outDir, "out")
-	if err := compileSourceToPath(source, target, output, opts.BackendRoot); err != nil {
-		return nil, err
-	}
-	return os.ReadFile(output)
+	return compileSourceToBytes(source, target, opts.BackendRoot)
 }
 
-func compileSourceToPath(source []byte, target string, output string, backendRootOverride string) error {
+func compileSourceToBytes(source []byte, target string, backendRootOverride string) ([]byte, error) {
 	root, err := backendRoot(backendRootOverride)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	cmd := exec.Command("go", "run", ".", "-t", target, "-o", output, "-")
+	cmd := exec.Command("go", "run", ".", "-t", target, "-o", "-", "-")
 	cmd.Dir = root
 	cmd.Stdin = bytes.NewReader(source)
+	var stdout bytes.Buffer
 	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		if stderr.Len() > 0 {
-			return fmt.Errorf("rtgx compile failed: %w: %s", err, stderr.String())
+			return nil, fmt.Errorf("rtgx compile failed: %w: %s", err, stderr.String())
 		}
-		return fmt.Errorf("rtgx compile failed: %w", err)
+		return nil, fmt.Errorf("rtgx compile failed: %w", err)
 	}
-	return os.Chmod(output, 0755)
+	return stdout.Bytes(), nil
 }
 
 func writeOutput(data []byte, outputPath string) error {

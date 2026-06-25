@@ -78,7 +78,7 @@ func rtgPrintIntErr(v int) {
 }
 
 func rtgPrintUsage() {
-	rtgPrintErr("usage: rtg [-t linux/amd64|linux/386|linux/aarch64|linux/arm|windows/amd64|windows/386|wasi/wasm32] -o <output> <input.go|->...\n")
+	rtgPrintErr("usage: rtg [-t linux/amd64|linux/386|linux/aarch64|linux/arm|windows/amd64|windows/386|wasi/wasm32] -o <output|-> <input.go|->...\n")
 }
 
 func rtgPrintUnsupportedTarget(target string) {
@@ -157,12 +157,15 @@ func appMain(args []string, env []string) int {
 		rtgPrintUsage()
 		return 1
 	}
-	var output int = open(outputPath, O_RDWR|O_CREATE|O_TRUNC)
-	if output < 0 {
-		rtgPrintErr("rtg: failed to open output: ")
-		rtgPrintErr(outputPath)
-		rtgPrintErr("\n")
-		return 1
+	output := 1
+	if outputPath != "-" {
+		output = open(outputPath, O_RDWR|O_CREATE|O_TRUNC)
+		if output < 0 {
+			rtgPrintErr("rtg: failed to open output: ")
+			rtgPrintErr(outputPath)
+			rtgPrintErr("\n")
+			return 1
+		}
 	}
 	return compileTarget(input, output, target)
 }
