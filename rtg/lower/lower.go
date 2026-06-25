@@ -254,6 +254,8 @@ type expressionStatement struct {
 	token     int
 	exprStart int
 	exprEnd   int
+	kind      string
+	openBrace int
 }
 
 func normalizeFunctionExpressions(body string, unitName string) string {
@@ -276,6 +278,30 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 		insertStart := statementInsertStart(body, toks[stmt.token].Start)
 		out = append(out, body[cursor:insertStart]...)
 		indent := statementIndent(body, toks[stmt.token].Start)
+		if stmt.kind == "for-condition" {
+			innerIndent := indent + "\t"
+			condition := applyExpressionReplacements(body, toks[stmt.exprStart].Start, toks[stmt.exprEnd-1].End, replacements)
+			out = append(out, body[insertStart:toks[stmt.token].Start]...)
+			out = append(out, "for {\n"...)
+			for _, temp := range temps {
+				out = append(out, innerIndent...)
+				out = append(out, temp.name...)
+				out = append(out, " := "...)
+				out = append(out, temp.expr...)
+				out = append(out, '\n')
+			}
+			out = append(out, innerIndent...)
+			out = append(out, "if !("...)
+			out = append(out, condition...)
+			out = append(out, ") {\n"...)
+			out = append(out, innerIndent...)
+			out = append(out, "\tbreak\n"...)
+			out = append(out, innerIndent...)
+			out = append(out, "}\n"...)
+			cursor = toks[stmt.openBrace].End
+			i = stmt.openBrace
+			continue
+		}
 		if insertStart == toks[stmt.token].Start {
 			out = append(out, '\n')
 		}
@@ -322,6 +348,17 @@ func normalizationStatement(toks []scan.Token, pos int) (expressionStatement, bo
 			return expressionStatement{}, false
 		}
 		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd}, true
+	}
+	if toks[pos].Text == "for" {
+		exprStart := pos + 1
+		exprEnd := conditionExpressionEnd(toks, pos)
+		if exprEnd <= exprStart {
+			return expressionStatement{}, false
+		}
+		if expressionContainsTopLevelSemicolon(toks, exprStart, exprEnd) {
+			return expressionStatement{}, false
+		}
+		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd, kind: "for-condition", openBrace: exprEnd}, true
 	}
 	if startsCallStatement(toks, pos) {
 		exprEnd := lineExpressionEnd(toks, pos)

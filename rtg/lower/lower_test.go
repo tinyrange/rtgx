@@ -853,7 +853,7 @@ func appMain() int {
 	}
 }
 
-func TestPackageDoesNotNormalizeForConditionCallArguments(t *testing.T) {
+func TestPackageNormalizesNestedForConditionCallArguments(t *testing.T) {
 	pkg := load.Package{
 		ImportPath: "example.com/app",
 		Name:       "main",
@@ -882,11 +882,20 @@ func appMain() int {
 		t.Fatalf("Package failed: %v", err)
 	}
 	body := u.Decls[3].Body
-	if strings.Contains(body, "_tmp_") {
-		t.Fatalf("for condition was normalized unsafely: %q", body)
+	if !strings.Contains(body, "for {\n") {
+		t.Fatalf("for condition was not rewritten to loop body guard: %q", body)
 	}
-	if !strings.Contains(body, "for rtg_example_com_app_join(rtg_example_com_app_first(), rtg_example_com_app_second()) == 12 {") {
-		t.Fatalf("for condition shape changed unexpectedly: %q", body)
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_first()") {
+		t.Fatalf("first for condition call was not lifted into loop body temp: %q", body)
+	}
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_second()") {
+		t.Fatalf("second for condition call was not lifted into loop body temp: %q", body)
+	}
+	if !strings.Contains(body, "if !(rtg_example_com_app_join(rtg_example_com_app_appMain_tmp_0, rtg_example_com_app_appMain_tmp_1) == 12) {\n\t\t\tbreak\n\t\t}") {
+		t.Fatalf("for condition guard did not use lifted temps: %q", body)
+	}
+	if !strings.Contains(body, "total = total + 1") {
+		t.Fatalf("for body was not preserved: %q", body)
 	}
 }
 
