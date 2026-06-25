@@ -140,13 +140,41 @@ import (
 	fmt2 "fmt"
 )
 
-func appMain() int { return 0 }
+func appMain() int { return fmt1.Value() + fmt2.Value() }
 `))
 	if err != nil {
 		t.Fatalf("FileSource failed: %v", err)
 	}
 	if diags := File(file); len(diags) != 0 {
 		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
+}
+
+func TestFileRejectsUnusedImports(t *testing.T) {
+	file, err := parse.FileSource("imports.go", []byte(`package main
+
+import (
+	"fmt"
+	alias "example.com/alias"
+)
+
+func appMain() int { return 0 }
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted unused imports")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"imports.go:4:2: unused import: fmt",
+		"imports.go:5:8: unused import: alias",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing diagnostic %q in:\n%s", want, msg)
+		}
 	}
 }
 

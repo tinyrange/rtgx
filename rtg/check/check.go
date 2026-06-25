@@ -167,6 +167,7 @@ func File(file parse.File) Diagnostics {
 func importDiagnostics(file parse.File) Diagnostics {
 	var diags Diagnostics
 	names := map[string]scan.Token{}
+	used := usedImportNames(file)
 	for _, imp := range file.Imports {
 		if imp.Alias == "." {
 			diags = append(diags, diag(file, imp.Tok, "dot imports are not supported"))
@@ -183,8 +184,21 @@ func importDiagnostics(file parse.File) Diagnostics {
 			continue
 		}
 		names[localName] = imp.Tok
+		if !used[localName] {
+			diags = append(diags, diag(file, imp.Tok, "unused import: "+localName))
+		}
 	}
 	return diags
+}
+
+func usedImportNames(file parse.File) map[string]bool {
+	used := map[string]bool{}
+	for i := 0; i+1 < len(file.Tokens); i++ {
+		if file.Tokens[i].Kind == scan.Ident && file.Tokens[i+1].Text == "." {
+			used[file.Tokens[i].Text] = true
+		}
+	}
+	return used
 }
 
 func importLocalName(imp parse.Import) string {
