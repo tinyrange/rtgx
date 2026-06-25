@@ -51,16 +51,18 @@ func Graph(g *load.Graph) error {
 			diags = append(diags, File(parsed)...)
 			diags = append(diags, importedSelectorDiagnostics(pkg, parsed, exported)...)
 			for _, decl := range parsed.Decls {
-				if decl.Name == "" || decl.Name == "_" {
-					continue
+				for i, name := range declNames(decl) {
+					if name == "" || name == "_" {
+						continue
+					}
+					current := declNameDiagnostic(parsed, decl, i, "duplicate package-level declaration: "+name)
+					if previous, ok := names[name]; ok {
+						diags = append(diags, previous)
+						diags = append(diags, current)
+						continue
+					}
+					names[name] = current
 				}
-				current := declDiagnostic(parsed, decl, "duplicate package-level declaration: "+decl.Name)
-				if previous, ok := names[decl.Name]; ok {
-					diags = append(diags, previous)
-					diags = append(diags, current)
-					continue
-				}
-				names[decl.Name] = current
 			}
 		}
 	}
@@ -320,6 +322,13 @@ func declDiagnostic(file parse.File, decl parse.Decl, message string) Diagnostic
 		tok = decl.Tok
 	}
 	return diag(file, tok, message)
+}
+
+func declNameDiagnostic(file parse.File, decl parse.Decl, index int, message string) Diagnostic {
+	if index >= 0 && index < len(decl.NameToks) {
+		return diag(file, decl.NameToks[index], message)
+	}
+	return declDiagnostic(file, decl, message)
 }
 
 func isExported(name string) bool {

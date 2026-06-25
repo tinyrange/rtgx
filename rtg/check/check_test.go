@@ -304,6 +304,46 @@ func Value() int { return 2 }
 	}
 }
 
+func TestGraphRejectsDuplicateGroupedPackageLevelNames(t *testing.T) {
+	graph := &load.Graph{
+		Packages: []load.Package{
+			{
+				ImportPath: "example.com/app/pkg",
+				Name:       "pkg",
+				Files: []load.File{
+					{
+						Path: "group.go",
+						Source: []byte(`package pkg
+
+const (
+	Answer = 1
+	Other = 2
+)
+
+var (
+	Other = 3
+)
+`),
+					},
+				},
+			},
+		},
+	}
+	err := Graph(graph)
+	if err == nil {
+		t.Fatalf("Graph succeeded with duplicate grouped declaration")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"group.go:5:2: duplicate package-level declaration: Other",
+		"group.go:9:2: duplicate package-level declaration: Other",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing diagnostic %q in:\n%s", want, msg)
+		}
+	}
+}
+
 func TestGraphRejectsUnresolvedImportedSelectors(t *testing.T) {
 	graph := &load.Graph{
 		Packages: []load.Package{

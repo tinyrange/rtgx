@@ -87,6 +87,9 @@ type (
 	if !sameStrings(file.Decls[0].Names, wantConst) {
 		t.Fatalf("const names = %#v, want %#v", file.Decls[0].Names, wantConst)
 	}
+	if len(file.Decls[0].NameToks) != 3 || file.Decls[0].NameToks[1].Line != 5 || file.Decls[0].NameToks[1].Column != 2 {
+		t.Fatalf("const name tokens = %#v", file.Decls[0].NameToks)
+	}
 	wantType := []string{"Box", "Alias"}
 	if !sameStrings(file.Decls[1].Names, wantType) {
 		t.Fatalf("type names = %#v, want %#v", file.Decls[1].Names, wantType)

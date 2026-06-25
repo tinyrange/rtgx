@@ -28,6 +28,7 @@ type Decl struct {
 	Names    []string
 	Tok      scan.Token
 	NameTok  scan.Token
+	NameToks []scan.Token
 	Receiver bool
 	Start    int
 	End      int
@@ -140,6 +141,7 @@ func parseDecl(file *File, pos int) int {
 			decl.Name = toks[namePos].Text
 			decl.Names = []string{decl.Name}
 			decl.NameTok = toks[namePos]
+			decl.NameToks = []scan.Token{decl.NameTok}
 		}
 		next := findNextTopLevel(toks, pos+1)
 		decl.End = declEnd(file, next)
@@ -151,7 +153,7 @@ func parseDecl(file *File, pos int) int {
 		if namePos < len(toks) && toks[namePos].Text == "(" {
 			close := skipBalanced(toks, namePos, "(", ")")
 			if close > namePos {
-				decl.Names = groupedDeclNames(toks, namePos, close)
+				decl.Names, decl.NameToks = groupedDeclNames(toks, namePos, close)
 				next := close + 1
 				decl.End = declEnd(file, next)
 				file.Decls = append(file.Decls, decl)
@@ -166,6 +168,7 @@ func parseDecl(file *File, pos int) int {
 			decl.Name = toks[namePos].Text
 			decl.Names = []string{decl.Name}
 			decl.NameTok = toks[namePos]
+			decl.NameToks = []scan.Token{decl.NameTok}
 		}
 		next := findNextTopLevel(toks, pos+1)
 		decl.End = declEnd(file, next)
@@ -175,8 +178,9 @@ func parseDecl(file *File, pos int) int {
 	return pos + 1
 }
 
-func groupedDeclNames(toks []scan.Token, open int, close int) []string {
+func groupedDeclNames(toks []scan.Token, open int, close int) ([]string, []scan.Token) {
 	var names []string
+	var nameToks []scan.Token
 	line := -1
 	expectName := true
 	paren := 0
@@ -225,12 +229,13 @@ func groupedDeclNames(toks []scan.Token, open int, close int) []string {
 		}
 		if tok.Kind == scan.Ident && expectName {
 			names = append(names, tok.Text)
+			nameToks = append(nameToks, tok)
 			expectName = false
 			continue
 		}
 		expectName = false
 	}
-	return names
+	return names, nameToks
 }
 
 func DeclText(file File, decl Decl) string {
