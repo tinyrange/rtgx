@@ -323,6 +323,14 @@ func normalizationStatement(toks []scan.Token, pos int) (expressionStatement, bo
 		}
 		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd}, true
 	}
+	if toks[pos].Text == "for" {
+		exprStart := pos + 1
+		exprEnd := conditionExpressionEnd(toks, pos)
+		if exprEnd <= exprStart || expressionContainsTopLevelSemicolon(toks, exprStart, exprEnd) {
+			return expressionStatement{}, false
+		}
+		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd}, true
+	}
 	if startsCallStatement(toks, pos) {
 		exprEnd := lineExpressionEnd(toks, pos)
 		if exprEnd <= pos {
@@ -344,7 +352,7 @@ func normalizationStatement(toks []scan.Token, pos int) (expressionStatement, bo
 	if !isAssignmentOperator(toks[pos].Text) {
 		return expressionStatement{}, false
 	}
-	if isForPostClauseAssignment(toks, pos) {
+	if isClassicForHeaderAssignment(toks, pos) {
 		return expressionStatement{}, false
 	}
 	exprStart := pos + 1
@@ -407,6 +415,15 @@ func statementStartToken(toks []scan.Token, pos int) int {
 
 func isAssignmentOperator(text string) bool {
 	return text == "=" || text == ":="
+}
+
+func isClassicForHeaderAssignment(toks []scan.Token, pos int) bool {
+	start := statementStartToken(toks, pos)
+	if start < len(toks) && toks[start].Text == "for" {
+		exprEnd := conditionExpressionEnd(toks, start)
+		return expressionContainsTopLevelSemicolon(toks, start+1, exprEnd)
+	}
+	return isForPostClauseAssignment(toks, pos)
 }
 
 func varInitializerStart(toks []scan.Token, pos int) int {
@@ -543,6 +560,19 @@ func expressionContainsCall(toks []scan.Token, start int, end int) bool {
 		if toks[i].Kind == scan.Ident && toks[i+1].Text == "(" {
 			return true
 		}
+	}
+	return false
+}
+
+func expressionContainsTopLevelSemicolon(toks []scan.Token, start int, end int) bool {
+	paren := 0
+	brack := 0
+	brace := 0
+	for i := start; i < end; i++ {
+		if paren == 0 && brack == 0 && brace == 0 && toks[i].Text == ";" {
+			return true
+		}
+		updateExpressionDepth(toks[i].Text, &paren, &brack, &brace)
 	}
 	return false
 }

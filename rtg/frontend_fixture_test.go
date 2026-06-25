@@ -111,6 +111,39 @@ func Emit() int {
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
+func TestForConditionNestedCallArgumentFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/forcall\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "example.com/forcall/pkg/dep"
+
+func main() {
+	count := 0
+	for dep.Join(dep.First(), dep.Second()) == 12 {
+		count = count + 1
+		break
+	}
+	if count == 1 {
+		dep.Emit()
+		return
+	}
+	print("FAIL\n")
+}
+`)
+	writeFixtureFile(t, fixture, "pkg/dep/dep.go", `package dep
+
+func First() int { return 1 }
+func Second() int { return 2 }
+func Join(a int, b int) int { return a*10 + b }
+func Emit() int {
+	print("PASS\n")
+	return 0
+}
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
 func runFrontendFixtureMatchesHostGo(t *testing.T, fixture string) {
 	t.Helper()
 	host := exec.Command("go", "run", "./cmd/app")

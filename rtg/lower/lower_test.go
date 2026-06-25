@@ -853,6 +853,81 @@ func appMain() int {
 	}
 }
 
+func TestPackageNormalizesNestedForConditionCallArguments(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func first() int { return 1 }
+func second() int { return 2 }
+func join(a int, b int) int { return a*10 + b }
+func appMain() int {
+	total := 0
+	for join(first(), second()) == 12 {
+		total = total + 1
+		break
+	}
+	return total
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[3].Body
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_first()") {
+		t.Fatalf("first for condition call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_second()") {
+		t.Fatalf("second for condition call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "for rtg_example_com_app_join(rtg_example_com_app_appMain_tmp_0, rtg_example_com_app_appMain_tmp_1) == 12 {") {
+		t.Fatalf("for condition did not use lifted temps: %q", body)
+	}
+}
+
+func TestPackageDoesNotNormalizeClassicForClauseCallArguments(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func first() int { return 1 }
+func next(v int) int { return v + 1 }
+func appMain() int {
+	total := 0
+	for i := next(first()); i < 3; i = next(first()) {
+		total = total + i
+	}
+	return total
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[2].Body
+	if strings.Contains(body, "_tmp_") {
+		t.Fatalf("classic for clause was normalized unsafely: %q", body)
+	}
+	if !strings.Contains(body, "for i := rtg_example_com_app_next(rtg_example_com_app_first()); i < 3; i = rtg_example_com_app_next(rtg_example_com_app_first()) {") {
+		t.Fatalf("classic for clause shape changed unexpectedly: %q", body)
+	}
+}
+
 func TestPackageNormalizesWithNonCollidingTempNames(t *testing.T) {
 	pkg := load.Package{
 		ImportPath: "example.com/app",
