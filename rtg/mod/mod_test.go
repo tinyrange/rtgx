@@ -49,6 +49,7 @@ func TestParseFileReplaces(t *testing.T) {
 
 replace example.com/lib => ../lib
 replace example.com/other v1.2.3 => ./other
+replace example.com/external => example.com/fork v1.2.3
 
 replace (
 	example.com/block => ./block
@@ -64,6 +65,7 @@ replace (
 	want := []Replace{
 		{Old: "example.com/lib", New: "../lib"},
 		{Old: "example.com/other", New: "./other"},
+		{Old: "example.com/external", New: "example.com/fork"},
 		{Old: "example.com/block", New: "./block"},
 		{Old: "example.com/versioned", New: "../versioned"},
 	}
@@ -165,6 +167,14 @@ replace (
 		{name: "missing target", data: `module example.com/app
 
 replace example.com/lib =>
+`},
+		{name: "too many target fields", data: `module example.com/app
+
+replace example.com/lib => ../lib extra
+`},
+		{name: "local target version", data: `module example.com/app
+
+replace example.com/lib => ../lib v1.2.3
 `},
 		{name: "bad block opener", data: `module example.com/app
 

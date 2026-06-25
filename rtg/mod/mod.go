@@ -151,7 +151,34 @@ func parseReplaceFields(fields []string) (Replace, error) {
 	if arrow <= 0 || arrow+1 >= len(fields) {
 		return Replace{}, fmt.Errorf("malformed replace directive")
 	}
-	return Replace{Old: fields[0], New: fields[arrow+1]}, nil
+	oldFields := fields[:arrow]
+	newFields := fields[arrow+1:]
+	if len(oldFields) > 2 || len(newFields) > 2 {
+		return Replace{}, fmt.Errorf("malformed replace directive")
+	}
+	if invalidReplaceFields(oldFields) || invalidReplaceFields(newFields) {
+		return Replace{}, fmt.Errorf("malformed replace directive")
+	}
+	if len(newFields) == 2 && isLocalReplacePath(newFields[0]) {
+		return Replace{}, fmt.Errorf("malformed replace directive")
+	}
+	return Replace{Old: oldFields[0], New: newFields[0]}, nil
+}
+
+func invalidReplaceFields(fields []string) bool {
+	if len(fields) == 0 {
+		return true
+	}
+	for _, field := range fields {
+		if field == "(" || field == ")" || field == "=>" {
+			return true
+		}
+	}
+	return false
+}
+
+func isLocalReplacePath(path string) bool {
+	return filepath.IsAbs(path) || strings.HasPrefix(path, "./") || strings.HasPrefix(path, "../") || path == "." || path == ".."
 }
 
 func parseRequireFields(fields []string) (Require, error) {
