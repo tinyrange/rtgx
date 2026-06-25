@@ -11,6 +11,8 @@ import (
 	"j5.nz/rtg/rtg/unit"
 )
 
+const crossArchTestsEnv = "RTG_CROSS_ARCH_TESTS"
+
 func TestCompileSourceBuildsRunnableExecutable(t *testing.T) {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		t.Skipf("linux/amd64 executable smoke requires linux/amd64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)
@@ -84,6 +86,37 @@ func appMain() int {
 	}
 }
 
+func TestCompileSourceBytesProducesTargetBytes(t *testing.T) {
+	root, ok := findBackendRootUpward(".")
+	if !ok {
+		t.Skip("backend root not found")
+	}
+	src := []byte(`//go:build rtg
+
+package main
+
+func appMain() int {
+	print("PASS\n")
+	return 0
+}
+`)
+	for _, target := range rtgxByteTargets(t) {
+		target := target
+		t.Run(target, func(t *testing.T) {
+			data, err := CompileSourceBytes(src, Options{Target: target, BackendRoot: root})
+			if err != nil {
+				t.Fatalf("CompileSourceBytes failed: %v", err)
+			}
+			if len(data) == 0 {
+				t.Fatalf("CompileSourceBytes returned empty output")
+			}
+			if !hasTargetMagic(target, data) {
+				t.Fatalf("compiled bytes for %s have unexpected magic: % x", target, leadingBytes(data, 8))
+			}
+		})
+	}
+}
+
 func TestCompileSourceRequiresOutput(t *testing.T) {
 	err := CompileSource([]byte("package main\n"), Options{Target: "linux/amd64"})
 	if err == nil {
@@ -92,6 +125,50 @@ func TestCompileSourceRequiresOutput(t *testing.T) {
 	if !strings.Contains(err.Error(), "missing output path") {
 		t.Fatalf("error = %q", err)
 	}
+}
+
+func rtgxByteTargets(t *testing.T) []string {
+	t.Helper()
+	switch runtime.GOOS + "/" + runtime.GOARCH {
+	case "linux/amd64":
+		targets := []string{"linux/amd64"}
+		if os.Getenv(crossArchTestsEnv) == "1" {
+			targets = append(targets,
+				"linux/386",
+				"linux/aarch64",
+				"linux/arm",
+				"windows/amd64",
+				"windows/386",
+				"wasi/wasm32",
+			)
+		}
+		return targets
+	case "linux/arm64":
+		return []string{"linux/aarch64"}
+	default:
+		t.Skipf("no rtgx byte targets supported on %s/%s", runtime.GOOS, runtime.GOARCH)
+		return nil
+	}
+}
+
+func hasTargetMagic(target string, data []byte) bool {
+	if strings.HasPrefix(target, "linux/") {
+		return len(data) >= 4 && data[0] == 0x7f && data[1] == 'E' && data[2] == 'L' && data[3] == 'F'
+	}
+	if strings.HasPrefix(target, "windows/") {
+		return len(data) >= 2 && data[0] == 'M' && data[1] == 'Z'
+	}
+	if target == "wasi/wasm32" {
+		return len(data) >= 4 && data[0] == 0x00 && data[1] == 'a' && data[2] == 's' && data[3] == 'm'
+	}
+	return false
+}
+
+func leadingBytes(data []byte, n int) []byte {
+	if len(data) < n {
+		return data
+	}
+	return data[:n]
 }
 
 func TestCompileSourceRejectsUnsupportedTarget(t *testing.T) {
