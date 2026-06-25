@@ -554,6 +554,39 @@ func appMain() int { return pkg.Value() }
 	}
 }
 
+func TestLoadEntriesResolvesVendoredRequiredModuleImports(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n\nrequire example.com/lib v1.2.3\n")
+	writeFile(t, root, "main.go", `package main
+
+import "example.com/lib/pkg/answer"
+
+func appMain() int { return answer.Value() }
+`)
+	writeFile(t, root, "vendor/example.com/lib/pkg/answer/answer.go", `package answer
+
+func Value() int { return 7 }
+`)
+
+	graph, err := LoadEntries([]string{root}, Options{})
+	if err != nil {
+		t.Fatalf("LoadEntries failed: %v", err)
+	}
+	if len(graph.Packages) != 2 {
+		t.Fatalf("loaded %d packages, want 2", len(graph.Packages))
+	}
+	dep := graph.Packages[1]
+	if dep.ImportPath != "example.com/lib/pkg/answer" {
+		t.Fatalf("dep import path = %q, want example.com/lib/pkg/answer", dep.ImportPath)
+	}
+	if dep.Dir != filepath.Join(root, "vendor", "example.com", "lib", "pkg", "answer") {
+		t.Fatalf("dep dir = %q, want vendor dir", dep.Dir)
+	}
+	if dep.Files[0].UnitPath != "example.com/lib/pkg/answer/answer.go" {
+		t.Fatalf("dep unit path = %q, want import-relative path", dep.Files[0].UnitPath)
+	}
+}
+
 func TestLoadEntriesRejectsRequiredExternalModuleImports(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n\nrequire example.com/lib v1.2.3\n")

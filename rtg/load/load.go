@@ -664,6 +664,9 @@ func resolveImport(module mod.Module, opts Options, imp string) (resolvedImport,
 		return next, ok, err
 	}
 	if req, ok := requiredModuleForImport(module, imp); ok {
+		if next, ok := resolveVendorImport(module, req, imp); ok {
+			return next, true, nil
+		}
 		return resolvedImport{}, false, fmt.Errorf("import %q uses required module %q; external module fetching is not supported", imp, req.Path)
 	}
 	stdDir := filepath.Join(opts.StdRoot, filepath.FromSlash(imp))
@@ -690,6 +693,17 @@ func resolveReplacedImport(module mod.Module, imp string) (resolvedImport, bool,
 		return resolvedImport{Dir: filepath.Join(root, filepath.FromSlash(suffix)), ImportPath: imp}, true, nil
 	}
 	return resolvedImport{}, false, nil
+}
+
+func resolveVendorImport(module mod.Module, req mod.Require, imp string) (resolvedImport, bool) {
+	if imp != req.Path && !strings.HasPrefix(imp, req.Path+"/") {
+		return resolvedImport{}, false
+	}
+	dir := filepath.Join(module.Root, "vendor", filepath.FromSlash(imp))
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		return resolvedImport{Dir: dir, ImportPath: imp}, true
+	}
+	return resolvedImport{}, false
 }
 
 func requiredModuleForImport(module mod.Module, imp string) (mod.Require, bool) {
