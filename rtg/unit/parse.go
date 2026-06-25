@@ -38,6 +38,9 @@ func ParseSource(path string, src []byte) (Unit, error) {
 			continue
 		}
 		body := strings.TrimPrefix(line, "// rtg:")
+		if !seenUnit && !strings.HasPrefix(body, "unit ") {
+			return Unit{}, fmt.Errorf("%s: rtg metadata before unit declaration", path)
+		}
 		if strings.HasPrefix(body, "decl ") {
 			decl, err := parseDecl(strings.TrimSpace(strings.TrimPrefix(body, "decl ")))
 			if err != nil {

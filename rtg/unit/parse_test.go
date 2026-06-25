@@ -88,6 +88,44 @@ package main
 	}
 }
 
+func TestParseSourceRequiresUnitMetadataFirst(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "import",
+			src: `//go:build rtg
+
+// rtg:import "example.com/app/dep"
+// rtg:unit example.com/app
+package main
+`,
+		},
+		{
+			name: "decl",
+			src: `//go:build rtg
+
+// rtg:decl func appMain => rtg_example_com_app_appMain main.go
+func rtg_example_com_app_appMain() int { return 0 }
+// rtg:unit example.com/app
+package main
+`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseSource(tt.name+".rtg.go", []byte(tt.src))
+			if err == nil {
+				t.Fatalf("ParseSource accepted %s metadata before unit identity", tt.name)
+			}
+			if !strings.Contains(err.Error(), "rtg metadata before unit declaration") {
+				t.Fatalf("error = %q", err)
+			}
+		})
+	}
+}
+
 func TestParseSourceRejectsDuplicateMetadata(t *testing.T) {
 	tests := []struct {
 		name string
