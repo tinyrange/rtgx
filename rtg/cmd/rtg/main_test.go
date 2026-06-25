@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -491,6 +492,52 @@ func Print() int {
 	}
 	if string(data) != "PASS\n" {
 		t.Fatalf("compiled app output = %q", string(data))
+	}
+}
+
+func TestRunBuildWritesDashOutputToStdout(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skipf("linux/amd64 stdout smoke requires linux/amd64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	root := t.TempDir()
+	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
+	writeCLIFile(t, root, "cmd/app/main.go", `package main
+
+func main() {
+	print("PASS\n")
+}
+`)
+	stdout := os.Stdout
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("Pipe failed: %v", err)
+	}
+	outCh := make(chan []byte, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		data, err := io.ReadAll(read)
+		outCh <- data
+		errCh <- err
+	}()
+	os.Stdout = write
+	err = run(config{output: "-", inputs: []string{filepath.Join(root, "cmd", "app")}})
+	os.Stdout = stdout
+	if closeErr := write.Close(); closeErr != nil {
+		t.Fatalf("stdout pipe close failed: %v", closeErr)
+	}
+	data := <-outCh
+	if readErr := <-errCh; readErr != nil {
+		t.Fatalf("stdout pipe read failed: %v", readErr)
+	}
+	if err != nil {
+		t.Fatalf("run build failed: %v", err)
+	}
+	if len(data) < 4 || data[0] != 0x7f || data[1] != 'E' || data[2] != 'L' || data[3] != 'F' {
+		leading := data
+		if len(leading) > 8 {
+			leading = leading[:8]
+		}
+		t.Fatalf("stdout output has unexpected magic: % x", leading)
 	}
 }
 
