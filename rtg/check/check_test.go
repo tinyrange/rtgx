@@ -108,6 +108,101 @@ func Value() int { return 2 }
 	}
 }
 
+func TestGraphRejectsUnresolvedImportedSelectors(t *testing.T) {
+	graph := &load.Graph{
+		Packages: []load.Package{
+			{
+				ImportPath:  "example.com/app",
+				Name:        "main",
+				Imports:     []string{"example.com/app/dep"},
+				ImportNames: map[string]string{"example.com/app/dep": "dep"},
+				Files: []load.File{
+					{
+						Path: "main.go",
+						Source: []byte(`package main
+
+import "example.com/app/dep"
+
+func appMain() int {
+	return dep.Missing() + dep.hidden()
+}
+`),
+					},
+				},
+			},
+			{
+				ImportPath: "example.com/app/dep",
+				Name:       "dep",
+				Files: []load.File{
+					{
+						Path: "dep.go",
+						Source: []byte(`package dep
+
+func Value() int { return 1 }
+func hidden() int { return 2 }
+`),
+					},
+				},
+			},
+		},
+	}
+	err := Graph(graph)
+	if err == nil {
+		t.Fatalf("Graph succeeded with unresolved imported selectors")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"main.go:6:13: unresolved imported selector: example.com/app/dep.Missing",
+		"main.go:6:29: unresolved imported selector: example.com/app/dep.hidden",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing diagnostic %q in:\n%s", want, msg)
+		}
+	}
+}
+
+func TestGraphAcceptsExportedImportedSelectors(t *testing.T) {
+	graph := &load.Graph{
+		Packages: []load.Package{
+			{
+				ImportPath:  "example.com/app",
+				Name:        "main",
+				Imports:     []string{"example.com/app/dep"},
+				ImportNames: map[string]string{"example.com/app/dep": "dep"},
+				Files: []load.File{
+					{
+						Path: "main.go",
+						Source: []byte(`package main
+
+import "example.com/app/dep"
+
+func appMain() int {
+	return dep.Value()
+}
+`),
+					},
+				},
+			},
+			{
+				ImportPath: "example.com/app/dep",
+				Name:       "dep",
+				Files: []load.File{
+					{
+						Path: "dep.go",
+						Source: []byte(`package dep
+
+func Value() int { return 1 }
+`),
+					},
+				},
+			},
+		},
+	}
+	if err := Graph(graph); err != nil {
+		t.Fatalf("Graph rejected exported selector: %v", err)
+	}
+}
+
 func messages(diags Diagnostics) []string {
 	var out []string
 	for _, diag := range diags {

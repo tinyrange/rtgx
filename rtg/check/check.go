@@ -35,6 +35,7 @@ func (d Diagnostics) Error() string {
 
 func Graph(g *load.Graph) error {
 	var diags Diagnostics
+	exported := exportedDecls(g)
 	for _, pkg := range g.Packages {
 		names := map[string]Diagnostic{}
 		for _, file := range pkg.Files {
@@ -48,6 +49,7 @@ func Graph(g *load.Graph) error {
 				continue
 			}
 			diags = append(diags, File(parsed)...)
+			diags = append(diags, importedSelectorDiagnostics(pkg, parsed, exported)...)
 			for _, decl := range parsed.Decls {
 				if decl.Name == "" || decl.Name == "_" {
 					continue
@@ -66,6 +68,56 @@ func Graph(g *load.Graph) error {
 		return diags
 	}
 	return nil
+}
+
+func exportedDecls(g *load.Graph) map[string]map[string]bool {
+	out := map[string]map[string]bool{}
+	for _, pkg := range g.Packages {
+		names := map[string]bool{}
+		for _, file := range pkg.Files {
+			parsed, err := parse.FileSource(file.Path, file.Source)
+			if err != nil {
+				continue
+			}
+			for _, decl := range parsed.Decls {
+				if isExported(decl.Name) {
+					names[decl.Name] = true
+				}
+			}
+		}
+		out[pkg.ImportPath] = names
+	}
+	return out
+}
+
+func importedSelectorDiagnostics(pkg load.Package, file parse.File, exported map[string]map[string]bool) Diagnostics {
+	localImports := map[string]string{}
+	for importPath, localName := range pkg.ImportNames {
+		if localName != "" {
+			localImports[localName] = importPath
+		}
+	}
+	if len(localImports) == 0 {
+		return nil
+	}
+	var diags Diagnostics
+	for i := 0; i+2 < len(file.Tokens); i++ {
+		local := file.Tokens[i]
+		dot := file.Tokens[i+1]
+		member := file.Tokens[i+2]
+		if local.Kind != scan.Ident || dot.Text != "." || member.Kind != scan.Ident {
+			continue
+		}
+		importPath, ok := localImports[local.Text]
+		if !ok {
+			continue
+		}
+		if exported[importPath][member.Text] {
+			continue
+		}
+		diags = append(diags, diag(file, member, "unresolved imported selector: "+importPath+"."+member.Text))
+	}
+	return diags
 }
 
 func File(file parse.File) Diagnostics {
@@ -183,4 +235,12 @@ func declDiagnostic(file parse.File, decl parse.Decl, message string) Diagnostic
 		tok = decl.Tok
 	}
 	return diag(file, tok, message)
+}
+
+func isExported(name string) bool {
+	if name == "" {
+		return false
+	}
+	c := name[0]
+	return c >= 'A' && c <= 'Z'
 }
