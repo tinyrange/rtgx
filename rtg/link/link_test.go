@@ -122,6 +122,22 @@ func TestBuildRejectsMissingImportedUnit(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsExportFromDifferentUnit(t *testing.T) {
+	_, err := Build([]unit.Unit{{
+		ImportPath: "example.com/app/dep",
+		Package:    "dep",
+		Exports: []unit.Symbol{
+			{ImportPath: "example.com/app/other", Name: "Value", UnitName: "rtg_example_com_app_other_Value"},
+		},
+	}})
+	if err == nil {
+		t.Fatalf("Build succeeded with export owned by another unit")
+	}
+	if !strings.Contains(err.Error(), "example.com/app/dep: export Value belongs to example.com/app/other") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestBuildRejectsMissingEntrypoint(t *testing.T) {
 	_, err := Build([]unit.Unit{{
 		ImportPath: "example.com/app/main",

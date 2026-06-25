@@ -23,6 +23,9 @@ func Build(units []unit.Unit) (Plan, error) {
 	if err := validateReferencesDeclared(units); err != nil {
 		return Plan{}, err
 	}
+	if err := validateExportOwnership(units); err != nil {
+		return Plan{}, err
+	}
 	exports := map[string]unit.Symbol{}
 	for _, u := range units {
 		for _, sym := range u.Exports {
@@ -89,6 +92,17 @@ func validateReferencesDeclared(units []unit.Unit) error {
 		for _, ref := range u.References {
 			if !imports[ref.ImportPath] {
 				return fmt.Errorf("%s: reference %s.%s missing import metadata", u.ImportPath, ref.ImportPath, ref.Name)
+			}
+		}
+	}
+	return nil
+}
+
+func validateExportOwnership(units []unit.Unit) error {
+	for _, u := range units {
+		for _, sym := range u.Exports {
+			if sym.ImportPath != u.ImportPath {
+				return fmt.Errorf("%s: export %s belongs to %s", u.ImportPath, sym.Name, sym.ImportPath)
 			}
 		}
 	}
