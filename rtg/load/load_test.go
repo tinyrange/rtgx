@@ -55,7 +55,7 @@ import "fmt"
 func appMain() int { return 0 }
 `)
 
-	_, err := LoadEntries([]string{root}, Options{})
+	_, err := LoadEntries([]string{root}, Options{StdRoot: filepath.Join(root, "missing-std")})
 	if err == nil {
 		t.Fatalf("LoadEntries succeeded with missing std package")
 	}
@@ -91,6 +91,37 @@ func PrintInt(v int) int { return v }
 	}
 	if graph.Packages[0].ImportNames["fmt"] != "fmt" {
 		t.Fatalf("std import local name = %q", graph.Packages[0].ImportNames["fmt"])
+	}
+}
+
+func TestLoadEntriesUsesRTGStdEnv(t *testing.T) {
+	root := t.TempDir()
+	stdRoot := filepath.Join(t.TempDir(), "std")
+	t.Setenv("RTG_STD", stdRoot)
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "main.go", `package main
+
+import "fmt"
+
+func appMain() int { return fmt.PrintInt(7) }
+`)
+	writeFile(t, stdRoot, "fmt/fmt.go", `package fmt
+
+func PrintInt(v int) int { return v }
+`)
+
+	graph, err := LoadEntries([]string{root}, Options{})
+	if err != nil {
+		t.Fatalf("LoadEntries failed: %v", err)
+	}
+	if len(graph.Packages) != 2 {
+		t.Fatalf("loaded %d packages, want 2", len(graph.Packages))
+	}
+	if graph.Packages[1].Dir != filepath.Join(stdRoot, "fmt") {
+		t.Fatalf("std package dir = %q", graph.Packages[1].Dir)
+	}
+	if graph.Packages[1].ImportPath != "fmt" {
+		t.Fatalf("std import path = %q, want fmt", graph.Packages[1].ImportPath)
 	}
 }
 

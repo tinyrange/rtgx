@@ -64,6 +64,14 @@ func TestSourceBuildTagIsIgnoredByHostGo(t *testing.T) {
 	}
 }
 
+func TestFileNameIsStableHostSafeName(t *testing.T) {
+	got := FileName("example.com/app/cmd/app")
+	want := "example_com_app_cmd_app.rtg.go"
+	if got != want {
+		t.Fatalf("FileName = %q, want %q", got, want)
+	}
+}
+
 func unitWithInvalidHostGo() unit.Unit {
 	return unit.Unit{
 		ImportPath: "example.com/hostsafe/generated",

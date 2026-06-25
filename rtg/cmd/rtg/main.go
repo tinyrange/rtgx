@@ -3,12 +3,13 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
+	"j5.nz/rtg/rtg/build"
 	"j5.nz/rtg/rtg/check"
 	"j5.nz/rtg/rtg/emit"
 	"j5.nz/rtg/rtg/link"
 	"j5.nz/rtg/rtg/load"
-	"j5.nz/rtg/rtg/lower"
 	"j5.nz/rtg/rtg/unit"
 )
 
@@ -46,23 +47,46 @@ func run(cfg config) error {
 		return check.Graph(graph)
 	}
 	if cfg.emitUnit {
-		if cfg.output == "" {
-			return fmt.Errorf("rtg: -emit-unit requires -o")
-		}
-		if len(graph.Packages) == 0 {
-			return fmt.Errorf("rtg: no packages loaded")
-		}
-		if err := check.Graph(graph); err != nil {
-			return err
-		}
-		u, err := lower.PackageWithGraph(graph.Packages[0], graph)
-		if err != nil {
-			return err
-		}
-		data := emit.Source(u)
-		return os.WriteFile(cfg.output, data, 0644)
+		return runEmitUnit(cfg, graph)
 	}
 	return fmt.Errorf("rtg: build pipeline after package loading is not implemented yet")
+}
+
+func runEmitUnit(cfg config, graph *load.Graph) error {
+	if cfg.output == "" {
+		return fmt.Errorf("rtg: -emit-unit requires -o")
+	}
+	if len(graph.Packages) == 0 {
+		return fmt.Errorf("rtg: no packages loaded")
+	}
+	units, err := build.Units(graph)
+	if err != nil {
+		return err
+	}
+	if len(units) == 1 {
+		return os.WriteFile(cfg.output, emit.Source(units[0]), 0644)
+	}
+	if info, err := os.Stat(cfg.output); err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("rtg: -emit-unit with multiple packages requires output directory")
+		}
+	} else if os.IsNotExist(err) {
+		if filepath.Ext(cfg.output) == ".go" {
+			return fmt.Errorf("rtg: -emit-unit with multiple packages requires output directory")
+		}
+	} else {
+		return err
+	}
+	if err := os.MkdirAll(cfg.output, 0755); err != nil {
+		return err
+	}
+	for _, u := range units {
+		path := filepath.Join(cfg.output, emit.FileName(u.ImportPath))
+		if err := os.WriteFile(path, emit.Source(u), 0644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func runLink(cfg config) error {

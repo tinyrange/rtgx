@@ -60,14 +60,16 @@ func Value() int {
 	return 7
 }
 `)
-	out := filepath.Join(root, "out.rtg.go")
+	out := filepath.Join(root, "units")
 	cfg := config{output: out, emitUnit: true, inputs: []string{filepath.Join(root, "cmd", "app")}}
 	if err := run(cfg); err != nil {
 		t.Fatalf("run failed: %v", err)
 	}
-	data, err := os.ReadFile(out)
+	mainUnit := filepath.Join(out, "example_com_app_cmd_app.rtg.go")
+	depUnit := filepath.Join(out, "example_com_app_pkg_answer.rtg.go")
+	data, err := os.ReadFile(mainUnit)
 	if err != nil {
-		t.Fatalf("ReadFile failed: %v", err)
+		t.Fatalf("ReadFile main unit failed: %v", err)
 	}
 	src := string(data)
 	if !strings.Contains(src, "// rtg:ref example.com/app/pkg/answer Value => rtg_example_com_app_pkg_answer_Value\n") {
@@ -75,6 +77,83 @@ func Value() int {
 	}
 	if !strings.Contains(src, "return rtg_example_com_app_pkg_answer_Value()") {
 		t.Fatalf("emitted unit did not rewrite imported selector:\n%s", src)
+	}
+	data, err = os.ReadFile(depUnit)
+	if err != nil {
+		t.Fatalf("ReadFile dep unit failed: %v", err)
+	}
+	src = string(data)
+	if !strings.Contains(src, "// rtg:unit example.com/app/pkg/answer\n") {
+		t.Fatalf("dep unit missing identity:\n%s", src)
+	}
+	if !strings.Contains(src, "// rtg:export Value => rtg_example_com_app_pkg_answer_Value\n") {
+		t.Fatalf("dep unit missing export:\n%s", src)
+	}
+}
+
+func TestRunEmitUnitWritesStdDependencyUnit(t *testing.T) {
+	root := t.TempDir()
+	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
+	writeCLIFile(t, root, "cmd/app/main.go", `package main
+
+import "fmt"
+
+func appMain() int {
+	return fmt.PrintInt(7)
+}
+`)
+	out := filepath.Join(root, "units")
+	cfg := config{output: out, emitUnit: true, inputs: []string{filepath.Join(root, "cmd", "app")}}
+	if err := run(cfg); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	mainUnit := filepath.Join(out, "example_com_app_cmd_app.rtg.go")
+	stdUnit := filepath.Join(out, "fmt.rtg.go")
+	data, err := os.ReadFile(mainUnit)
+	if err != nil {
+		t.Fatalf("ReadFile main unit failed: %v", err)
+	}
+	src := string(data)
+	if !strings.Contains(src, "// rtg:ref fmt PrintInt => rtg_fmt_PrintInt\n") {
+		t.Fatalf("main unit missing std reference:\n%s", src)
+	}
+	if !strings.Contains(src, "return rtg_fmt_PrintInt(7)") {
+		t.Fatalf("main unit did not rewrite std selector:\n%s", src)
+	}
+	data, err = os.ReadFile(stdUnit)
+	if err != nil {
+		t.Fatalf("ReadFile std unit failed: %v", err)
+	}
+	src = string(data)
+	if !strings.Contains(src, "// rtg:unit fmt\n") {
+		t.Fatalf("std unit missing identity:\n%s", src)
+	}
+	if !strings.Contains(src, "// rtg:export PrintInt => rtg_fmt_PrintInt\n") {
+		t.Fatalf("std unit missing export:\n%s", src)
+	}
+}
+
+func TestRunEmitUnitRejectsFileOutputForPackageGraph(t *testing.T) {
+	root := t.TempDir()
+	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
+	writeCLIFile(t, root, "cmd/app/main.go", `package main
+
+import "example.com/app/pkg/answer"
+
+func appMain() int { return answer.Value() }
+`)
+	writeCLIFile(t, root, "pkg/answer/answer.go", `package answer
+
+func Value() int { return 7 }
+`)
+	out := filepath.Join(root, "out.rtg.go")
+	cfg := config{output: out, emitUnit: true, inputs: []string{filepath.Join(root, "cmd", "app")}}
+	err := run(cfg)
+	if err == nil {
+		t.Fatalf("run succeeded with file output for package graph")
+	}
+	if !strings.Contains(err.Error(), "requires output directory") {
+		t.Fatalf("error = %q", err)
 	}
 }
 

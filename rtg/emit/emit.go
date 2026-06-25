@@ -7,6 +7,23 @@ import (
 	"j5.nz/rtg/rtg/unit"
 )
 
+func FileName(importPath string) string {
+	if importPath == "" {
+		return "unit.rtg.go"
+	}
+	out := make([]byte, 0, len(importPath)+7)
+	for i := 0; i < len(importPath); i++ {
+		c := importPath[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			out = append(out, c)
+		} else {
+			out = append(out, '_')
+		}
+	}
+	out = append(out, ".rtg.go"...)
+	return string(out)
+}
+
 func Source(u unit.Unit) []byte {
 	var out bytes.Buffer
 	out.WriteString("//go:build rtg\n")

@@ -43,7 +43,7 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 		return nil, err
 	}
 	if opts.StdRoot == "" {
-		opts.StdRoot = filepath.Join(module.Root, "rtg", "std")
+		opts.StdRoot = defaultStdRoot(module.Root)
 	}
 	g := &Graph{Module: module}
 	seen := map[string]bool{}
@@ -57,6 +57,37 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 		}
 	}
 	return g, nil
+}
+
+func defaultStdRoot(moduleRoot string) string {
+	if env := os.Getenv("RTG_STD"); env != "" {
+		return env
+	}
+	moduleStd := filepath.Join(moduleRoot, "rtg", "std")
+	if info, err := os.Stat(moduleStd); err == nil && info.IsDir() {
+		return moduleStd
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if root, ok := findStdRootUpward(cwd); ok {
+			return root
+		}
+	}
+	return moduleStd
+}
+
+func findStdRootUpward(start string) (string, bool) {
+	dir := filepath.Clean(start)
+	for {
+		candidate := filepath.Join(dir, "rtg", "std")
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
 }
 
 func entryDir(entry string) (string, error) {
