@@ -7,13 +7,23 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"j5.nz/rtg/rtg/link"
 	targetpkg "j5.nz/rtg/rtg/target"
+	"j5.nz/rtg/rtg/unit"
 )
 
 type Options struct {
 	Target      string
 	Output      string
 	BackendRoot string
+}
+
+func CompileUnits(units []unit.Unit, opts Options) error {
+	plan, err := link.Build(units)
+	if err != nil {
+		return err
+	}
+	return CompileSource(link.Source(plan), opts)
 }
 
 func CompileSource(source []byte, opts Options) error {

@@ -9,7 +9,6 @@ import (
 	"j5.nz/rtg/rtg/build"
 	"j5.nz/rtg/rtg/check"
 	"j5.nz/rtg/rtg/emit"
-	"j5.nz/rtg/rtg/link"
 	"j5.nz/rtg/rtg/load"
 	"j5.nz/rtg/rtg/rtgx"
 	"j5.nz/rtg/rtg/target"
@@ -63,11 +62,7 @@ func runBuild(cfg config, graph *load.Graph) error {
 	if err != nil {
 		return err
 	}
-	plan, err := link.Build(units)
-	if err != nil {
-		return err
-	}
-	return rtgx.CompileSource(link.Source(plan), rtgx.Options{Target: cfg.target, Output: cfg.output})
+	return rtgx.CompileUnits(units, rtgx.Options{Target: cfg.target, Output: cfg.output})
 }
 
 func runEmitUnit(cfg config, graph *load.Graph) error {
@@ -126,11 +121,7 @@ func runLink(cfg config) error {
 	if err != nil {
 		return err
 	}
-	plan, err := link.Build(units)
-	if err != nil {
-		return err
-	}
-	return rtgx.CompileSource(link.Source(plan), rtgx.Options{Target: cfg.target, Output: cfg.output})
+	return rtgx.CompileUnits(units, rtgx.Options{Target: cfg.target, Output: cfg.output})
 }
 
 func readUnitInputs(inputs []string) ([]unit.Unit, error) {
