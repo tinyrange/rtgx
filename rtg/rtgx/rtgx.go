@@ -30,17 +30,9 @@ func CompileSource(source []byte, opts Options) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.MkdirTemp("", "rtg-rtgx-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(tmp)
-	input := filepath.Join(tmp, "linked.rtg.go")
-	if err := os.WriteFile(input, source, 0644); err != nil {
-		return err
-	}
-	cmd := exec.Command("go", "run", ".", "-t", target, "-o", output, input)
+	cmd := exec.Command("go", "run", ".", "-t", target, "-o", output, "-")
 	cmd.Dir = root
+	cmd.Stdin = bytes.NewReader(source)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
