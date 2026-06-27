@@ -11,11 +11,6 @@ import (
 	"j5.nz/rtg/rtg/unit"
 )
 
-type localRange struct {
-	start int
-	end   int
-}
-
 type localTypeInfo struct {
 	qualifier string
 	name      string
@@ -40,11 +35,31 @@ type methodEntry struct {
 	info   methodInfo
 }
 
+type importSymbolGroup struct {
+	localName string
+	symbols   []unit.Symbol
+}
+
+type localNameRange struct {
+	name  string
+	start int
+	end   int
+}
+
+type localTypeEntry struct {
+	name string
+	info localTypeInfo
+}
+
 type symbolNameTable []symbolName
 
 type methodTable []methodEntry
 
-type importSymbolMap map[string]map[string]unit.Symbol
+type importSymbolTable []importSymbolGroup
+
+type localNameTable []localNameRange
+
+type localTypeTable []localTypeEntry
 
 func (table symbolNameTable) unitName(name string) string {
 	for i := 0; i < len(table); i++ {
@@ -82,6 +97,53 @@ func (table methodTable) set(name string, info methodInfo) methodTable {
 		}
 	}
 	return append(table, methodEntry{lookup: name, info: info})
+}
+
+func (table importSymbolTable) symbols(localName string) ([]unit.Symbol, bool) {
+	for i := 0; i < len(table); i++ {
+		if table[i].localName == localName {
+			return table[i].symbols, true
+		}
+	}
+	return nil, false
+}
+
+func symbolByName(symbols []unit.Symbol, name string) (unit.Symbol, bool) {
+	for i := 0; i < len(symbols); i++ {
+		if symbols[i].Name == name {
+			return symbols[i], true
+		}
+	}
+	return unit.Symbol{}, false
+}
+
+func setSymbol(symbols []unit.Symbol, sym unit.Symbol) []unit.Symbol {
+	for i := 0; i < len(symbols); i++ {
+		if symbols[i].Name == sym.Name {
+			symbols[i] = sym
+			return symbols
+		}
+	}
+	return append(symbols, sym)
+}
+
+func (table localTypeTable) lookup(name string) localTypeInfo {
+	for i := 0; i < len(table); i++ {
+		if table[i].name == name {
+			return table[i].info
+		}
+	}
+	return localTypeInfo{}
+}
+
+func (table localTypeTable) set(name string, info localTypeInfo) localTypeTable {
+	for i := 0; i < len(table); i++ {
+		if table[i].name == name {
+			table[i].info = info
+			return table
+		}
+	}
+	return append(table, localTypeEntry{name: name, info: info})
 }
 
 func Package(pkg load.Package) (unit.Unit, error) {
@@ -449,7 +511,7 @@ func appendExpressionReplacements(out []expressionReplacement, values []expressi
 	return out
 }
 
-func rewriteDecl(file parse.File, decl parse.Decl, topNames symbolNameTable, topNameOrder []string, importRefs importSymbolMap, importRefNames []string, methods methodTable, refs *[]unit.Symbol) string {
+func rewriteDecl(file parse.File, decl parse.Decl, topNames symbolNameTable, topNameOrder []string, importRefs importSymbolTable, importRefNames []string, methods methodTable, refs *[]unit.Symbol) string {
 	start := decl.Start
 	end := decl.End
 	if start < 0 {
@@ -484,7 +546,7 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames symbolNameTable, top
 		replacement := ""
 		if tok.Kind == scan.Ident && i+2 < len(file.Tokens) && file.Tokens[i+1].Text == "." && file.Tokens[i+2].Kind == scan.Ident {
 			if i+3 < len(file.Tokens) && file.Tokens[i+3].Text == "(" {
-				if receiverType := localTypes[tok.Text]; receiverType.name != "" {
+				if receiverType := localTypes.lookup(tok.Text); receiverType.name != "" {
 					methodName := methodLookupName(receiverType, file.Tokens[i+2].Text)
 					if method := methods.lookup(methodName); method.unitName != "" {
 						open := file.Tokens[i+3]
@@ -508,9 +570,9 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames symbolNameTable, top
 					}
 				}
 			}
-			if symbols, ok := importRefs[tok.Text]; ok && !isLocalNameAt(localNames, tok.Text, tok.Start) {
+			if symbols, ok := importRefs.symbols(tok.Text); ok && !isLocalNameAt(localNames, tok.Text, tok.Start) {
 				member := file.Tokens[i+2]
-				if sym, ok := symbols[member.Text]; ok {
+				if sym, ok := symbolByName(symbols, member.Text); ok {
 					replacement = sym.UnitName
 					if sym.ImportPath != "" {
 						*refs = append(*refs, sym)
@@ -1477,22 +1539,22 @@ func statementInsertStart(body string, pos int) int {
 	return lineStart
 }
 
-func localRewriteNames(topNames symbolNameTable, topNameOrder []string, importRefs importSymbolMap, importRefNames []string) map[string]string {
-	names := map[string]string{}
+func localRewriteNames(topNames symbolNameTable, topNameOrder []string, importRefs importSymbolTable, importRefNames []string) symbolNameTable {
+	var names symbolNameTable
 	for i := 0; i < len(topNameOrder); i++ {
 		name := topNameOrder[i]
 		unitName := topNames.unitName(name)
-		names[name] = unitName
+		names = names.set(name, unitName)
 	}
 	for i := 0; i < len(importRefNames); i++ {
 		name := importRefNames[i]
-		names[name] = name
+		names = names.set(name, name)
 	}
 	return names
 }
 
-func localNamesForDecl(file parse.File, decl parse.Decl, namesOfInterest map[string]string) map[string][]localRange {
-	names := map[string][]localRange{}
+func localNamesForDecl(file parse.File, decl parse.Decl, namesOfInterest symbolNameTable) localNameTable {
+	var names localNameTable
 	if decl.Kind != "func" {
 		return names
 	}
@@ -1505,21 +1567,21 @@ func localNamesForDecl(file parse.File, decl parse.Decl, namesOfInterest map[str
 	if body < 0 {
 		return names
 	}
-	collectFuncSignatureLocals(toks, start, body, namesOfInterest, names)
+	collectFuncSignatureLocals(toks, start, body, namesOfInterest, &names)
 	for i := body + 1; i < len(toks) && toks[i].Start < decl.End; i++ {
 		if toks[i].Text == ":=" {
-			collectShortDeclLocals(toks, body, i, decl.End, namesOfInterest, names)
+			collectShortDeclLocals(toks, body, i, decl.End, namesOfInterest, &names)
 			continue
 		}
 		if toks[i].Text == "var" {
-			collectVarLocals(toks, body, i, decl.End, namesOfInterest, names)
+			collectVarLocals(toks, body, i, decl.End, namesOfInterest, &names)
 		}
 	}
 	return names
 }
 
-func localTypesForDecl(file parse.File, decl parse.Decl) map[string]localTypeInfo {
-	types := map[string]localTypeInfo{}
+func localTypesForDecl(file parse.File, decl parse.Decl) localTypeTable {
+	var types localTypeTable
 	if decl.Kind != "func" {
 		return types
 	}
@@ -1532,20 +1594,20 @@ func localTypesForDecl(file parse.File, decl parse.Decl) map[string]localTypeInf
 	if body < 0 {
 		return types
 	}
-	collectFuncSignatureLocalTypes(toks, start, body, types)
+	collectFuncSignatureLocalTypes(toks, start, body, &types)
 	for i := body + 1; i < len(toks) && toks[i].Start < decl.End; i++ {
 		if toks[i].Text == ":=" {
-			collectShortDeclLocalTypes(toks, i, types)
+			collectShortDeclLocalTypes(toks, i, &types)
 			continue
 		}
 		if toks[i].Text == "var" {
-			collectVarLocalTypes(toks, i, decl.End, types)
+			collectVarLocalTypes(toks, i, decl.End, &types)
 		}
 	}
 	return types
 }
 
-func collectFuncSignatureLocalTypes(toks []scan.Token, start int, end int, types map[string]localTypeInfo) {
+func collectFuncSignatureLocalTypes(toks []scan.Token, start int, end int, types *localTypeTable) {
 	for i := start; i < end; i++ {
 		if toks[i].Text != "(" {
 			continue
@@ -1559,7 +1621,7 @@ func collectFuncSignatureLocalTypes(toks []scan.Token, start int, end int, types
 	}
 }
 
-func collectParameterListLocalTypes(toks []scan.Token, start int, end int, types map[string]localTypeInfo) {
+func collectParameterListLocalTypes(toks []scan.Token, start int, end int, types *localTypeTable) {
 	for i := start; i < end; i++ {
 		if toks[i].Kind != scan.Ident {
 			continue
@@ -1570,7 +1632,7 @@ func collectParameterListLocalTypes(toks []scan.Token, start int, end int, types
 			typ := typeInfoInRange(toks, typeStart, typeEnd)
 			if typ.name != "" {
 				typ.pointer = typeRangeIsPointer(toks, typeStart, typeEnd)
-				types[toks[i].Text] = typ
+				*types = types.set(toks[i].Text, typ)
 			}
 			continue
 		}
@@ -1584,14 +1646,14 @@ func collectParameterListLocalTypes(toks []scan.Token, start int, end int, types
 			if typ.name != "" {
 				info := typ
 				info.pointer = typeRangeIsPointer(toks, typeStart, typeEnd)
-				types[toks[i].Text] = info
-				types[toks[i+2].Text] = info
+				*types = types.set(toks[i].Text, info)
+				*types = types.set(toks[i+2].Text, info)
 			}
 		}
 	}
 }
 
-func collectShortDeclLocalTypes(toks []scan.Token, assign int, types map[string]localTypeInfo) {
+func collectShortDeclLocalTypes(toks []scan.Token, assign int, types *localTypeTable) {
 	if assign-1 < 0 || assign+2 >= len(toks) {
 		return
 	}
@@ -1599,45 +1661,45 @@ func collectShortDeclLocalTypes(toks []scan.Token, assign int, types map[string]
 		return
 	}
 	if toks[assign+1].Kind == scan.Ident && toks[assign+2].Text == "{" {
-		types[toks[assign-1].Text] = localTypeInfo{name: toks[assign+1].Text}
+		*types = types.set(toks[assign-1].Text, localTypeInfo{name: toks[assign+1].Text})
 		return
 	}
 	if assign+4 < len(toks) && toks[assign+1].Kind == scan.Ident && toks[assign+2].Text == "." && toks[assign+3].Kind == scan.Ident && toks[assign+4].Text == "{" {
-		types[toks[assign-1].Text] = localTypeInfo{qualifier: toks[assign+1].Text, name: toks[assign+3].Text}
+		*types = types.set(toks[assign-1].Text, localTypeInfo{qualifier: toks[assign+1].Text, name: toks[assign+3].Text})
 		return
 	}
 	if assign+3 < len(toks) && toks[assign+1].Text == "&" && toks[assign+2].Kind == scan.Ident && toks[assign+3].Text == "{" {
-		types[toks[assign-1].Text] = localTypeInfo{name: toks[assign+2].Text, pointer: true}
+		*types = types.set(toks[assign-1].Text, localTypeInfo{name: toks[assign+2].Text, pointer: true})
 		return
 	}
 	if assign+5 < len(toks) && toks[assign+1].Text == "&" && toks[assign+2].Kind == scan.Ident && toks[assign+3].Text == "." && toks[assign+4].Kind == scan.Ident && toks[assign+5].Text == "{" {
-		types[toks[assign-1].Text] = localTypeInfo{qualifier: toks[assign+2].Text, name: toks[assign+4].Text, pointer: true}
+		*types = types.set(toks[assign-1].Text, localTypeInfo{qualifier: toks[assign+2].Text, name: toks[assign+4].Text, pointer: true})
 		return
 	}
 	if assign+2 < len(toks) && toks[assign+1].Text == "&" && toks[assign+2].Kind == scan.Ident {
-		if pointed := types[toks[assign+2].Text]; pointed.name != "" {
+		if pointed := types.lookup(toks[assign+2].Text); pointed.name != "" {
 			pointed.pointer = true
-			types[toks[assign-1].Text] = pointed
+			*types = types.set(toks[assign-1].Text, pointed)
 		}
 	}
 }
 
-func collectVarLocalTypes(toks []scan.Token, pos int, end int, types map[string]localTypeInfo) {
+func collectVarLocalTypes(toks []scan.Token, pos int, end int, types *localTypeTable) {
 	if pos+2 >= len(toks) || toks[pos+1].Kind != scan.Ident {
 		return
 	}
 	if toks[pos+2].Text == "=" {
 		if pos+4 < len(toks) && toks[pos+3].Kind == scan.Ident && toks[pos+4].Text == "{" {
-			types[toks[pos+1].Text] = localTypeInfo{name: toks[pos+3].Text}
+			*types = types.set(toks[pos+1].Text, localTypeInfo{name: toks[pos+3].Text})
 		}
 		if pos+6 < len(toks) && toks[pos+3].Kind == scan.Ident && toks[pos+4].Text == "." && toks[pos+5].Kind == scan.Ident && toks[pos+6].Text == "{" {
-			types[toks[pos+1].Text] = localTypeInfo{qualifier: toks[pos+3].Text, name: toks[pos+5].Text}
+			*types = types.set(toks[pos+1].Text, localTypeInfo{qualifier: toks[pos+3].Text, name: toks[pos+5].Text})
 		}
 		if pos+5 < len(toks) && toks[pos+3].Text == "&" && toks[pos+4].Kind == scan.Ident && toks[pos+5].Text == "{" {
-			types[toks[pos+1].Text] = localTypeInfo{name: toks[pos+4].Text, pointer: true}
+			*types = types.set(toks[pos+1].Text, localTypeInfo{name: toks[pos+4].Text, pointer: true})
 		}
 		if pos+7 < len(toks) && toks[pos+3].Text == "&" && toks[pos+4].Kind == scan.Ident && toks[pos+5].Text == "." && toks[pos+6].Kind == scan.Ident && toks[pos+7].Text == "{" {
-			types[toks[pos+1].Text] = localTypeInfo{qualifier: toks[pos+4].Text, name: toks[pos+6].Text, pointer: true}
+			*types = types.set(toks[pos+1].Text, localTypeInfo{qualifier: toks[pos+4].Text, name: toks[pos+6].Text, pointer: true})
 		}
 		return
 	}
@@ -1646,7 +1708,7 @@ func collectVarLocalTypes(toks []scan.Token, pos int, end int, types map[string]
 	typ := typeInfoInRange(toks, typeStart, typeEnd)
 	if typ.name != "" {
 		typ.pointer = typeRangeIsPointer(toks, typeStart, typeEnd)
-		types[toks[pos+1].Text] = typ
+		*types = types.set(toks[pos+1].Text, typ)
 	}
 }
 
@@ -1698,18 +1760,17 @@ func typeRangeIsPointer(toks []scan.Token, start int, end int) bool {
 	return containsTokenText(toks, start, end, "*")
 }
 
-func isLocalNameAt(names map[string][]localRange, name string, pos int) bool {
-	scopes := names[name]
-	for i := 0; i < len(scopes); i++ {
-		scope := scopes[i]
-		if pos >= scope.start && pos < scope.end {
+func isLocalNameAt(names localNameTable, name string, pos int) bool {
+	for i := 0; i < len(names); i++ {
+		scope := names[i]
+		if scope.name == name && pos >= scope.start && pos < scope.end {
 			return true
 		}
 	}
 	return false
 }
 
-func collectFuncSignatureLocals(toks []scan.Token, start int, end int, topNames map[string]string, names map[string][]localRange) {
+func collectFuncSignatureLocals(toks []scan.Token, start int, end int, topNames symbolNameTable, names *localNameTable) {
 	for i := start; i < end; i++ {
 		if toks[i].Text != "(" {
 			continue
@@ -1723,9 +1784,9 @@ func collectFuncSignatureLocals(toks []scan.Token, start int, end int, topNames 
 	}
 }
 
-func collectParameterListLocals(toks []scan.Token, start int, end int, topNames map[string]string, names map[string][]localRange) {
+func collectParameterListLocals(toks []scan.Token, start int, end int, topNames symbolNameTable, names *localNameTable) {
 	for i := start; i < end; i++ {
-		if toks[i].Kind != scan.Ident || topNames[toks[i].Text] == "" {
+		if toks[i].Kind != scan.Ident || topNames.unitName(toks[i].Text) == "" {
 			continue
 		}
 		if i+1 < end && isTypeStart(toks[i+1]) {
@@ -1738,7 +1799,7 @@ func collectParameterListLocals(toks []scan.Token, start int, end int, topNames 
 	}
 }
 
-func collectShortDeclLocals(toks []scan.Token, body int, assign int, declEnd int, topNames map[string]string, names map[string][]localRange) {
+func collectShortDeclLocals(toks []scan.Token, body int, assign int, declEnd int, topNames symbolNameTable, names *localNameTable) {
 	line := toks[assign].Line
 	scopeEnd := localScopeEnd(toks, body, assign, declEnd)
 	for i := assign - 1; i >= 0; i-- {
@@ -1748,20 +1809,20 @@ func collectShortDeclLocals(toks []scan.Token, body int, assign int, declEnd int
 		if isStatementBoundary(toks[i].Text) {
 			return
 		}
-		if toks[i].Kind == scan.Ident && topNames[toks[i].Text] != "" && (i == 0 || toks[i-1].Text != ".") {
+		if toks[i].Kind == scan.Ident && topNames.unitName(toks[i].Text) != "" && (i == 0 || toks[i-1].Text != ".") {
 			addLocalName(names, toks[i].Text, toks[i].Start, scopeEnd)
 		}
 	}
 }
 
-func collectVarLocals(toks []scan.Token, body int, pos int, end int, topNames map[string]string, names map[string][]localRange) {
+func collectVarLocals(toks []scan.Token, body int, pos int, end int, topNames symbolNameTable, names *localNameTable) {
 	scopeEnd := localScopeEnd(toks, body, pos, end)
 	if pos+1 < len(toks) && toks[pos+1].Text == "(" {
 		for i := pos + 2; i < len(toks) && toks[i].Start < end; i++ {
 			if toks[i].Text == ")" || toks[i].Text == "}" {
 				return
 			}
-			if toks[i].Kind != scan.Ident || topNames[toks[i].Text] == "" {
+			if toks[i].Kind != scan.Ident || topNames.unitName(toks[i].Text) == "" {
 				continue
 			}
 			if toks[i-1].Text == "(" || toks[i-1].Text == "," || toks[i-1].Line != toks[i].Line {
@@ -1778,7 +1839,7 @@ func collectVarLocals(toks []scan.Token, body int, pos int, end int, topNames ma
 		if toks[i].Text == "=" {
 			return
 		}
-		if toks[i].Kind != scan.Ident || topNames[toks[i].Text] == "" {
+		if toks[i].Kind != scan.Ident || topNames.unitName(toks[i].Text) == "" {
 			continue
 		}
 		if i == pos+1 || toks[i-1].Text == "," {
@@ -1806,8 +1867,8 @@ func localScopeEnd(toks []scan.Token, body int, pos int, fallback int) int {
 	return toks[close].Start
 }
 
-func addLocalName(names map[string][]localRange, name string, start int, end int) {
-	names[name] = append(names[name], localRange{start: start, end: end})
+func addLocalName(names *localNameTable, name string, start int, end int) {
+	*names = append(*names, localNameRange{name: name, start: start, end: end})
 }
 
 func maxSourcePosition() int {
@@ -1927,8 +1988,8 @@ func mergedMethodMap(local methodTable, localOrder []string, imported methodTabl
 	return methods
 }
 
-func importReferenceMap(file parse.File, packages []load.Package) (importSymbolMap, []string) {
-	refs := importSymbolMap{}
+func importReferenceMap(file parse.File, packages []load.Package) (importSymbolTable, []string) {
+	var refs importSymbolTable
 	var refNames []string
 	for impIndex := 0; impIndex < len(file.Imports); impIndex++ {
 		imp := file.Imports[impIndex]
@@ -1938,7 +1999,7 @@ func importReferenceMap(file parse.File, packages []load.Package) (importSymbolM
 		if !ok || localName == "" {
 			continue
 		}
-		symbols := map[string]unit.Symbol{}
+		var symbols []unit.Symbol
 		for fileIndex := 0; fileIndex < len(dep.Files); fileIndex++ {
 			depFile := dep.Files[fileIndex]
 			parsed, err := parse.FileSource(depFile.Path, depFile.Source)
@@ -1951,7 +2012,7 @@ func importReferenceMap(file parse.File, packages []load.Package) (importSymbolM
 				for nameIndex := 0; nameIndex < len(names); nameIndex++ {
 					name := names[nameIndex]
 					if isExported(name) {
-						symbols[name] = unit.Symbol{ImportPath: importPath, Name: name, UnitName: SymbolName(importPath, name)}
+						symbols = setSymbol(symbols, unit.Symbol{ImportPath: importPath, Name: name, UnitName: SymbolName(importPath, name)})
 					}
 				}
 			}
@@ -1960,10 +2021,10 @@ func importReferenceMap(file parse.File, packages []load.Package) (importSymbolM
 		for i := 0; i < len(intrinsicNames); i++ {
 			name := intrinsicNames[i]
 			intrinsic := intrinsicImportSymbol(importPath, name)
-			symbols[name] = unit.Symbol{Name: name, UnitName: intrinsic}
+			symbols = setSymbol(symbols, unit.Symbol{Name: name, UnitName: intrinsic})
 		}
 		refNames = append(refNames, localName)
-		refs[localName] = symbols
+		refs = append(refs, importSymbolGroup{localName: localName, symbols: symbols})
 	}
 	return refs, refNames
 }
