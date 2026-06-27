@@ -22,7 +22,28 @@ func (d Diagnostic) Error() string {
 
 type Diagnostics []Diagnostic
 
-type sourceRange struct {
+type diagnosticEntry struct {
+	name string
+	diag Diagnostic
+}
+
+type exportedPackage struct {
+	importPath string
+	names      []string
+}
+
+type importEntry struct {
+	name string
+	path string
+}
+
+type importNameToken struct {
+	name string
+	tok  scan.Token
+}
+
+type localShadow struct {
+	name  string
 	start int
 	end   int
 }
@@ -44,7 +65,7 @@ func Graph(g *load.Graph) error {
 	exported := exportedDecls(g)
 	for pkgIndex := 0; pkgIndex < len(g.Packages); pkgIndex++ {
 		pkg := g.Packages[pkgIndex]
-		names := map[string]Diagnostic{}
+		var names []diagnosticEntry
 		for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 			file := pkg.Files[fileIndex]
 			parsed, err := parse.FileSource(file.Path, file.Source)
@@ -67,12 +88,12 @@ func Graph(g *load.Graph) error {
 						continue
 					}
 					current := declNameDiagnostic(parsed, decl, i, "duplicate package-level declaration: "+name)
-					if previous, ok := names[name]; ok {
+					if previous, ok := diagnosticEntryValue(names, name); ok {
 						diags = append(diags, previous)
 						diags = append(diags, current)
 						continue
 					}
-					names[name] = current
+					names = append(names, diagnosticEntry{name: name, diag: current})
 				}
 			}
 		}
@@ -146,11 +167,11 @@ func declDiagnostics(file parse.File) Diagnostics {
 	return diags
 }
 
-func exportedDecls(g *load.Graph) map[string]map[string]bool {
-	out := map[string]map[string]bool{}
+func exportedDecls(g *load.Graph) []exportedPackage {
+	var out []exportedPackage
 	for pkgIndex := 0; pkgIndex < len(g.Packages); pkgIndex++ {
 		pkg := g.Packages[pkgIndex]
-		names := map[string]bool{}
+		var names []string
 		for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 			file := pkg.Files[fileIndex]
 			parsed, err := parse.FileSource(file.Path, file.Source)
@@ -162,13 +183,13 @@ func exportedDecls(g *load.Graph) map[string]map[string]bool {
 				namesForDecl := packageLevelDeclNames(decl)
 				for nameIndex := 0; nameIndex < len(namesForDecl); nameIndex++ {
 					name := namesForDecl[nameIndex]
-					if isExported(name) {
-						names[name] = true
+					if isExported(name) && !containsString(names, name) {
+						names = append(names, name)
 					}
 				}
 			}
 		}
-		out[pkg.ImportPath] = names
+		out = append(out, exportedPackage{importPath: pkg.ImportPath, names: names})
 	}
 	return out
 }
@@ -190,15 +211,17 @@ func declNames(decl parse.Decl) []string {
 	return []string{decl.Name}
 }
 
-func importedSelectorDiagnostics(file parse.File, exported map[string]map[string]bool) Diagnostics {
-	localImports := map[string]string{}
-	importNames := map[string]bool{}
+func importedSelectorDiagnostics(file parse.File, exported []exportedPackage) Diagnostics {
+	var localImports []importEntry
+	var importNames []string
 	for i := 0; i < len(file.Imports); i++ {
 		imp := file.Imports[i]
 		localName := importLocalName(imp)
 		if localName != "" {
-			localImports[localName] = imp.Path
-			importNames[localName] = true
+			localImports = append(localImports, importEntry{name: localName, path: imp.Path})
+			if !containsString(importNames, localName) {
+				importNames = append(importNames, localName)
+			}
 		}
 	}
 	if len(localImports) == 0 {
@@ -213,14 +236,14 @@ func importedSelectorDiagnostics(file parse.File, exported map[string]map[string
 		if local.Kind != scan.Ident || dot.Text != "." || member.Kind != scan.Ident {
 			continue
 		}
-		importPath, ok := localImports[local.Text]
+		importPath, ok := importEntryPath(localImports, local.Text)
 		if !ok {
 			continue
 		}
 		if isLocalShadowAt(shadows, local.Text, local.Start) {
 			continue
 		}
-		if exported[importPath][member.Text] {
+		if exportedNameExists(exported, importPath, member.Text) {
 			continue
 		}
 		diags = append(diags, diag(file, member, "unresolved imported selector: "+importPath+"."+member.Text))
@@ -302,15 +325,63 @@ func appendDiagnostics(out Diagnostics, values Diagnostics) Diagnostics {
 	return out
 }
 
+func containsString(values []string, value string) bool {
+	for i := 0; i < len(values); i++ {
+		if values[i] == value {
+			return true
+		}
+	}
+	return false
+}
+
+func diagnosticEntryValue(values []diagnosticEntry, name string) (Diagnostic, bool) {
+	for i := 0; i < len(values); i++ {
+		if values[i].name == name {
+			return values[i].diag, true
+		}
+	}
+	return Diagnostic{}, false
+}
+
+func importEntryPath(values []importEntry, name string) (string, bool) {
+	for i := 0; i < len(values); i++ {
+		if values[i].name == name {
+			return values[i].path, true
+		}
+	}
+	return "", false
+}
+
+func exportedNameExists(values []exportedPackage, importPath string, name string) bool {
+	for i := 0; i < len(values); i++ {
+		value := values[i]
+		if value.importPath == importPath {
+			return containsString(value.names, name)
+		}
+	}
+	return false
+}
+
+func hasImportNameToken(values []importNameToken, name string) bool {
+	for i := 0; i < len(values); i++ {
+		if values[i].name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func importDiagnostics(file parse.File) Diagnostics {
 	var diags Diagnostics
-	names := map[string]scan.Token{}
-	importNames := map[string]bool{}
+	var names []importNameToken
+	var importNames []string
 	for i := 0; i < len(file.Imports); i++ {
 		imp := file.Imports[i]
 		localName := importLocalName(imp)
 		if localName != "" && localName != "." && localName != "_" {
-			importNames[localName] = true
+			if !containsString(importNames, localName) {
+				importNames = append(importNames, localName)
+			}
 		}
 	}
 	used := usedImportNames(file, importNames)
@@ -326,27 +397,30 @@ func importDiagnostics(file parse.File) Diagnostics {
 		if localName == "" || localName == "." || localName == "_" {
 			continue
 		}
-		if _, ok := names[localName]; ok {
+		if hasImportNameToken(names, localName) {
 			diags = append(diags, diag(file, imp.Tok, "duplicate import name: "+localName))
 			continue
 		}
-		names[localName] = imp.Tok
-		if !used[localName] {
+		names = append(names, importNameToken{name: localName, tok: imp.Tok})
+		if !containsString(used, localName) {
 			diags = append(diags, diag(file, imp.Tok, "unused import: "+localName))
 		}
 	}
 	return diags
 }
 
-func usedImportNames(file parse.File, importNames map[string]bool) map[string]bool {
-	used := map[string]bool{}
+func usedImportNames(file parse.File, importNames []string) []string {
+	var used []string
 	shadows := localImportShadows(file, importNames)
 	for i := 0; i+1 < len(file.Tokens); i++ {
 		if file.Tokens[i].Kind == scan.Ident && file.Tokens[i+1].Text == "." {
 			if isLocalShadowAt(shadows, file.Tokens[i].Text, file.Tokens[i].Start) {
 				continue
 			}
-			used[file.Tokens[i].Text] = true
+			name := file.Tokens[i].Text
+			if !containsString(used, name) {
+				used = append(used, name)
+			}
 		}
 	}
 	return used
@@ -693,8 +767,8 @@ func isKeyword(text string) bool {
 	return false
 }
 
-func localImportShadows(file parse.File, importNames map[string]bool) map[string][]sourceRange {
-	shadows := map[string][]sourceRange{}
+func localImportShadows(file parse.File, importNames []string) []localShadow {
+	var shadows []localShadow
 	if len(importNames) == 0 {
 		return shadows
 	}
@@ -711,20 +785,20 @@ func localImportShadows(file parse.File, importNames map[string]bool) map[string
 		if body < 0 {
 			continue
 		}
-		collectFuncSignatureImportShadows(file.Tokens, start, body, importNames, shadows)
+		collectFuncSignatureImportShadows(file.Tokens, start, body, importNames, &shadows)
 		for i := body + 1; i < len(file.Tokens) && file.Tokens[i].Start < decl.End; i++ {
 			if file.Tokens[i].Text == ":=" {
-				collectShortDeclImportShadows(file.Tokens, body, i, decl.End, importNames, shadows)
+				collectShortDeclImportShadows(file.Tokens, body, i, decl.End, importNames, &shadows)
 			}
 			if file.Tokens[i].Text == "var" {
-				collectVarImportShadows(file.Tokens, body, i, decl.End, importNames, shadows)
+				collectVarImportShadows(file.Tokens, body, i, decl.End, importNames, &shadows)
 			}
 		}
 	}
 	return shadows
 }
 
-func collectFuncSignatureImportShadows(toks []scan.Token, start int, end int, names map[string]bool, shadows map[string][]sourceRange) {
+func collectFuncSignatureImportShadows(toks []scan.Token, start int, end int, names []string, shadows *[]localShadow) {
 	for i := start; i < end; i++ {
 		if toks[i].Text != "(" {
 			continue
@@ -738,9 +812,9 @@ func collectFuncSignatureImportShadows(toks []scan.Token, start int, end int, na
 	}
 }
 
-func collectParameterImportShadows(toks []scan.Token, start int, end int, names map[string]bool, shadows map[string][]sourceRange) {
+func collectParameterImportShadows(toks []scan.Token, start int, end int, names []string, shadows *[]localShadow) {
 	for i := start; i < end; i++ {
-		if toks[i].Kind != scan.Ident || !names[toks[i].Text] {
+		if toks[i].Kind != scan.Ident || !containsString(names, toks[i].Text) {
 			continue
 		}
 		if i+1 < end && isTypeStart(toks[i+1]) {
@@ -753,27 +827,27 @@ func collectParameterImportShadows(toks []scan.Token, start int, end int, names 
 	}
 }
 
-func collectShortDeclImportShadows(toks []scan.Token, body int, assign int, declEnd int, names map[string]bool, shadows map[string][]sourceRange) {
+func collectShortDeclImportShadows(toks []scan.Token, body int, assign int, declEnd int, names []string, shadows *[]localShadow) {
 	line := toks[assign].Line
 	scopeEnd := localScopeEnd(toks, body, assign, declEnd)
 	for i := assign - 1; i >= 0; i-- {
 		if toks[i].Line != line || isStatementBoundary(toks[i].Text) {
 			return
 		}
-		if toks[i].Kind == scan.Ident && names[toks[i].Text] && (i == 0 || toks[i-1].Text != ".") {
+		if toks[i].Kind == scan.Ident && containsString(names, toks[i].Text) && (i == 0 || toks[i-1].Text != ".") {
 			addLocalShadow(shadows, toks[i].Text, toks[i].Start, scopeEnd)
 		}
 	}
 }
 
-func collectVarImportShadows(toks []scan.Token, body int, pos int, end int, names map[string]bool, shadows map[string][]sourceRange) {
+func collectVarImportShadows(toks []scan.Token, body int, pos int, end int, names []string, shadows *[]localShadow) {
 	scopeEnd := localScopeEnd(toks, body, pos, end)
 	if pos+1 < len(toks) && toks[pos+1].Text == "(" {
 		for i := pos + 2; i < len(toks) && toks[i].Start < end; i++ {
 			if toks[i].Text == ")" || toks[i].Text == "}" {
 				return
 			}
-			if toks[i].Kind == scan.Ident && names[toks[i].Text] && (toks[i-1].Text == "(" || toks[i-1].Text == "," || toks[i-1].Line != toks[i].Line) {
+			if toks[i].Kind == scan.Ident && containsString(names, toks[i].Text) && (toks[i-1].Text == "(" || toks[i-1].Text == "," || toks[i-1].Line != toks[i].Line) {
 				addLocalShadow(shadows, toks[i].Text, toks[i].Start, scopeEnd)
 			}
 		}
@@ -784,7 +858,7 @@ func collectVarImportShadows(toks []scan.Token, body int, pos int, end int, name
 		if toks[i].Text == ")" || toks[i].Text == "}" || toks[i].Text == ":=" || toks[i].Text == "=" {
 			return
 		}
-		if toks[i].Kind == scan.Ident && names[toks[i].Text] && (i == pos+1 || toks[i-1].Text == ",") {
+		if toks[i].Kind == scan.Ident && containsString(names, toks[i].Text) && (i == pos+1 || toks[i-1].Text == ",") {
 			addLocalShadow(shadows, toks[i].Text, toks[i].Start, scopeEnd)
 		}
 	}
@@ -809,15 +883,14 @@ func localScopeEnd(toks []scan.Token, body int, pos int, fallback int) int {
 	return toks[close].Start
 }
 
-func addLocalShadow(shadows map[string][]sourceRange, name string, start int, end int) {
-	shadows[name] = append(shadows[name], sourceRange{start: start, end: end})
+func addLocalShadow(shadows *[]localShadow, name string, start int, end int) {
+	*shadows = append(*shadows, localShadow{name: name, start: start, end: end})
 }
 
-func isLocalShadowAt(shadows map[string][]sourceRange, name string, pos int) bool {
-	ranges := shadows[name]
-	for i := 0; i < len(ranges); i++ {
-		r := ranges[i]
-		if pos >= r.start && pos < r.end {
+func isLocalShadowAt(shadows []localShadow, name string, pos int) bool {
+	for i := 0; i < len(shadows); i++ {
+		shadow := shadows[i]
+		if shadow.name == name && pos >= shadow.start && pos < shadow.end {
 			return true
 		}
 	}
