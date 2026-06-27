@@ -52,6 +52,28 @@ func appMain() int {
 	}
 }
 
+func TestFileRejectsMapTypesWithoutArrayDiagnostic(t *testing.T) {
+	file, err := parse.FileSource("maps.go", []byte(`package main
+
+type table map[string]map[string]int
+func use(values map[string]int) int { return 0 }
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	diags := File(file)
+	if len(diags) == 0 {
+		t.Fatalf("File accepted map types")
+	}
+	msg := diags.Error()
+	if !strings.Contains(msg, "maps are not supported") {
+		t.Fatalf("missing map diagnostic in:\n%s", msg)
+	}
+	if strings.Contains(msg, "arrays are not supported") {
+		t.Fatalf("map types produced array diagnostic:\n%s", msg)
+	}
+}
+
 func TestFileRejectsGenericInstantiations(t *testing.T) {
 	file, err := parse.FileSource("generics.go", []byte(`package main
 

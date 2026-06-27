@@ -460,6 +460,9 @@ func startsArrayType(toks []scan.Token, i int) bool {
 		return false
 	}
 	prev := toks[i-1]
+	if prev.Text == "map" {
+		return false
+	}
 	if prev.Text == "*" {
 		return precededByTypeContext(toks, i-1)
 	}

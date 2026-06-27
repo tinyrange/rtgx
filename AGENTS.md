@@ -6,7 +6,8 @@ The compiler will eventually target many operating systems and architectures. Th
 
 ## Restrictions
 
-- The only compiler files that can be modified are `./compiler_*_impl.go` and `./compiler_main.go`.
+- Backend compiler edits are limited to `./compiler_*_impl.go` and `./compiler_main.go`.
+- Frontend edits under `./rtg/` are allowed.
 - You can add new regression programs in `./tests` but you should avoid modifying existing ones unless they are broken.
 - Do not modify `./main_test.go`.
 - The only syscalls are `open`, `close`, `read`, `write`, `chmod`, and `print`.
