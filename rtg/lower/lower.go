@@ -104,7 +104,7 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 	}
 	sortSymbolsByName(u.Exports)
 	depPackages := dependencyPackages(graph)
-	seenRefs := map[string]bool{}
+	var seenRefs []string
 	for fileIndex := 0; fileIndex < len(parsedFiles); fileIndex++ {
 		parsed := parsedFiles[fileIndex]
 		importRefs, importRefNames := importReferenceMap(parsed, depPackages)
@@ -120,8 +120,8 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 			for refIndex := 0; refIndex < len(refs); refIndex++ {
 				ref := refs[refIndex]
 				key := ref.ImportPath + "\x00" + ref.Name
-				if !seenRefs[key] {
-					seenRefs[key] = true
+				if !containsString(seenRefs, key) {
+					seenRefs = append(seenRefs, key)
 					u.References = append(u.References, ref)
 				}
 			}
@@ -1826,16 +1826,35 @@ func isStatementBoundary(text string) bool {
 	return text == "{" || text == "}" || text == ";" || text == "if" || text == "for" || text == "switch"
 }
 
-func dependencyPackages(graph *load.Graph) map[string]load.Package {
-	packages := map[string]load.Package{}
+func containsString(values []string, value string) bool {
+	for i := 0; i < len(values); i++ {
+		if values[i] == value {
+			return true
+		}
+	}
+	return false
+}
+
+func dependencyPackages(graph *load.Graph) []load.Package {
+	var packages []load.Package
 	if graph == nil {
 		return packages
 	}
 	for i := 0; i < len(graph.Packages); i++ {
 		dep := graph.Packages[i]
-		packages[dep.ImportPath] = dep
+		packages = append(packages, dep)
 	}
 	return packages
+}
+
+func packageByImportPath(packages []load.Package, importPath string) (load.Package, bool) {
+	for i := 0; i < len(packages); i++ {
+		pkg := packages[i]
+		if pkg.ImportPath == importPath {
+			return pkg, true
+		}
+	}
+	return load.Package{}, false
 }
 
 func mergedMethodMap(local methodMap, localOrder []string, imported methodMap, importedOrder []string) methodMap {
@@ -1858,14 +1877,14 @@ func mergedMethodMap(local methodMap, localOrder []string, imported methodMap, i
 	return methods
 }
 
-func importReferenceMap(file parse.File, packages map[string]load.Package) (importSymbolMap, []string) {
+func importReferenceMap(file parse.File, packages []load.Package) (importSymbolMap, []string) {
 	refs := importSymbolMap{}
 	var refNames []string
 	for impIndex := 0; impIndex < len(file.Imports); impIndex++ {
 		imp := file.Imports[impIndex]
 		localName := importLocalName(imp)
 		importPath := imp.Path
-		dep, ok := packages[importPath]
+		dep, ok := packageByImportPath(packages, importPath)
 		if !ok || localName == "" {
 			continue
 		}
@@ -1887,11 +1906,10 @@ func importReferenceMap(file parse.File, packages map[string]load.Package) (impo
 				}
 			}
 		}
-		intrinsics := intrinsicImportSymbols(importPath)
 		intrinsicNames := intrinsicImportSymbolNames(importPath)
 		for i := 0; i < len(intrinsicNames); i++ {
 			name := intrinsicNames[i]
-			intrinsic := intrinsics[name]
+			intrinsic := intrinsicImportSymbol(importPath, name)
 			symbols[name] = unit.Symbol{Name: name, UnitName: intrinsic}
 		}
 		refNames = append(refNames, localName)
@@ -1900,14 +1918,14 @@ func importReferenceMap(file parse.File, packages map[string]load.Package) (impo
 	return refs, refNames
 }
 
-func importMethodMap(file parse.File, packages map[string]load.Package) (methodMap, []string) {
+func importMethodMap(file parse.File, packages []load.Package) (methodMap, []string) {
 	methods := methodMap{}
 	var methodNames []string
 	for impIndex := 0; impIndex < len(file.Imports); impIndex++ {
 		imp := file.Imports[impIndex]
 		localName := importLocalName(imp)
 		importPath := imp.Path
-		dep, ok := packages[importPath]
+		dep, ok := packageByImportPath(packages, importPath)
 		if !ok || localName == "" {
 			continue
 		}
@@ -1939,25 +1957,39 @@ func importMethodMap(file parse.File, packages map[string]load.Package) (methodM
 	return methods, methodNames
 }
 
-func intrinsicImportSymbols(importPath string) map[string]string {
+func intrinsicImportSymbol(importPath string, name string) string {
 	if importPath != "os" {
-		return nil
+		return ""
 	}
-	return map[string]string{
-		"Open":     "open",
-		"Close":    "close",
-		"Read":     "read",
-		"Write":    "write",
-		"Chmod":    "chmod",
-		"O_RDONLY": "O_RDONLY",
-		"O_WRONLY": "O_WRONLY",
-		"O_RDWR":   "O_RDWR",
-		"O_CREATE": "O_CREATE",
-		"O_TRUNC":  "O_TRUNC",
-		"Stdin":    "0",
-		"Stdout":   "1",
-		"Stderr":   "2",
+	switch name {
+	case "Open":
+		return "open"
+	case "Close":
+		return "close"
+	case "Read":
+		return "read"
+	case "Write":
+		return "write"
+	case "Chmod":
+		return "chmod"
+	case "O_RDONLY":
+		return "O_RDONLY"
+	case "O_WRONLY":
+		return "O_WRONLY"
+	case "O_RDWR":
+		return "O_RDWR"
+	case "O_CREATE":
+		return "O_CREATE"
+	case "O_TRUNC":
+		return "O_TRUNC"
+	case "Stdin":
+		return "0"
+	case "Stdout":
+		return "1"
+	case "Stderr":
+		return "2"
 	}
+	return ""
 }
 
 func intrinsicImportSymbolNames(importPath string) []string {
