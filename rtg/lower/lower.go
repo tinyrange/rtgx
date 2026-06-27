@@ -30,6 +30,10 @@ type methodInfo struct {
 	importPath      string
 }
 
+type importSymbolMap map[string]map[string]unit.Symbol
+
+type methodMap map[string]methodInfo
+
 func Package(pkg load.Package) (unit.Unit, error) {
 	return PackageWithGraph(pkg, nil)
 }
@@ -42,7 +46,7 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 	parsedFiles := make([]parse.File, 0, len(files))
 	topNames := map[string]string{}
 	var topNameOrder []string
-	methods := map[string]methodInfo{}
+	methods := methodMap{}
 	var methodOrder []string
 	for fileIndex := 0; fileIndex < len(files); fileIndex++ {
 		file := files[fileIndex]
@@ -352,7 +356,7 @@ func SymbolName(importPath string, name string) string {
 	return string(out)
 }
 
-func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, topNameOrder []string, importRefs map[string]map[string]unit.Symbol, importRefNames []string, methods map[string]methodInfo, refs *[]unit.Symbol) string {
+func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, topNameOrder []string, importRefs importSymbolMap, importRefNames []string, methods methodMap, refs *[]unit.Symbol) string {
 	start := decl.Start
 	end := decl.End
 	if start < 0 {
@@ -1380,7 +1384,7 @@ func statementInsertStart(body string, pos int) int {
 	return lineStart
 }
 
-func localRewriteNames(topNames map[string]string, topNameOrder []string, importRefs map[string]map[string]unit.Symbol, importRefNames []string) map[string]string {
+func localRewriteNames(topNames map[string]string, topNameOrder []string, importRefs importSymbolMap, importRefNames []string) map[string]string {
 	names := map[string]string{}
 	for i := 0; i < len(topNameOrder); i++ {
 		name := topNameOrder[i]
@@ -1791,11 +1795,11 @@ func dependencyPackages(graph *load.Graph) map[string]load.Package {
 	return packages
 }
 
-func mergedMethodMap(local map[string]methodInfo, localOrder []string, imported map[string]methodInfo, importedOrder []string) map[string]methodInfo {
+func mergedMethodMap(local methodMap, localOrder []string, imported methodMap, importedOrder []string) methodMap {
 	if len(imported) == 0 {
 		return local
 	}
-	methods := map[string]methodInfo{}
+	methods := methodMap{}
 	for i := 0; i < len(localOrder); i++ {
 		name := localOrder[i]
 		method := local[name]
@@ -1811,8 +1815,8 @@ func mergedMethodMap(local map[string]methodInfo, localOrder []string, imported 
 	return methods
 }
 
-func importReferenceMap(file parse.File, packages map[string]load.Package) (map[string]map[string]unit.Symbol, []string) {
-	refs := map[string]map[string]unit.Symbol{}
+func importReferenceMap(file parse.File, packages map[string]load.Package) (importSymbolMap, []string) {
+	refs := importSymbolMap{}
 	var refNames []string
 	for impIndex := 0; impIndex < len(file.Imports); impIndex++ {
 		imp := file.Imports[impIndex]
@@ -1853,8 +1857,8 @@ func importReferenceMap(file parse.File, packages map[string]load.Package) (map[
 	return refs, refNames
 }
 
-func importMethodMap(file parse.File, packages map[string]load.Package) (map[string]methodInfo, []string) {
-	methods := map[string]methodInfo{}
+func importMethodMap(file parse.File, packages map[string]load.Package) (methodMap, []string) {
+	methods := methodMap{}
 	var methodNames []string
 	for impIndex := 0; impIndex < len(file.Imports); impIndex++ {
 		imp := file.Imports[impIndex]
