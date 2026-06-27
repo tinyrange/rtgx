@@ -22,13 +22,14 @@ type Package struct {
 	Name            string
 	Files           []File
 	Imports         []string
-	ImportPositions map[string]ImportPosition
+	ImportPositions []ImportPosition
 }
 
 type ImportPosition struct {
-	Path   string
-	Line   int
-	Column int
+	ImportPath string
+	Path       string
+	Line       int
+	Column     int
 }
 
 type Graph struct {
@@ -39,6 +40,11 @@ type Graph struct {
 type Options struct {
 	StdRoot string
 	Target  string
+}
+
+type fileEntryGroup struct {
+	dir   string
+	files []string
 }
 
 func LoadEntries(entries []string, opts Options) (*Graph, error) {
@@ -56,8 +62,8 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 		opts.Target = targetpkg.Default()
 	}
 	g := &Graph{Module: module}
-	seen := map[string]bool{}
-	fileEntries := map[string][]string{}
+	var seen []string
+	var fileEntries []fileEntryGroup
 	var fileDirs []string
 	for i := 0; i < len(entries); i++ {
 		entry := entries[i]
@@ -72,21 +78,28 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 			return nil, fmt.Errorf("%s: entry is inside nested module root %s", dir, nested)
 		}
 		if len(files) > 0 {
-			if _, ok := fileEntries[dir]; !ok {
+			index := fileEntryGroupIndex(fileEntries, dir)
+			if index < 0 {
 				fileDirs = append(fileDirs, dir)
+				fileEntries = append(fileEntries, fileEntryGroup{dir: dir})
+				index = len(fileEntries) - 1
 			}
-			fileEntries[dir] = appendStrings(fileEntries[dir], files)
+			fileEntries[index].files = appendStrings(fileEntries[index].files, files)
 			continue
 		}
-		if err := loadPackageRecursive(g, opts, seen, dir); err != nil {
+		if err := loadPackageRecursive(g, opts, &seen, dir); err != nil {
 			return nil, err
 		}
 	}
 	sortStrings(fileDirs)
 	for i := 0; i < len(fileDirs); i++ {
 		dir := fileDirs[i]
-		files := fileEntries[dir]
-		if err := loadPackageFilesRecursive(g, opts, seen, dir, files); err != nil {
+		index := fileEntryGroupIndex(fileEntries, dir)
+		if index < 0 {
+			continue
+		}
+		files := fileEntries[index].files
+		if err := loadPackageFilesRecursive(g, opts, &seen, dir, files); err != nil {
 			return nil, err
 		}
 	}
@@ -157,20 +170,20 @@ func validateFrontendFileInput(path string) error {
 	return nil
 }
 
-func loadPackageRecursive(g *Graph, opts Options, seen map[string]bool, dir string) error {
+func loadPackageRecursive(g *Graph, opts Options, seen *[]string, dir string) error {
 	return loadPackageRecursiveAs(g, opts, seen, dir, importPathForDir(g.Module, dir))
 }
 
-func loadPackageFilesRecursive(g *Graph, opts Options, seen map[string]bool, dir string, files []string) error {
+func loadPackageFilesRecursive(g *Graph, opts Options, seen *[]string, dir string, files []string) error {
 	return loadPackageFilesRecursiveAs(g, opts, seen, dir, importPathForDir(g.Module, dir), files)
 }
 
-func loadPackageRecursiveAs(g *Graph, opts Options, seen map[string]bool, dir string, importPath string) error {
+func loadPackageRecursiveAs(g *Graph, opts Options, seen *[]string, dir string, importPath string) error {
 	dir = filepath.Clean(dir)
-	if seen[dir] {
+	if containsString(*seen, dir) {
 		return nil
 	}
-	seen[dir] = true
+	*seen = append(*seen, dir)
 	pkg, err := readPackage(g.Module, dir, importPath, opts)
 	if err != nil {
 		return err
@@ -191,12 +204,12 @@ func loadPackageRecursiveAs(g *Graph, opts Options, seen map[string]bool, dir st
 	return nil
 }
 
-func loadPackageFilesRecursiveAs(g *Graph, opts Options, seen map[string]bool, dir string, importPath string, files []string) error {
+func loadPackageFilesRecursiveAs(g *Graph, opts Options, seen *[]string, dir string, importPath string, files []string) error {
 	dir = filepath.Clean(dir)
-	if seen[dir] {
+	if containsString(*seen, dir) {
 		return nil
 	}
-	seen[dir] = true
+	*seen = append(*seen, dir)
 	pkg, err := readPackageFiles(g.Module, dir, importPath, files)
 	if err != nil {
 		return err
@@ -235,8 +248,8 @@ func readPackageFiles(module mod.Module, dir string, importPath string, files []
 	files = copyStrings(files)
 	sortStrings(files)
 	files = uniqueStrings(files)
-	pkg := Package{Dir: dir, ImportPath: importPath, ImportPositions: map[string]ImportPosition{}}
-	importSet := map[string]bool{}
+	pkg := Package{Dir: dir, ImportPath: importPath}
+	var importSet []string
 	for i := 0; i < len(files); i++ {
 		path := files[i]
 		data, err := os.ReadFile(path)
@@ -254,12 +267,12 @@ func readPackageFiles(module mod.Module, dir string, importPath string, files []
 		}
 		for j := 0; j < len(info.Imports); j++ {
 			imp := info.Imports[j]
-			if !importSet[imp.Path] {
-				importSet[imp.Path] = true
+			if !containsString(importSet, imp.Path) {
+				importSet = append(importSet, imp.Path)
 				pkg.Imports = append(pkg.Imports, imp.Path)
 			}
-			if _, ok := pkg.ImportPositions[imp.Path]; !ok {
-				pkg.ImportPositions[imp.Path] = ImportPosition{Path: path, Line: imp.Line, Column: imp.Column}
+			if !hasImportPosition(pkg.ImportPositions, imp.Path) {
+				pkg.ImportPositions = append(pkg.ImportPositions, ImportPosition{ImportPath: imp.Path, Path: path, Line: imp.Line, Column: imp.Column})
 			}
 		}
 		pkg.Files = append(pkg.Files, File{Path: path, UnitPath: unitFilePath(module, importPath, path), Source: data})
@@ -269,11 +282,47 @@ func readPackageFiles(module mod.Module, dir string, importPath string, files []
 }
 
 func importResolutionError(pkg Package, imp string, err error) error {
-	pos, ok := pkg.ImportPositions[imp]
+	pos, ok := importPosition(pkg.ImportPositions, imp)
 	if !ok || pos.Path == "" || pos.Line == 0 || pos.Column == 0 {
 		return err
 	}
 	return fmt.Errorf("%s:%d:%d: %v", pos.Path, pos.Line, pos.Column, err)
+}
+
+func fileEntryGroupIndex(groups []fileEntryGroup, dir string) int {
+	for i := 0; i < len(groups); i++ {
+		if groups[i].dir == dir {
+			return i
+		}
+	}
+	return -1
+}
+
+func containsString(values []string, value string) bool {
+	for i := 0; i < len(values); i++ {
+		if values[i] == value {
+			return true
+		}
+	}
+	return false
+}
+
+func hasImportPosition(values []ImportPosition, path string) bool {
+	for i := 0; i < len(values); i++ {
+		if values[i].ImportPath == path {
+			return true
+		}
+	}
+	return false
+}
+
+func importPosition(values []ImportPosition, path string) (ImportPosition, bool) {
+	for i := 0; i < len(values); i++ {
+		if values[i].ImportPath == path {
+			return values[i], true
+		}
+	}
+	return ImportPosition{}, false
 }
 
 func uniqueStrings(values []string) []string {
