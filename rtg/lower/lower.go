@@ -30,9 +30,59 @@ type methodInfo struct {
 	importPath      string
 }
 
+type symbolName struct {
+	name     string
+	unitName string
+}
+
+type methodEntry struct {
+	lookup string
+	info   methodInfo
+}
+
+type symbolNameTable []symbolName
+
+type methodTable []methodEntry
+
 type importSymbolMap map[string]map[string]unit.Symbol
 
-type methodMap map[string]methodInfo
+func (table symbolNameTable) unitName(name string) string {
+	for i := 0; i < len(table); i++ {
+		if table[i].name == name {
+			return table[i].unitName
+		}
+	}
+	return ""
+}
+
+func (table symbolNameTable) set(name string, unitName string) symbolNameTable {
+	for i := 0; i < len(table); i++ {
+		if table[i].name == name {
+			table[i].unitName = unitName
+			return table
+		}
+	}
+	return append(table, symbolName{name: name, unitName: unitName})
+}
+
+func (table methodTable) lookup(name string) methodInfo {
+	for i := 0; i < len(table); i++ {
+		if table[i].lookup == name {
+			return table[i].info
+		}
+	}
+	return methodInfo{}
+}
+
+func (table methodTable) set(name string, info methodInfo) methodTable {
+	for i := 0; i < len(table); i++ {
+		if table[i].lookup == name {
+			table[i].info = info
+			return table
+		}
+	}
+	return append(table, methodEntry{lookup: name, info: info})
+}
 
 func Package(pkg load.Package) (unit.Unit, error) {
 	return PackageWithGraph(pkg, nil)
@@ -44,9 +94,9 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 	files := copyLoadFiles(pkg.Files)
 	sortFilesByPath(files)
 	parsedFiles := make([]parse.File, 0, len(files))
-	topNames := map[string]string{}
+	var topNames symbolNameTable
 	var topNameOrder []string
-	methods := methodMap{}
+	var methods methodTable
 	var methodOrder []string
 	for fileIndex := 0; fileIndex < len(files); fileIndex++ {
 		file := files[fileIndex]
@@ -64,10 +114,10 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 			for nameIndex := 0; nameIndex < len(names); nameIndex++ {
 				name := names[nameIndex]
 				if name != "" && name != "_" {
-					if _, ok := topNames[name]; !ok {
+					if topNames.unitName(name) == "" {
 						topNameOrder = append(topNameOrder, name)
 					}
-					topNames[name] = SymbolName(pkg.ImportPath, name)
+					topNames = topNames.set(name, SymbolName(pkg.ImportPath, name))
 				}
 			}
 		}
@@ -81,23 +131,23 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 			}
 			info := methodDeclInfo(parsed, decl)
 			if info.name != "" {
-				info.unitName = topNames[info.name]
-				if _, ok := methods[info.name]; !ok {
+				info.unitName = topNames.unitName(info.name)
+				if methods.lookup(info.name).unitName == "" {
 					methodOrder = append(methodOrder, info.name)
 				}
-				methods[info.name] = info
+				methods = methods.set(info.name, info)
 			}
 		}
 	}
 	syntheticEntrypoint := false
-	if pkg.Name == "main" && topNames["appMain"] == "" && topNames["main"] != "" && hasOrdinaryMain(parsedFiles) {
+	if pkg.Name == "main" && topNames.unitName("appMain") == "" && topNames.unitName("main") != "" && hasOrdinaryMain(parsedFiles) {
 		topNameOrder = append(topNameOrder, "appMain")
-		topNames["appMain"] = SymbolName(pkg.ImportPath, "appMain")
+		topNames = topNames.set("appMain", SymbolName(pkg.ImportPath, "appMain"))
 		syntheticEntrypoint = true
 	}
 	for i := 0; i < len(topNameOrder); i++ {
 		name := topNameOrder[i]
-		unitName := topNames[name]
+		unitName := topNames.unitName(name)
 		if isExported(name) {
 			u.Exports = append(u.Exports, unit.Symbol{ImportPath: pkg.ImportPath, Name: name, UnitName: unitName})
 		}
@@ -135,7 +185,7 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 		}
 	}
 	if syntheticEntrypoint {
-		u.Decls = append(u.Decls, syntheticAppMainDecl(topNames["appMain"], topNames["main"]))
+		u.Decls = append(u.Decls, syntheticAppMainDecl(topNames.unitName("appMain"), topNames.unitName("main")))
 	}
 	sortSymbolsByImportPathName(u.References)
 	return u, nil
@@ -198,15 +248,15 @@ func unitDeclName(file parse.File, decl parse.Decl) string {
 	return strings.Join(names, ", ")
 }
 
-func unitDeclSymbol(decl parse.Decl, file parse.File, topNames map[string]string) string {
+func unitDeclSymbol(decl parse.Decl, file parse.File, topNames symbolNameTable) string {
 	if decl.Kind == "func" && decl.Receiver {
-		return topNames[methodDeclName(file, decl)]
+		return topNames.unitName(methodDeclName(file, decl))
 	}
 	names := declNames(decl)
 	if len(names) != 1 {
 		return ""
 	}
-	return topNames[names[0]]
+	return topNames.unitName(names[0])
 }
 
 func declTopNames(file parse.File, decl parse.Decl) []string {
@@ -399,7 +449,7 @@ func appendExpressionReplacements(out []expressionReplacement, values []expressi
 	return out
 }
 
-func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, topNameOrder []string, importRefs importSymbolMap, importRefNames []string, methods methodMap, refs *[]unit.Symbol) string {
+func rewriteDecl(file parse.File, decl parse.Decl, topNames symbolNameTable, topNameOrder []string, importRefs importSymbolMap, importRefNames []string, methods methodTable, refs *[]unit.Symbol) string {
 	start := decl.Start
 	end := decl.End
 	if start < 0 {
@@ -436,7 +486,7 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, t
 			if i+3 < len(file.Tokens) && file.Tokens[i+3].Text == "(" {
 				if receiverType := localTypes[tok.Text]; receiverType.name != "" {
 					methodName := methodLookupName(receiverType, file.Tokens[i+2].Text)
-					if method := methods[methodName]; method.unitName != "" {
+					if method := methods.lookup(methodName); method.unitName != "" {
 						open := file.Tokens[i+3]
 						close := findClose(file.Tokens, i+3, "(", ")")
 						if method.importPath != "" {
@@ -474,7 +524,7 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, t
 			}
 		}
 		if tok.Kind == scan.Ident && prevText != "." && !isLocalNameAt(localNames, tok.Text, tok.Start) {
-			replacement = topNames[tok.Text]
+			replacement = topNames.unitName(tok.Text)
 		}
 		if replacement != "" {
 			out = appendString(out, replacement)
@@ -498,7 +548,7 @@ func methodLookupName(receiver localTypeInfo, methodName string) string {
 	return name
 }
 
-func appendMethodDeclPrefix(file parse.File, decl parse.Decl, topNames map[string]string, out *[]byte) int {
+func appendMethodDeclPrefix(file parse.File, decl parse.Decl, topNames symbolNameTable, out *[]byte) int {
 	toks := file.Tokens
 	start := tokenIndexAt(toks, decl.Start)
 	if start < 0 || start+1 >= len(toks) || toks[start+1].Text != "(" {
@@ -518,7 +568,7 @@ func appendMethodDeclPrefix(file parse.File, decl parse.Decl, topNames map[strin
 	if paramsClose < 0 {
 		return decl.Start
 	}
-	unitName := topNames[methodDeclName(file, decl)]
+	unitName := topNames.unitName(methodDeclName(file, decl))
 	if unitName == "" {
 		return decl.Start
 	}
@@ -533,7 +583,7 @@ func appendMethodDeclPrefix(file parse.File, decl parse.Decl, topNames map[strin
 	return toks[paramsClose].Start
 }
 
-func rewriteReceiverSegment(file parse.File, start int, end int, topNames map[string]string) string {
+func rewriteReceiverSegment(file parse.File, start int, end int, topNames symbolNameTable) string {
 	toks := file.Tokens
 	var out []byte
 	cursor := toks[start].Start
@@ -544,7 +594,7 @@ func rewriteReceiverSegment(file parse.File, start int, end int, topNames map[st
 		}
 		replacement := ""
 		if tok.Kind == scan.Ident && (i > start || !receiverSegmentHasName(toks, start, end)) {
-			replacement = topNames[tok.Text]
+			replacement = topNames.unitName(tok.Text)
 		}
 		if replacement != "" {
 			out = appendString(out, replacement)
@@ -1427,11 +1477,11 @@ func statementInsertStart(body string, pos int) int {
 	return lineStart
 }
 
-func localRewriteNames(topNames map[string]string, topNameOrder []string, importRefs importSymbolMap, importRefNames []string) map[string]string {
+func localRewriteNames(topNames symbolNameTable, topNameOrder []string, importRefs importSymbolMap, importRefNames []string) map[string]string {
 	names := map[string]string{}
 	for i := 0; i < len(topNameOrder); i++ {
 		name := topNameOrder[i]
-		unitName := topNames[name]
+		unitName := topNames.unitName(name)
 		names[name] = unitName
 	}
 	for i := 0; i < len(importRefNames); i++ {
@@ -1857,21 +1907,21 @@ func packageByImportPath(packages []load.Package, importPath string) (load.Packa
 	return load.Package{}, false
 }
 
-func mergedMethodMap(local methodMap, localOrder []string, imported methodMap, importedOrder []string) methodMap {
+func mergedMethodMap(local methodTable, localOrder []string, imported methodTable, importedOrder []string) methodTable {
 	if len(imported) == 0 {
 		return local
 	}
-	methods := methodMap{}
+	var methods methodTable
 	for i := 0; i < len(localOrder); i++ {
 		name := localOrder[i]
-		method := local[name]
-		methods[name] = method
+		method := local.lookup(name)
+		methods = methods.set(name, method)
 	}
 	for i := 0; i < len(importedOrder); i++ {
 		name := importedOrder[i]
-		method := imported[name]
-		if _, ok := methods[name]; !ok {
-			methods[name] = method
+		method := imported.lookup(name)
+		if methods.lookup(name).unitName == "" {
+			methods = methods.set(name, method)
 		}
 	}
 	return methods
@@ -1918,8 +1968,8 @@ func importReferenceMap(file parse.File, packages []load.Package) (importSymbolM
 	return refs, refNames
 }
 
-func importMethodMap(file parse.File, packages []load.Package) (methodMap, []string) {
-	methods := methodMap{}
+func importMethodMap(file parse.File, packages []load.Package) (methodTable, []string) {
+	var methods methodTable
 	var methodNames []string
 	for impIndex := 0; impIndex < len(file.Imports); impIndex++ {
 		imp := file.Imports[impIndex]
@@ -1947,10 +1997,10 @@ func importMethodMap(file parse.File, packages []load.Package) (methodMap, []str
 				info.unitName = SymbolName(importPath, info.name)
 				info.importPath = importPath
 				methodName := localName + "." + info.name
-				if _, ok := methods[methodName]; !ok {
+				if methods.lookup(methodName).unitName == "" {
 					methodNames = append(methodNames, methodName)
 				}
-				methods[methodName] = info
+				methods = methods.set(methodName, info)
 			}
 		}
 	}
