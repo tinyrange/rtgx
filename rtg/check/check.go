@@ -628,8 +628,10 @@ func precededByTypeContext(toks []scan.Token, pos int) bool {
 	}
 	prev := toks[pos-1]
 	switch prev.Text {
-	case "var", "type", "*", "]", ")":
+	case "var", "type", "*":
 		return true
+	case "]":
+		return toks[pos].Text == "*"
 	}
 	if prev.Kind == scan.Ident && pos >= 2 {
 		if isKeyword(prev.Text) {

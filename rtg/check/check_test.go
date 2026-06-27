@@ -56,7 +56,13 @@ func TestFileRejectsMapTypesWithoutArrayDiagnostic(t *testing.T) {
 	file, err := parse.FileSource("maps.go", []byte(`package main
 
 type table map[string]map[string]int
-func use(values map[string]int) int { return 0 }
+func use(values map[string]int) int {
+	print("x")
+	values["key"] = 1
+	_ = values["key"]
+	values["other"] = values["key"]
+	return values["key"]
+}
 `))
 	if err != nil {
 		t.Fatalf("FileSource failed: %v", err)
