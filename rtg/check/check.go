@@ -618,7 +618,7 @@ func precededByTypeContext(toks []scan.Token, pos int) bool {
 	}
 	prev := toks[pos-1]
 	switch prev.Text {
-	case "var", "type", "{", "*", "]", ")":
+	case "var", "type", "*", "]", ")":
 		return true
 	}
 	if prev.Kind == scan.Ident && pos >= 2 {
@@ -626,8 +626,11 @@ func precededByTypeContext(toks []scan.Token, pos int) bool {
 			return false
 		}
 		beforeName := toks[pos-2].Text
-		if beforeName == "var" || beforeName == "type" || beforeName == "{" {
+		if beforeName == "var" || beforeName == "type" {
 			return true
+		}
+		if beforeName == "{" {
+			return nameInStructFieldList(toks, pos-1)
 		}
 		if beforeName == "(" || beforeName == "," {
 			namePos := pos - 1

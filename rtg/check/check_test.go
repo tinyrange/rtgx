@@ -105,6 +105,24 @@ func equal(a []byte, b []byte) bool {
 	}
 }
 
+func TestFileAllowsIndexAssignmentAtBlockStart(t *testing.T) {
+	file, err := parse.FileSource("index_assign.go", []byte(`package main
+
+func move(values []int, i int, j int) {
+	if i < j {
+		values[j+1] = values[j]
+	}
+}
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	diags := File(file)
+	if len(diags) != 0 {
+		t.Fatalf("File rejected index assignment: %v", diags)
+	}
+}
+
 func TestFileRejectsTypeAssertionsAndSwitches(t *testing.T) {
 	file, err := parse.FileSource("assertions.go", []byte(`package main
 
