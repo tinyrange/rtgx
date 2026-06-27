@@ -113,20 +113,34 @@ func writeUnitDirectory(dir string, units []unit.Unit) error {
 	if err := os.MkdirAll(dir, 493); err != nil {
 		return err
 	}
-	names := map[string]string{}
+	var names []unitFileName
 	for i := 0; i < len(units); i++ {
 		u := units[i]
 		name := emit.FileName(u.ImportPath)
-		if existing, ok := names[name]; ok {
+		if existing, ok := findUnitFileName(names, name); ok {
 			return fmt.Errorf("rtg: emitted unit filename collision for %s: %s and %s", name, existing, u.ImportPath)
 		}
-		names[name] = u.ImportPath
+		names = append(names, unitFileName{name: name, importPath: u.ImportPath})
 		path := filepath.Join(dir, name)
 		if err := os.WriteFile(path, emit.Source(u), 420); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+type unitFileName struct {
+	name       string
+	importPath string
+}
+
+func findUnitFileName(names []unitFileName, name string) (string, bool) {
+	for i := 0; i < len(names); i++ {
+		if names[i].name == name {
+			return names[i].importPath, true
+		}
+	}
+	return "", false
 }
 
 func isUnitFileOutput(path string) bool {
