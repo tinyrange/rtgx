@@ -54,11 +54,27 @@ func CompileUnitsArtifact(units []unit.Unit, opts Options) (Artifact, error) {
 	if err != nil {
 		return Artifact{}, err
 	}
-	compiled.LinkedSource = append([]byte(nil), linked.Source...)
-	compiled.LinkedUnits = append([]string(nil), linked.LinkedUnits...)
-	compiled.ReachableFunctions = append([]string(nil), linked.ReachableFunctions...)
+	compiled.LinkedSource = copyBytes(linked.Source)
+	compiled.LinkedUnits = copyStrings(linked.LinkedUnits)
+	compiled.ReachableFunctions = copyStrings(linked.ReachableFunctions)
 	compiled.Entrypoint = linked.Entrypoint
 	return compiled, nil
+}
+
+func copyBytes(values []byte) []byte {
+	out := make([]byte, len(values))
+	for i := 0; i < len(values); i++ {
+		out[i] = values[i]
+	}
+	return out
+}
+
+func copyStrings(values []string) []string {
+	out := make([]string, len(values))
+	for i := 0; i < len(values); i++ {
+		out[i] = values[i]
+	}
+	return out
 }
 
 func CompileUnitSources(sources []unit.SourceFile, opts Options) error {
