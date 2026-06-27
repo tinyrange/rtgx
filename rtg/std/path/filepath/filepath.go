@@ -22,6 +22,26 @@ func FromSlash(path string) string {
 	return path
 }
 
+func Abs(path string) (string, error) {
+	return Clean(path), nil
+}
+
+func Rel(basepath string, targpath string) (string, error) {
+	base := Clean(basepath)
+	target := Clean(targpath)
+	if base == target {
+		return ".", nil
+	}
+	prefix := base
+	if !strings.HasSuffix(prefix, "/") {
+		prefix = prefix + "/"
+	}
+	if strings.HasPrefix(target, prefix) {
+		return target[len(prefix):len(target)], nil
+	}
+	return target, nil
+}
+
 func IsAbs(path string) bool {
 	return len(path) > 0 && path[0] == '/'
 }
