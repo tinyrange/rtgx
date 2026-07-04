@@ -13,24 +13,26 @@ const (
 )
 
 const (
-	TagUnit     = uint16(1)
-	TagPackage  = uint16(2)
-	TagText     = uint16(7)
-	TagTokens   = uint16(8)
-	TagDecls    = uint16(9)
-	TagFuncs    = uint16(10)
-	TagIndexes  = uint16(11)
-	TagComps    = uint16(12)
-	TagAssigns  = uint16(13)
-	TagReturns  = uint16(14)
-	TagCalls    = uint16(15)
-	TagRefs     = uint16(16)
-	TagSels     = uint16(17)
-	TagTypes    = uint16(18)
-	TagTypeRefs = uint16(19)
-	TagLocals   = uint16(20)
-	TagSigs     = uint16(21)
-	TagDeclMeta = uint16(22)
+	TagUnit       = uint16(1)
+	TagPackage    = uint16(2)
+	TagImportPath = uint16(3)
+	TagText       = uint16(7)
+	TagTokens     = uint16(8)
+	TagDecls      = uint16(9)
+	TagFuncs      = uint16(10)
+	TagIndexes    = uint16(11)
+	TagComps      = uint16(12)
+	TagAssigns    = uint16(13)
+	TagReturns    = uint16(14)
+	TagCalls      = uint16(15)
+	TagRefs       = uint16(16)
+	TagSels       = uint16(17)
+	TagTypes      = uint16(18)
+	TagTypeRefs   = uint16(19)
+	TagLocals     = uint16(20)
+	TagSigs       = uint16(21)
+	TagDeclMeta   = uint16(22)
+	TagImports    = uint16(23)
 )
 
 const (
@@ -73,6 +75,16 @@ type Decl struct {
 	NameEnd   int
 	StartTok  int
 	EndTok    int
+}
+
+type Import struct {
+	Name       string
+	ImportPath string
+	Package    int
+	NameTok    int
+	PathTok    int
+	Dot        bool
+	Blank      bool
 }
 
 type DeclMeta struct {
@@ -306,8 +318,10 @@ type LocalDecl struct {
 
 type Program struct {
 	Package    string
+	ImportPath string
 	Text       []byte
 	Tokens     []byte
+	Imports    []Import
 	Decls      []Decl
 	DeclMeta   []DeclMeta
 	Funcs      []Func
@@ -374,8 +388,10 @@ func Marshal(program Program) ([]byte, error) {
 	}
 	root := Parent(TagUnit,
 		NewNode(TagPackage, []byte(program.Package)),
+		NewNode(TagImportPath, []byte(program.ImportPath)),
 		NewNode(TagText, program.Text),
 		NewNode(TagTokens, tokens),
+		NewNode(TagImports, encodeImports(program.Imports)),
 		NewNode(TagDecls, encodeDecls(program.Decls)),
 		NewNode(TagDeclMeta, encodeDeclMeta(program.DeclMeta)),
 		NewNode(TagFuncs, encodeFuncs(program.Funcs)),
@@ -427,6 +443,7 @@ func Unmarshal(data []byte) (Program, error) {
 		return program, fmt.Errorf("invalid root length")
 	}
 	var tokenData []byte
+	var importData []byte
 	var declMetaData []byte
 	var sigData []byte
 	var typeData []byte
@@ -439,6 +456,8 @@ func Unmarshal(data []byte) (Program, error) {
 	var callData []byte
 	var refData []byte
 	var selectorData []byte
+	seenImportPath := false
+	seenImports := false
 	seenDeclMeta := false
 	seenSigs := false
 	seenTypes := false
@@ -467,10 +486,22 @@ func Unmarshal(data []byte) (Program, error) {
 		switch tag {
 		case TagPackage:
 			program.Package = string(payload)
+		case TagImportPath:
+			if seenImportPath {
+				return program, fmt.Errorf("duplicate import path")
+			}
+			seenImportPath = true
+			program.ImportPath = string(payload)
 		case TagText:
 			program.Text = payload
 		case TagTokens:
 			tokenData = payload
+		case TagImports:
+			if seenImports {
+				return program, fmt.Errorf("duplicate import table")
+			}
+			seenImports = true
+			importData = payload
 		case TagDecls:
 			decls, err := decodeDecls(payload)
 			if err != nil {
@@ -571,6 +602,13 @@ func Unmarshal(data []byte) (Program, error) {
 		return program, err
 	}
 	program.Tokens = tokens
+	if seenImports {
+		imports, err := decodeImports(importData)
+		if err != nil {
+			return program, err
+		}
+		program.Imports = imports
+	}
 	if seenDeclMeta {
 		declMeta, err := decodeDeclMeta(declMetaData)
 		if err != nil {
@@ -1457,6 +1495,27 @@ func encodeDecls(decls []Decl) []byte {
 	return out
 }
 
+func encodeImports(imports []Import) []byte {
+	var out []byte
+	out = appendVarint(out, len(imports))
+	for _, imp := range imports {
+		out = appendString(out, imp.Name)
+		out = appendString(out, imp.ImportPath)
+		out = appendNullable(out, imp.Package)
+		out = appendNullable(out, imp.NameTok)
+		out = appendVarint(out, imp.PathTok)
+		flags := 0
+		if imp.Dot {
+			flags |= 1
+		}
+		if imp.Blank {
+			flags |= 2
+		}
+		out = appendVarint(out, flags)
+	}
+	return out
+}
+
 func encodeDeclMeta(metas []DeclMeta) []byte {
 	var out []byte
 	out = appendVarint(out, len(metas))
@@ -1759,6 +1818,65 @@ func decodeDecls(data []byte) ([]Decl, error) {
 		return nil, fmt.Errorf("trailing decl data")
 	}
 	return decls, nil
+}
+
+func decodeImports(data []byte) ([]Import, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid import count")
+	}
+	pos = next
+	imports := make([]Import, 0, count)
+	for i := 0; i < count; i++ {
+		name, n, ok := readString(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid import %d name", i)
+		}
+		pos = n
+		importPath, n, ok := readString(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid import %d path", i)
+		}
+		pos = n
+		pkg, n, ok := readNullable(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid import %d package", i)
+		}
+		pos = n
+		nameTok, n, ok := readNullable(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid import %d name token", i)
+		}
+		pos = n
+		pathTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid import %d path token", i)
+		}
+		pos = n
+		flags, n, ok := readVarint(data, pos)
+		if !ok || flags > 3 {
+			return nil, fmt.Errorf("invalid import %d flags", i)
+		}
+		pos = n
+		imp := Import{
+			Name:       name,
+			ImportPath: importPath,
+			Package:    pkg,
+			NameTok:    nameTok,
+			PathTok:    pathTok,
+			Dot:        flags&1 != 0,
+			Blank:      flags&2 != 0,
+		}
+		if imp.Dot && imp.Blank {
+			return nil, fmt.Errorf("invalid import %d dot blank flags", i)
+		}
+		imports = append(imports, imp)
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing import data")
+	}
+	return imports, nil
 }
 
 func decodeDeclMeta(data []byte) ([]DeclMeta, error) {
@@ -2759,6 +2877,24 @@ func readNullable(data []byte, pos int) (int, int, bool) {
 		return 0, pos, false
 	}
 	return value - 1, next, true
+}
+
+func appendString(out []byte, text string) []byte {
+	out = appendVarint(out, len(text))
+	return append(out, text...)
+}
+
+func readString(data []byte, pos int) (string, int, bool) {
+	size, next, ok := readVarint(data, pos)
+	if !ok {
+		return "", pos, false
+	}
+	pos = next
+	end := pos + size
+	if end < pos || end > len(data) {
+		return "", pos, false
+	}
+	return string(data[pos:end]), end, true
 }
 
 func appendVarint(out []byte, v int) []byte {

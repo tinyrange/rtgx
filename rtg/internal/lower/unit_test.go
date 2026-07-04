@@ -57,6 +57,66 @@ func appMain() int {
 	}
 }
 
+func TestEmitCheckedPackagePreservesImports(t *testing.T) {
+	graph := loadTestGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import (
+	core "example.com/case/pkg/lib"
+	. "example.com/case/pkg/dot"
+	_ "example.com/case/pkg/side"
+)
+
+func appMain() int { return core.Value() }
+`)},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
+
+func Value() int { return 1 }
+`)},
+		{Path: "/repo/case/pkg/dot/dot.go", Src: []byte(`package dot
+
+const DotValue = 2
+`)},
+		{Path: "/repo/case/pkg/side/side.go", Src: []byte(`package side
+
+const SideValue = 3
+`)},
+	})
+	prog := check.CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	root := findGraphPackage(graph, graph.Root)
+	if root < 0 {
+		t.Fatalf("root package %q not found in %#v", graph.Root, graph.Packages)
+	}
+	result := EmitCheckedPackage(graph.Packages[root], prog.Packages[root])
+	if !result.Ok {
+		t.Fatalf("EmitCheckedPackage failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
+	}
+	if result.Program.ImportPath != "example.com/case/cmd/app" {
+		t.Fatalf("unit import path = %q", result.Program.ImportPath)
+	}
+	if len(result.Program.Imports) != 3 {
+		t.Fatalf("imports = %#v, want 3", result.Program.Imports)
+	}
+	assertUnitImport(t, result.Program, "core", "example.com/case/pkg/lib", false, false)
+	assertUnitImport(t, result.Program, ".", "example.com/case/pkg/dot", true, false)
+	assertUnitImport(t, result.Program, "_", "example.com/case/pkg/side", false, true)
+
+	data, ok := unit.Marshal(result.Program)
+	if !ok {
+		t.Fatal("unit Marshal failed")
+	}
+	decoded, err := rtgunit.Unmarshal(data)
+	if err != nil {
+		t.Fatalf("host unit decode failed: %v", err)
+	}
+	if decoded.ImportPath != result.Program.ImportPath || len(decoded.Imports) != len(result.Program.Imports) {
+		t.Fatalf("decoded imports = %q %#v, want %q %#v", decoded.ImportPath, decoded.Imports, result.Program.ImportPath, result.Program.Imports)
+	}
+}
+
 func TestEmitPackagePreservesTextAndFileOrder(t *testing.T) {
 	graph := loadTestGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/z.go", Src: []byte("package main\n\nfunc z() int { return 2 }\n")},
@@ -395,6 +455,15 @@ func loadTestGraph(t *testing.T, files []load.SourceFile) load.Graph {
 	return graph
 }
 
+func findGraphPackage(graph load.Graph, importPath string) int {
+	for i := 0; i < len(graph.Packages); i++ {
+		if graph.Packages[i].Ref.ImportPath == importPath {
+			return i
+		}
+	}
+	return -1
+}
+
 func tokenText(program rtgunit.Program, index int) string {
 	if index < 0 || index*8+8 > len(program.Tokens) {
 		return ""
@@ -535,6 +604,27 @@ func assertUnitDeclMeta(t *testing.T, program unit.Program, declIndex int, typ s
 		return
 	}
 	t.Fatalf("decl metadata index=%d alias=%v not found in %#v", declIndex, alias, program.DeclMeta)
+}
+
+func assertUnitImport(t *testing.T, program unit.Program, name string, importPath string, dot bool, blank bool) {
+	t.Helper()
+	for i := 0; i < len(program.Imports); i++ {
+		imp := program.Imports[i]
+		if imp.Name != name || imp.ImportPath != importPath || imp.Dot != dot || imp.Blank != blank {
+			continue
+		}
+		if imp.Package < 0 {
+			t.Fatalf("import %s package = %d", importPath, imp.Package)
+		}
+		if tokenTextUnit(program, imp.PathTok) != `"`+importPath+`"` {
+			t.Fatalf("import %s path token = %q", importPath, tokenTextUnit(program, imp.PathTok))
+		}
+		if name != "." && name != "_" && imp.NameTok >= 0 && tokenTextUnit(program, imp.NameTok) != name {
+			t.Fatalf("import %s name token = %q", importPath, tokenTextUnit(program, imp.NameTok))
+		}
+		return
+	}
+	t.Fatalf("import %s %s not found in %#v", name, importPath, program.Imports)
 }
 
 func assertUnitSignature(t *testing.T, program unit.Program, funcIndex int, receiver []string, params []string, results []string) {

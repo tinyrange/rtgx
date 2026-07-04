@@ -89,6 +89,14 @@ func TestMarshalRoundTripInternalDecoder(t *testing.T) {
 
 func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 	program := declProgram()
+	program.ImportPath = "example.com/case/cmd/app"
+	program.Imports = []Import{{
+		Name:       "lib",
+		ImportPath: "example.com/case/pkg/lib",
+		Package:    1,
+		NameTok:    13,
+		PathTok:    13,
+	}}
 	program.DeclMeta = []DeclMeta{{
 		DeclIndex:  0,
 		Symbol:     -1,
@@ -413,10 +421,11 @@ func hostTokenBytes(program Program) []byte {
 }
 
 func equalPrograms(left Program, right Program) bool {
-	if left.Package != right.Package || !bytes.Equal(left.Text, right.Text) {
+	if left.Package != right.Package || left.ImportPath != right.ImportPath || !bytes.Equal(left.Text, right.Text) {
 		return false
 	}
-	if len(left.Tokens) != len(right.Tokens) || len(left.Decls) != len(right.Decls) || len(left.Funcs) != len(right.Funcs) ||
+	if len(left.Tokens) != len(right.Tokens) || len(left.Imports) != len(right.Imports) ||
+		len(left.Decls) != len(right.Decls) || len(left.Funcs) != len(right.Funcs) ||
 		len(left.DeclMeta) != len(right.DeclMeta) ||
 		len(left.Signatures) != len(right.Signatures) ||
 		len(left.Types) != len(right.Types) ||
@@ -429,6 +438,11 @@ func equalPrograms(left Program, right Program) bool {
 	}
 	for i := 0; i < len(left.Tokens); i++ {
 		if left.Tokens[i] != right.Tokens[i] {
+			return false
+		}
+	}
+	for i := 0; i < len(left.Imports); i++ {
+		if left.Imports[i] != right.Imports[i] {
 			return false
 		}
 	}

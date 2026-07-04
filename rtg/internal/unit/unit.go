@@ -6,24 +6,26 @@ const (
 )
 
 const (
-	TagUnit     = 1
-	TagPackage  = 2
-	TagText     = 7
-	TagTokens   = 8
-	TagDecls    = 9
-	TagFuncs    = 10
-	TagIndexes  = 11
-	TagComps    = 12
-	TagAssigns  = 13
-	TagReturns  = 14
-	TagCalls    = 15
-	TagRefs     = 16
-	TagSels     = 17
-	TagTypes    = 18
-	TagTypeRefs = 19
-	TagLocals   = 20
-	TagSigs     = 21
-	TagDeclMeta = 22
+	TagUnit       = 1
+	TagPackage    = 2
+	TagImportPath = 3
+	TagText       = 7
+	TagTokens     = 8
+	TagDecls      = 9
+	TagFuncs      = 10
+	TagIndexes    = 11
+	TagComps      = 12
+	TagAssigns    = 13
+	TagReturns    = 14
+	TagCalls      = 15
+	TagRefs       = 16
+	TagSels       = 17
+	TagTypes      = 18
+	TagTypeRefs   = 19
+	TagLocals     = 20
+	TagSigs       = 21
+	TagDeclMeta   = 22
+	TagImports    = 23
 )
 
 const (
@@ -65,6 +67,16 @@ type Decl struct {
 	NameEnd   int
 	StartTok  int
 	EndTok    int
+}
+
+type Import struct {
+	Name       string
+	ImportPath string
+	Package    int
+	NameTok    int
+	PathTok    int
+	Dot        bool
+	Blank      bool
 }
 
 type DeclMeta struct {
@@ -298,8 +310,10 @@ type LocalDecl struct {
 
 type Program struct {
 	Package    string
+	ImportPath string
 	Text       []byte
 	Tokens     []Token
+	Imports    []Import
 	Decls      []Decl
 	DeclMeta   []DeclMeta
 	Funcs      []Func
@@ -321,6 +335,10 @@ func Marshal(program Program) ([]byte, bool) {
 		return nil, false
 	}
 	tokenData, ok := encodeTokens(program.Text, program.Tokens)
+	if !ok {
+		return nil, false
+	}
+	importData, ok := encodeImports(program.Imports, len(program.Tokens))
 	if !ok {
 		return nil, false
 	}
@@ -382,8 +400,10 @@ func Marshal(program Program) ([]byte, bool) {
 	}
 	var root []byte
 	root = appendNode(root, TagPackage, []byte(program.Package))
+	root = appendNode(root, TagImportPath, []byte(program.ImportPath))
 	root = appendNode(root, TagText, program.Text)
 	root = appendNode(root, TagTokens, tokenData)
+	root = appendNode(root, TagImports, importData)
 	root = appendNode(root, TagDecls, declData)
 	root = appendNode(root, TagDeclMeta, declMetaData)
 	root = appendNode(root, TagFuncs, funcData)
@@ -429,6 +449,7 @@ func Unmarshal(data []byte) (Program, bool) {
 		return program, false
 	}
 	tokenData := []byte{}
+	importData := []byte{}
 	declMetaData := []byte{}
 	sigData := []byte{}
 	typeData := []byte{}
@@ -442,8 +463,10 @@ func Unmarshal(data []byte) (Program, bool) {
 	refData := []byte{}
 	selectorData := []byte{}
 	seenPackage := false
+	seenImportPath := false
 	seenText := false
 	seenTokens := false
+	seenImports := false
 	seenDecls := false
 	seenDeclMeta := false
 	seenFuncs := false
@@ -477,6 +500,12 @@ func Unmarshal(data []byte) (Program, bool) {
 			}
 			seenPackage = true
 			program.Package = string(payload)
+		} else if tag == TagImportPath {
+			if seenImportPath {
+				return program, false
+			}
+			seenImportPath = true
+			program.ImportPath = string(payload)
 		} else if tag == TagText {
 			if seenText {
 				return program, false
@@ -489,6 +518,12 @@ func Unmarshal(data []byte) (Program, bool) {
 			}
 			seenTokens = true
 			tokenData = payload
+		} else if tag == TagImports {
+			if seenImports {
+				return program, false
+			}
+			seenImports = true
+			importData = payload
 		} else if tag == TagDecls {
 			if seenDecls {
 				return program, false
@@ -597,6 +632,13 @@ func Unmarshal(data []byte) (Program, bool) {
 		return program, false
 	}
 	program.Tokens = tokens
+	if seenImports {
+		imports, ok := decodeImports(importData, len(program.Tokens))
+		if !ok {
+			return program, false
+		}
+		program.Imports = imports
+	}
 	if seenDeclMeta {
 		declMeta, ok := decodeDeclMeta(declMetaData, len(program.Tokens), len(program.Decls))
 		if !ok {
@@ -773,6 +815,93 @@ func decodeTokens(text []byte, data []byte) ([]Token, bool) {
 		return nil, false
 	}
 	return tokens, true
+}
+
+func encodeImports(imports []Import, tokenLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(imports)*12+1)
+	out = appendVarint(out, len(imports))
+	for i := 0; i < len(imports); i++ {
+		imp := imports[i]
+		if len(imp.Name) == 0 || len(imp.ImportPath) == 0 ||
+			!validNullable(imp.Package) ||
+			!validNullable(imp.NameTok) ||
+			(imp.NameTok >= 0 && !validToken(tokenLimit, imp.NameTok)) ||
+			!validToken(tokenLimit, imp.PathTok) ||
+			(imp.Dot && imp.Blank) {
+			return nil, false
+		}
+		out = appendString(out, imp.Name)
+		out = appendString(out, imp.ImportPath)
+		out = appendNullable(out, imp.Package)
+		out = appendNullable(out, imp.NameTok)
+		out = appendVarint(out, imp.PathTok)
+		flags := 0
+		if imp.Dot {
+			flags |= 1
+		}
+		if imp.Blank {
+			flags |= 2
+		}
+		out = appendVarint(out, flags)
+	}
+	return out, true
+}
+
+func decodeImports(data []byte, tokenLimit int) ([]Import, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	imports := make([]Import, 0, count)
+	for i := 0; i < count; i++ {
+		name, ok := readString(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		importPath, ok := readString(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		pkg, ok := readNullable(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		nameTok, ok := readNullable(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		pathTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		flags, ok := readVarint(data, &pos)
+		if !ok || flags > 3 {
+			return nil, false
+		}
+		imp := Import{
+			Name:       name,
+			ImportPath: importPath,
+			Package:    pkg,
+			NameTok:    nameTok,
+			PathTok:    pathTok,
+			Dot:        flags&1 != 0,
+			Blank:      flags&2 != 0,
+		}
+		if len(imp.Name) == 0 || len(imp.ImportPath) == 0 ||
+			!validNullable(imp.Package) ||
+			!validNullable(imp.NameTok) ||
+			(imp.NameTok >= 0 && !validToken(tokenLimit, imp.NameTok)) ||
+			!validToken(tokenLimit, imp.PathTok) ||
+			(imp.Dot && imp.Blank) {
+			return nil, false
+		}
+		imports = append(imports, imp)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return imports, true
 }
 
 func encodeDecls(decls []Decl) ([]byte, bool) {
@@ -2273,6 +2402,25 @@ func readNullable(data []byte, pos *int) (int, bool) {
 		return 0, false
 	}
 	return value - 1, true
+}
+
+func appendString(out []byte, text string) []byte {
+	out = appendVarint(out, len(text))
+	return append(out, text...)
+}
+
+func readString(data []byte, pos *int) (string, bool) {
+	size, ok := readVarint(data, pos)
+	if !ok || size < 0 {
+		return "", false
+	}
+	end := *pos + size
+	if end < *pos || end > len(data) {
+		return "", false
+	}
+	text := string(data[*pos:end])
+	*pos = end
+	return text, true
 }
 
 func appendNode(out []byte, tag int, payload []byte) []byte {

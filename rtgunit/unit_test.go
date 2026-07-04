@@ -86,6 +86,14 @@ func appMain() int { return values[0] }
 	localNamePos := localNameTok * tokenStride
 	localNameStart := readTokenStart(program.Tokens, localNamePos)
 	localNameSize := int(program.Tokens[localNamePos+4]) | int(program.Tokens[localNamePos+5])<<8
+	program.ImportPath = "example.com/case/cmd/app"
+	program.Imports = []Import{{
+		Name:       "lib",
+		ImportPath: "example.com/case/pkg/lib",
+		Package:    1,
+		NameTok:    17,
+		PathTok:    17,
+	}}
 	program.DeclMeta = []DeclMeta{{
 		DeclIndex:  0,
 		Symbol:     -1,
@@ -230,6 +238,9 @@ func appMain() int { return values[0] }
 	}
 	if len(decoded.TypeRefs) != 1 || decoded.TypeRefs[0] != program.TypeRefs[0] {
 		t.Fatalf("decoded type refs = %#v, want %#v", decoded.TypeRefs, program.TypeRefs)
+	}
+	if decoded.ImportPath != program.ImportPath || len(decoded.Imports) != 1 || decoded.Imports[0] != program.Imports[0] {
+		t.Fatalf("decoded imports = %q %#v, want %q %#v", decoded.ImportPath, decoded.Imports, program.ImportPath, program.Imports)
 	}
 	if len(decoded.Signatures) != 1 || len(decoded.Signatures[0].Results) != 1 || decoded.Signatures[0].Results[0] != program.Signatures[0].Results[0] {
 		t.Fatalf("decoded signatures = %#v, want %#v", decoded.Signatures, program.Signatures)

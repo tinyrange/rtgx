@@ -33,6 +33,10 @@ func Value() int { return answer }
 	if linked.Program.Package != "main" {
 		t.Fatalf("linked package = %q, want main", linked.Program.Package)
 	}
+	if linked.Program.ImportPath != "example.com/case/cmd/app" {
+		t.Fatalf("linked import path = %q", linked.Program.ImportPath)
+	}
+	assertLinkedImport(t, linked.Program, "lib", "example.com/case/pkg/lib", false, false)
 	if !bytes.Contains(linked.Program.Text, []byte("package lib")) || !bytes.Contains(linked.Program.Text, []byte("package main")) {
 		t.Fatalf("linked text missing package sources: %q", string(linked.Program.Text))
 	}
@@ -42,6 +46,9 @@ func Value() int { return answer }
 	}
 	if decoded.Package != "main" {
 		t.Fatalf("decoded package = %q, want main", decoded.Package)
+	}
+	if decoded.ImportPath != "example.com/case/cmd/app" || len(decoded.Imports) != 1 || decoded.Imports[0].ImportPath != "example.com/case/pkg/lib" {
+		t.Fatalf("decoded imports = %q %#v", decoded.ImportPath, decoded.Imports)
 	}
 	if len(decoded.Decls) != 1 {
 		t.Fatalf("decoded decl count = %d, want 1", len(decoded.Decls))
@@ -402,6 +409,27 @@ func assertLinkedDeclMeta(t *testing.T, program unit.Program, declIndex int, typ
 		return
 	}
 	t.Fatalf("linked decl metadata index=%d not found in %#v", declIndex, program.DeclMeta)
+}
+
+func assertLinkedImport(t *testing.T, program unit.Program, name string, importPath string, dot bool, blank bool) {
+	t.Helper()
+	for i := 0; i < len(program.Imports); i++ {
+		imp := program.Imports[i]
+		if imp.Name != name || imp.ImportPath != importPath || imp.Dot != dot || imp.Blank != blank {
+			continue
+		}
+		if imp.Package < 0 {
+			t.Fatalf("linked import %s package = %d", importPath, imp.Package)
+		}
+		if linkedTokenText(program, imp.PathTok) != `"`+importPath+`"` {
+			t.Fatalf("linked import %s path token = %q", importPath, linkedTokenText(program, imp.PathTok))
+		}
+		if name != "." && name != "_" && imp.NameTok >= 0 && linkedTokenText(program, imp.NameTok) != name {
+			t.Fatalf("linked import %s name token = %q", importPath, linkedTokenText(program, imp.NameTok))
+		}
+		return
+	}
+	t.Fatalf("linked import %s %s not found in %#v", name, importPath, program.Imports)
 }
 
 func assertLinkedFields(t *testing.T, program unit.Program, fields []unit.Field, want []string) {

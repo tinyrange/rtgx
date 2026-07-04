@@ -78,7 +78,7 @@ func LinkPrograms(programs []unit.Program, root int, rootName string) (unit.Prog
 	if root < 0 || root >= len(programs) || rootName == "" {
 		return unit.Program{}, false
 	}
-	program := unit.Program{Package: rootName}
+	program := unit.Program{Package: rootName, ImportPath: programs[root].ImportPath}
 	finalEOF := countLinkedTokens(programs)
 	lineOffset := 0
 	for i := 0; i < len(programs); i++ {
@@ -117,6 +117,13 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		dst.Tokens = append(dst.Tokens, tok)
 	}
 	dst.Text = append(dst.Text, src.Text...)
+	for i := 0; i < len(src.Imports); i++ {
+		imp, ok := mapImport(src.Imports[i], oldToNew, finalEOF)
+		if !ok {
+			return false
+		}
+		dst.Imports = append(dst.Imports, imp)
+	}
 	for i := 0; i < len(src.Decls); i++ {
 		decl := src.Decls[i]
 		decl.NameStart += textOffset
@@ -226,6 +233,19 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		dst.Text = append(dst.Text, '\n')
 	}
 	return true
+}
+
+func mapImport(imp unit.Import, oldToNew []int, eof int) (unit.Import, bool) {
+	imp.NameTok = mapNullableToken(imp.NameTok, oldToNew, eof)
+	imp.PathTok = mapToken(oldToNew, imp.PathTok, eof)
+	if len(imp.Name) == 0 || len(imp.ImportPath) == 0 ||
+		imp.Package < -1 ||
+		imp.NameTok < -1 ||
+		imp.PathTok < 0 ||
+		(imp.Dot && imp.Blank) {
+		return imp, false
+	}
+	return imp, true
 }
 
 func mapDeclMeta(meta unit.DeclMeta, oldToNew []int, eof int, declOffset int) (unit.DeclMeta, bool) {

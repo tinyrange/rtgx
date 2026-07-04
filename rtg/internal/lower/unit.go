@@ -43,6 +43,7 @@ func EmitPackage(pkg load.Package) Result {
 	}
 	var builder unitBuilder
 	builder.program.Package = pkg.Name
+	builder.program.ImportPath = pkg.Ref.ImportPath
 	builder.finalEOF = countPackageTokens(pkg)
 	for i := 0; i < len(pkg.Files); i++ {
 		if !pkg.Files[i].File.Ok {
@@ -88,6 +89,7 @@ func EmitCheckedPackage(pkg load.Package, info check.PackageInfo) Result {
 	}
 	var builder unitBuilder
 	builder.program.Package = pkg.Name
+	builder.program.ImportPath = pkg.Ref.ImportPath
 	builder.finalEOF = countPackageTokens(pkg)
 	files := make([]fileTokens, len(pkg.Files))
 	for i := 0; i < len(pkg.Files); i++ {
@@ -99,6 +101,9 @@ func EmitCheckedPackage(pkg load.Package, info check.PackageInfo) Result {
 			return emitFail(result, builder.err, builder.errFile, builder.errToken)
 		}
 		files[i] = fileTokens{file: pkg.Files[i].File, oldToNew: oldToNew}
+	}
+	if !builder.addCheckedImports(info, files) {
+		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
 	if !builder.addCheckedDecls(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
@@ -245,6 +250,40 @@ func (b *unitBuilder) addFunc(file syntax.File, fn syntax.FuncDecl, oldToNew []i
 		BodyEnd:       mapToken(oldToNew, bodyEnd, b.finalEOF),
 		EndTok:        mapToken(oldToNew, fn.EndTok, b.finalEOF),
 	})
+	return true
+}
+
+func (b *unitBuilder) addCheckedImports(info check.PackageInfo, files []fileTokens) bool {
+	for i := 0; i < len(info.Imports); i++ {
+		imp := info.Imports[i]
+		if imp.File < 0 || imp.File >= len(files) {
+			b.setErr(EmitErrCheck, -1, imp.Token)
+			return false
+		}
+		decl := findFileImport(files[imp.File].file, imp.Token)
+		if decl.PathTok < 0 {
+			b.setErr(EmitErrCheck, imp.File, imp.Token)
+			return false
+		}
+		mapped := unit.Import{
+			Name:       imp.Name,
+			ImportPath: imp.ImportPath,
+			Package:    imp.Package,
+			NameTok:    mapNullableToken(decl.NameTok, files[imp.File].oldToNew, b.finalEOF),
+			PathTok:    mapToken(files[imp.File].oldToNew, decl.PathTok, b.finalEOF),
+			Dot:        imp.Dot,
+			Blank:      imp.Blank,
+		}
+		if len(mapped.Name) == 0 || len(mapped.ImportPath) == 0 ||
+			mapped.Package < -1 ||
+			mapped.NameTok < -1 ||
+			mapped.PathTok < 0 ||
+			(mapped.Dot && mapped.Blank) {
+			b.setErr(EmitErrCheck, imp.File, imp.Token)
+			return false
+		}
+		b.program.Imports = append(b.program.Imports, mapped)
+	}
 	return true
 }
 
@@ -988,6 +1027,16 @@ func findFileDecl(file syntax.File, nameTok int) syntax.TopDecl {
 		}
 	}
 	return syntax.TopDecl{NameTok: -1}
+}
+
+func findFileImport(file syntax.File, tok int) syntax.ImportDecl {
+	for i := 0; i < len(file.Imports); i++ {
+		imp := file.Imports[i]
+		if imp.NameTok == tok || imp.PathTok == tok {
+			return imp
+		}
+	}
+	return syntax.ImportDecl{PathTok: -1}
 }
 
 func (b *unitBuilder) setErr(err int, file int, tok int) {
