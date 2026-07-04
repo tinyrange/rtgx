@@ -35,7 +35,7 @@ func BuildUnit(workDir string, stdRoot string, arg string, files []load.SourceFi
 	workspace := load.LoadWorkspace(workDir, stdRoot, arg, files)
 	result.Workspace = workspace
 	if !workspace.Ok {
-		return pipelineFail(result, PipelineErrLoad, workspace.ErrorFile, -1, -1)
+		return pipelineFail(result, PipelineErrLoad, -1, workspace.ErrorFile, -1)
 	}
 	built := build.BuildUnits(workspace.Graph)
 	result.Build = built

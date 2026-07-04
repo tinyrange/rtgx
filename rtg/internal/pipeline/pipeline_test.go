@@ -54,6 +54,17 @@ func TestBuildUnitReportsLoadError(t *testing.T) {
 	if result.ErrorFile != -1 || result.ErrorPackage != -1 || result.ErrorToken != -1 {
 		t.Fatalf("load error location = pkg %d file %d tok %d", result.ErrorPackage, result.ErrorFile, result.ErrorToken)
 	}
+
+	duplicate := BuildUnit("/repo/case", "/std", "./cmd/app", []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+	})
+	if duplicate.Ok || duplicate.Error != PipelineErrLoad {
+		t.Fatalf("duplicate file result = %#v", duplicate)
+	}
+	if duplicate.ErrorPackage != -1 || duplicate.ErrorFile != 1 || duplicate.ErrorToken != -1 {
+		t.Fatalf("duplicate load location = pkg %d file %d tok %d", duplicate.ErrorPackage, duplicate.ErrorFile, duplicate.ErrorToken)
+	}
 }
 
 func TestBuildUnitReportsBuildError(t *testing.T) {
