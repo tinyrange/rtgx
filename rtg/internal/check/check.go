@@ -59,13 +59,14 @@ type Import struct {
 }
 
 type FuncBody struct {
-	Name  string
-	Kind  int
-	File  int
-	Func  int
-	Body  syntax.Body
-	Scope FuncScope
-	Refs  []NameRef
+	Name      string
+	Kind      int
+	File      int
+	Func      int
+	Signature FuncSignature
+	Body      syntax.Body
+	Scope     FuncScope
+	Refs      []NameRef
 }
 
 func CheckGraph(graph load.Graph) Program {
@@ -175,6 +176,7 @@ func checkPackage(graph load.Graph, pkgIndex int) (PackageInfo, bool, int, int, 
 				name = receiverTypeName(file, fn) + "." + name
 				kind = SymbolMethod
 			}
+			signature := buildFuncSignature(file, fn)
 			body := syntax.ParseFuncBody(file, fn)
 			if !body.Ok {
 				return info, false, CheckErrBody, fileIndex, body.ErrorTok
@@ -184,7 +186,7 @@ func checkPackage(graph load.Graph, pkgIndex int) (PackageInfo, bool, int, int, 
 				return info, false, CheckErrScope, fileIndex, scopeTok
 			}
 			refs := buildFuncRefs(file, fileIndex, info, body, scope)
-			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Body: body, Scope: scope, Refs: refs})
+			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Signature: signature, Body: body, Scope: scope, Refs: refs})
 		}
 	}
 	return info, true, CheckOK, -1, -1

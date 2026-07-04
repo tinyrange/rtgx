@@ -149,6 +149,56 @@ start:
 	assertScopeName(t, scope, "start", NameLabel)
 }
 
+func TestCheckGraphFunctionSignatures(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type item struct{}
+
+func (it *item) run(left, right int, data []byte, callback func(int) string) (total int, ok bool) {
+	return 0, true
+}
+
+func unnamed(int, string) []byte {
+	return nil
+}
+`)},
+	})
+	prog := CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	root := prog.Packages[0]
+	bodyIndex := LookupFuncBody(root, "item.run")
+	if bodyIndex < 0 {
+		t.Fatalf("item.run body not found: %#v", root.Bodies)
+	}
+	body := root.Bodies[bodyIndex]
+	file := prog.Graph.Packages[0].Files[body.File].File
+	assertField(t, file, body.Signature.Receiver, "it", "*item")
+	assertField(t, file, body.Signature.Params, "left", "int")
+	assertField(t, file, body.Signature.Params, "right", "int")
+	assertField(t, file, body.Signature.Params, "data", "[]byte")
+	assertField(t, file, body.Signature.Params, "callback", "func(int) string")
+	assertField(t, file, body.Signature.Results, "total", "int")
+	assertField(t, file, body.Signature.Results, "ok", "bool")
+
+	unnamedIndex := LookupFuncBody(root, "unnamed")
+	if unnamedIndex < 0 {
+		t.Fatalf("unnamed body not found: %#v", root.Bodies)
+	}
+	unnamed := root.Bodies[unnamedIndex]
+	if len(unnamed.Signature.Params) != 2 {
+		t.Fatalf("unnamed params = %#v", unnamed.Signature.Params)
+	}
+	assertUnnamedField(t, file, unnamed.Signature.Params[0], "int")
+	assertUnnamedField(t, file, unnamed.Signature.Params[1], "string")
+	if len(unnamed.Signature.Results) != 1 {
+		t.Fatalf("unnamed results = %#v", unnamed.Signature.Results)
+	}
+	assertUnnamedField(t, file, unnamed.Signature.Results[0], "[]byte")
+}
+
 func TestCheckGraphFunctionReferences(t *testing.T) {
 	graph := testGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -401,6 +451,39 @@ func assertScopeName(t *testing.T, scope FuncScope, name string, kind int) {
 	if scope.Names[index].Kind != kind {
 		t.Fatalf("scope name %q kind = %d, want %d", name, scope.Names[index].Kind, kind)
 	}
+}
+
+func assertField(t *testing.T, file syntax.File, fields []Field, name string, typ string) {
+	t.Helper()
+	index := LookupField(fields, name)
+	if index < 0 {
+		t.Fatalf("field %q not found in %#v", name, fields)
+	}
+	if got := fieldTypeText(file, fields[index]); got != typ {
+		t.Fatalf("field %q type = %q, want %q", name, got, typ)
+	}
+}
+
+func assertUnnamedField(t *testing.T, file syntax.File, field Field, typ string) {
+	t.Helper()
+	if field.Name != "" || field.NameTok >= 0 {
+		t.Fatalf("field = %#v, want unnamed", field)
+	}
+	if got := fieldTypeText(file, field); got != typ {
+		t.Fatalf("unnamed field type = %q, want %q", got, typ)
+	}
+}
+
+func fieldTypeText(file syntax.File, field Field) string {
+	if field.TypeStart < 0 || field.TypeEnd <= field.TypeStart || field.TypeEnd > len(file.Tokens) {
+		return ""
+	}
+	start := file.Tokens[field.TypeStart].Start
+	end := file.Tokens[field.TypeEnd-1].End
+	if start < 0 || end < start || end > len(file.Src) {
+		return ""
+	}
+	return string(file.Src[start:end])
 }
 
 func assertBodyRef(t *testing.T, body FuncBody, name string, kind int) {
