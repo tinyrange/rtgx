@@ -91,6 +91,9 @@ type LocalDeclInfo struct {
 	ValueStart int
 	ValueEnd   int
 	Values     []ExprSpan
+	Refs       []NameRef
+	Selectors  []SelectorRef
+	Calls      []CallRef
 	Alias      bool
 }
 
@@ -247,7 +250,7 @@ func checkPackage(graph load.Graph, pkgIndex int, checked []PackageInfo) (Packag
 			refs := buildFuncRefs(file, fileIndex, info, body, scope)
 			selectors := buildFuncSelectors(file, fileIndex, info, checked, body, scope)
 			calls := buildFuncCalls(file, fileIndex, info, checked, body, scope)
-			locals := buildFuncLocalDecls(file, fileIndex, body, scope)
+			locals := buildFuncLocalDecls(file, fileIndex, info, checked, body, scope)
 			typeRefs := buildFuncTypeRefs(file, fileIndex, info, checked, signature, locals, scope)
 			assigns := buildFuncAssignments(file, fileIndex, info, body, scope)
 			returns := buildFuncReturns(file, body)

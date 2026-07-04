@@ -49,6 +49,35 @@ func LookupLocalDecl(body FuncBody, name string) int {
 	return -1
 }
 
+func LookupLocalDeclRef(decl LocalDeclInfo, name string, kind int) int {
+	for i := 0; i < len(decl.Refs); i++ {
+		if decl.Refs[i].Name == name && decl.Refs[i].Kind == kind {
+			return i
+		}
+	}
+	return -1
+}
+
+func LookupLocalDeclSelector(decl LocalDeclInfo, base string, name string, kind int) int {
+	for i := 0; i < len(decl.Selectors); i++ {
+		selector := decl.Selectors[i]
+		if selector.BaseName == base && selector.Name == name && selector.Kind == kind {
+			return i
+		}
+	}
+	return -1
+}
+
+func LookupLocalDeclCall(decl LocalDeclInfo, base string, name string, kind int) int {
+	for i := 0; i < len(decl.Calls); i++ {
+		call := decl.Calls[i]
+		if call.BaseName == base && call.Name == name && call.Kind == kind {
+			return i
+		}
+	}
+	return -1
+}
+
 func buildDeclInfo(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, decl syntax.TopDecl) DeclInfo {
 	name := tokenString(file, decl.NameTok)
 	out := DeclInfo{
@@ -86,7 +115,7 @@ func buildDeclInfo(file syntax.File, fileIndex int, info PackageInfo, checked []
 	return out
 }
 
-func buildFuncLocalDecls(file syntax.File, fileIndex int, body syntax.Body, scope FuncScope) []LocalDeclInfo {
+func buildFuncLocalDecls(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, body syntax.Body, scope FuncScope) []LocalDeclInfo {
 	var decls []LocalDeclInfo
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
@@ -104,7 +133,7 @@ func buildFuncLocalDecls(file syntax.File, fileIndex int, body syntax.Body, scop
 					break
 				}
 				specEnd := statementSpecEnd(file, j, end)
-				decls = appendLocalDeclSpec(decls, file, fileIndex, scope, kind, j, specEnd)
+				decls = appendLocalDeclSpec(decls, file, fileIndex, info, checked, scope, kind, j, specEnd)
 				if specEnd <= j {
 					j++
 				} else {
@@ -113,12 +142,12 @@ func buildFuncLocalDecls(file syntax.File, fileIndex int, body syntax.Body, scop
 			}
 			continue
 		}
-		decls = appendLocalDeclSpec(decls, file, fileIndex, scope, kind, start, end)
+		decls = appendLocalDeclSpec(decls, file, fileIndex, info, checked, scope, kind, start, end)
 	}
 	return decls
 }
 
-func appendLocalDeclSpec(decls []LocalDeclInfo, file syntax.File, fileIndex int, scope FuncScope, kind int, start int, end int) []LocalDeclInfo {
+func appendLocalDeclSpec(decls []LocalDeclInfo, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, kind int, start int, end int) []LocalDeclInfo {
 	start, end = trimDeclSpan(file, start, end)
 	if start < 0 || end <= start || start >= len(file.Tokens) || file.Tokens[start].Kind != syntax.TokenIdent {
 		return decls
@@ -142,6 +171,9 @@ func appendLocalDeclSpec(decls []LocalDeclInfo, file syntax.File, fileIndex int,
 		typeStart, typeEnd = trimDeclSpan(file, namesEnd, end)
 	}
 	values := splitExprList(file, valueSpanStart, valueSpanEnd)
+	refs := appendExprRefs(nil, file, fileIndex, info, scope, valueSpanStart, valueSpanEnd)
+	selectors := appendExprSelectors(nil, file, fileIndex, info, checked, scope, valueSpanStart, valueSpanEnd)
+	calls := appendExprCalls(nil, file, fileIndex, info, checked, scope, valueSpanStart, valueSpanEnd)
 	for i := 0; i < len(names); i++ {
 		name := tokenString(file, names[i])
 		if name == "_" {
@@ -158,6 +190,9 @@ func appendLocalDeclSpec(decls []LocalDeclInfo, file syntax.File, fileIndex int,
 			ValueStart: valueSpanStart,
 			ValueEnd:   valueSpanEnd,
 			Values:     values,
+			Refs:       refs,
+			Selectors:  selectors,
+			Calls:      calls,
 		})
 	}
 	return decls

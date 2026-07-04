@@ -258,6 +258,8 @@ func TestCheckGraphLocalDeclarations(t *testing.T) {
 	graph := testGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
 
+import lib "example.com/case/pkg/lib"
+
 func appMain() int {
 	const named = 1
 	const typed int = 2
@@ -265,27 +267,36 @@ func appMain() int {
 	var empty string
 	type alias = int
 	type local struct { value int }
+	var fromHelper = helper(left)
+	var imported = lib.Value(fromHelper)
 	var (
 		groupedA, groupedB = left, right
 		groupedC string
 	)
-	return left + right + groupedA + groupedB
+	return left + right + groupedA + groupedB + imported
 }
+
+func helper(value int) int { return value }
+`)},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
+
+func Value(value int) int { return value }
 `)},
 	})
 	prog := CheckGraph(graph)
 	if !prog.Ok {
 		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
 	}
-	root := prog.Packages[0]
+	rootPackage := len(prog.Packages) - 1
+	root := prog.Packages[rootPackage]
 	bodyIndex := LookupFuncBody(root, "appMain")
 	if bodyIndex < 0 {
 		t.Fatalf("appMain body not found: %#v", root.Bodies)
 	}
 	body := root.Bodies[bodyIndex]
-	file := prog.Graph.Packages[0].Files[body.File].File
-	if len(body.Locals) != 10 {
-		t.Fatalf("local decls = %#v, want 10", body.Locals)
+	file := prog.Graph.Packages[rootPackage].Files[body.File].File
+	if len(body.Locals) != 12 {
+		t.Fatalf("local decls = %#v, want 12", body.Locals)
 	}
 	assertLocalDeclSpan(t, file, body, "named", SymbolConst, "", "1", false)
 	assertLocalDeclSpan(t, file, body, "typed", SymbolConst, "int", "2", false)
@@ -294,6 +305,8 @@ func appMain() int {
 	assertLocalDeclSpan(t, file, body, "empty", SymbolVar, "string", "", false)
 	assertLocalDeclSpan(t, file, body, "alias", SymbolType, "int", "", true)
 	assertLocalDeclSpan(t, file, body, "local", SymbolType, "struct { value int }", "", false)
+	assertLocalDeclSpan(t, file, body, "fromHelper", SymbolVar, "", "helper(left)", false)
+	assertLocalDeclSpan(t, file, body, "imported", SymbolVar, "", "lib.Value(fromHelper)", false)
 	assertLocalDeclSpan(t, file, body, "groupedA", SymbolVar, "", "left, right", false)
 	assertLocalDeclSpan(t, file, body, "groupedB", SymbolVar, "", "left, right", false)
 	assertLocalDeclSpan(t, file, body, "groupedC", SymbolVar, "string", "", false)
@@ -303,9 +316,18 @@ func appMain() int {
 	assertLocalDeclValues(t, file, body, "right", []string{"named", "typed"})
 	assertLocalDeclValues(t, file, body, "empty", nil)
 	assertLocalDeclValues(t, file, body, "alias", nil)
+	assertLocalDeclValues(t, file, body, "fromHelper", []string{"helper(left)"})
+	assertLocalDeclValues(t, file, body, "imported", []string{"lib.Value(fromHelper)"})
 	assertLocalDeclValues(t, file, body, "groupedA", []string{"left", "right"})
 	assertLocalDeclValues(t, file, body, "groupedB", []string{"left", "right"})
 	assertLocalDeclValues(t, file, body, "groupedC", nil)
+	assertLocalDeclRef(t, body, "fromHelper", "helper", RefPackage)
+	assertLocalDeclRef(t, body, "fromHelper", "left", RefScope)
+	assertLocalDeclCall(t, prog, body, "fromHelper", "", "helper", CallPackage)
+	assertLocalDeclRef(t, body, "imported", "lib", RefImport)
+	assertLocalDeclRef(t, body, "imported", "fromHelper", RefScope)
+	assertLocalDeclSelector(t, prog, body, "imported", "lib", "Value")
+	assertLocalDeclCall(t, prog, body, "imported", "lib", "Value", CallImportSelector)
 }
 
 func TestCheckGraphTypes(t *testing.T) {
@@ -914,6 +936,57 @@ func assertLocalDeclValues(t *testing.T, file syntax.File, body FuncBody, name s
 		t.Fatalf("local decl %q not found in %#v", name, body.Locals)
 	}
 	assertExprSpans(t, file, body.Locals[index].Values, values)
+}
+
+func assertLocalDeclRef(t *testing.T, body FuncBody, declName string, refName string, kind int) {
+	t.Helper()
+	index := LookupLocalDecl(body, declName)
+	if index < 0 {
+		t.Fatalf("local decl %q not found in %#v", declName, body.Locals)
+	}
+	if LookupLocalDeclRef(body.Locals[index], refName, kind) < 0 {
+		t.Fatalf("local decl %q ref %q kind %d not found in %#v", declName, refName, kind, body.Locals[index].Refs)
+	}
+}
+
+func assertLocalDeclSelector(t *testing.T, prog Program, body FuncBody, declName string, base string, name string) {
+	t.Helper()
+	index := LookupLocalDecl(body, declName)
+	if index < 0 {
+		t.Fatalf("local decl %q not found in %#v", declName, body.Locals)
+	}
+	selectorIndex := LookupLocalDeclSelector(body.Locals[index], base, name, SelectorImport)
+	if selectorIndex < 0 {
+		t.Fatalf("local decl %q selector %s.%s not found in %#v", declName, base, name, body.Locals[index].Selectors)
+	}
+	selector := body.Locals[index].Selectors[selectorIndex]
+	if selector.Package < 0 || selector.Package >= len(prog.Packages) {
+		t.Fatalf("local decl %q selector package = %d in %#v", declName, selector.Package, prog.Packages)
+	}
+	if selector.Symbol < 0 || selector.Symbol >= len(prog.Packages[selector.Package].Symbols) || prog.Packages[selector.Package].Symbols[selector.Symbol].Name != name {
+		t.Fatalf("local decl %q selector symbol = %d in %#v", declName, selector.Symbol, prog.Packages[selector.Package].Symbols)
+	}
+}
+
+func assertLocalDeclCall(t *testing.T, prog Program, body FuncBody, declName string, base string, name string, kind int) {
+	t.Helper()
+	index := LookupLocalDecl(body, declName)
+	if index < 0 {
+		t.Fatalf("local decl %q not found in %#v", declName, body.Locals)
+	}
+	callIndex := LookupLocalDeclCall(body.Locals[index], base, name, kind)
+	if callIndex < 0 {
+		t.Fatalf("local decl %q call %s.%s kind %d not found in %#v", declName, base, name, kind, body.Locals[index].Calls)
+	}
+	call := body.Locals[index].Calls[callIndex]
+	if kind == CallPackage || kind == CallImportSelector {
+		if call.Package < 0 || call.Package >= len(prog.Packages) {
+			t.Fatalf("local decl %q call package = %d in %#v", declName, call.Package, prog.Packages)
+		}
+		if call.Symbol < 0 || call.Symbol >= len(prog.Packages[call.Package].Symbols) || prog.Packages[call.Package].Symbols[call.Symbol].Name != name {
+			t.Fatalf("local decl %q call symbol = %d in %#v", declName, call.Symbol, prog.Packages[call.Package].Symbols)
+		}
+	}
 }
 
 func assertType(t *testing.T, file syntax.File, info PackageInfo, name string, kind int, alias bool, typ string) {
