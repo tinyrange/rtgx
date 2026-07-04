@@ -38,6 +38,7 @@ type PackageInfo struct {
 	Symbols []Symbol
 	Imports []Import
 	Decls   []DeclInfo
+	Types   []TypeInfo
 	Bodies  []FuncBody
 }
 
@@ -69,6 +70,7 @@ type DeclInfo struct {
 	TypeEnd    int
 	ValueStart int
 	ValueEnd   int
+	Alias      bool
 }
 
 type FuncBody struct {
@@ -186,6 +188,14 @@ func checkPackage(graph load.Graph, pkgIndex int) (PackageInfo, bool, int, int, 
 		}
 	}
 	sortDecls(info.Decls)
+	for i := 0; i < len(info.Decls); i++ {
+		decl := info.Decls[i]
+		if decl.Kind == SymbolType {
+			file := pkg.Files[decl.File].File
+			info.Types = append(info.Types, buildTypeInfo(file, decl, i))
+		}
+	}
+	sortTypes(info.Types)
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Funcs); i++ {

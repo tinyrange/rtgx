@@ -25,7 +25,12 @@ func buildDeclInfo(file syntax.File, fileIndex int, info PackageInfo, decl synta
 		ValueEnd:   -1,
 	}
 	if decl.Kind == syntax.TokenType {
-		out.TypeStart, out.TypeEnd = trimDeclSpan(file, decl.NameTok+1, decl.EndTok)
+		typeStart := decl.NameTok + 1
+		if tokenTextIs(file, typeStart, "=") {
+			out.Alias = true
+			typeStart++
+		}
+		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, decl.EndTok)
 		return out
 	}
 	typeStart := declNameListEnd(file, decl)

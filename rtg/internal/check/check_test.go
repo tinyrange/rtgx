@@ -230,6 +230,51 @@ func later() int { return 4 }
 	assertDeclSpan(t, file, root, "item", SymbolType, "struct { value int }", "")
 }
 
+func TestCheckGraphTypes(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type item struct {
+	value int
+	left, right string
+	data []byte "json:\"data\""
+	Embedded
+	*Pointer
+}
+
+type alias = item
+type table map[string]int
+type values []int
+type fixed [4]int
+type ptr *item
+type callback func(int) string
+type face interface { Value() int }
+`)},
+	})
+	prog := CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	root := prog.Packages[0]
+	file := prog.Graph.Packages[0].Files[0].File
+	assertType(t, file, root, "item", TypeStruct, false, "struct {\n\tvalue int\n\tleft, right string\n\tdata []byte \"json:\\\"data\\\"\"\n\tEmbedded\n\t*Pointer\n}")
+	assertType(t, file, root, "alias", TypeNamed, true, "item")
+	assertType(t, file, root, "table", TypeMap, false, "map[string]int")
+	assertType(t, file, root, "values", TypeSlice, false, "[]int")
+	assertType(t, file, root, "fixed", TypeArray, false, "[4]int")
+	assertType(t, file, root, "ptr", TypePointer, false, "*item")
+	assertType(t, file, root, "callback", TypeFunc, false, "func(int) string")
+	assertType(t, file, root, "face", TypeInterface, false, "interface { Value() int }")
+
+	item := root.Types[LookupType(root, "item")]
+	assertField(t, file, item.Fields, "value", "int")
+	assertField(t, file, item.Fields, "left", "string")
+	assertField(t, file, item.Fields, "right", "string")
+	assertField(t, file, item.Fields, "data", "[]byte")
+	assertStructUnnamedField(t, file, item.Fields, "Embedded")
+	assertStructUnnamedField(t, file, item.Fields, "*Pointer")
+}
+
 func TestCheckGraphFunctionReferences(t *testing.T) {
 	graph := testGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -528,6 +573,37 @@ func assertDeclSpan(t *testing.T, file syntax.File, info PackageInfo, name strin
 	if got := spanText(file, decl.ValueStart, decl.ValueEnd); got != value {
 		t.Fatalf("decl %q value = %q, want %q", name, got, value)
 	}
+}
+
+func assertType(t *testing.T, file syntax.File, info PackageInfo, name string, kind int, alias bool, typ string) {
+	t.Helper()
+	index := LookupType(info, name)
+	if index < 0 {
+		t.Fatalf("type %q not found in %#v", name, info.Types)
+	}
+	tp := info.Types[index]
+	if tp.Kind != kind {
+		t.Fatalf("type %q kind = %d, want %d", name, tp.Kind, kind)
+	}
+	if tp.Alias != alias {
+		t.Fatalf("type %q alias = %v, want %v", name, tp.Alias, alias)
+	}
+	if tp.Symbol < 0 || tp.Symbol >= len(info.Symbols) || info.Symbols[tp.Symbol].Name != name {
+		t.Fatalf("type %q symbol = %d in %#v", name, tp.Symbol, info.Symbols)
+	}
+	if got := spanText(file, tp.TypeStart, tp.TypeEnd); got != typ {
+		t.Fatalf("type %q span = %q, want %q", name, got, typ)
+	}
+}
+
+func assertStructUnnamedField(t *testing.T, file syntax.File, fields []Field, typ string) {
+	t.Helper()
+	for i := 0; i < len(fields); i++ {
+		if fields[i].Name == "" && fields[i].NameTok < 0 && fieldTypeText(file, fields[i]) == typ {
+			return
+		}
+	}
+	t.Fatalf("unnamed field type %q not found in %#v", typ, fields)
 }
 
 func spanText(file syntax.File, startTok int, endTok int) string {
