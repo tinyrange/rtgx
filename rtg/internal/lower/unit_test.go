@@ -189,6 +189,9 @@ func appMain() int {
 	if len(result.Program.Calls) != 2 {
 		t.Fatalf("calls = %#v, want 2", result.Program.Calls)
 	}
+	if len(result.Program.Refs) == 0 {
+		t.Fatalf("refs = %#v, want refs", result.Program.Refs)
+	}
 	global := findUnitDecl(result.Program, "global")
 	picked := findUnitDecl(result.Program, "picked")
 	appMain := findUnitFunc(result.Program, "appMain")
@@ -199,6 +202,8 @@ func appMain() int {
 	assertUnitComposite(t, result.Program, unit.OwnerDecl, global, "[]int", []string{"1", "2", "3"})
 	assertUnitIndex(t, result.Program, unit.OwnerDecl, picked, "global", "1")
 	assertUnitCall(t, result.Program, unit.OwnerDecl, picked, unit.CallPackage, "", "choose", []string{"global[1]"})
+	assertUnitRef(t, result.Program, unit.OwnerDecl, picked, unit.RefPackage, "choose")
+	assertUnitRef(t, result.Program, unit.OwnerDecl, picked, unit.RefPackage, "global")
 	assertUnitComposite(t, result.Program, unit.OwnerFunc, appMain, "[]item", []string{"{value: global[0]}"})
 	assertUnitComposite(t, result.Program, unit.OwnerFunc, appMain, "item", []string{"value: picked"})
 	assertUnitIndex(t, result.Program, unit.OwnerFunc, appMain, "global", "0")
@@ -207,6 +212,8 @@ func appMain() int {
 	assertUnitReturn(t, result.Program, choose, []string{"v"})
 	assertUnitReturn(t, result.Program, appMain, []string{"choose(local[0].value)"})
 	assertUnitCall(t, result.Program, unit.OwnerFunc, appMain, unit.CallPackage, "", "choose", []string{"local[0].value"})
+	assertUnitRef(t, result.Program, unit.OwnerFunc, appMain, unit.RefPackage, "choose")
+	assertUnitRef(t, result.Program, unit.OwnerFunc, appMain, unit.RefScope, "local")
 
 	data, ok := unit.Marshal(result.Program)
 	if !ok {
@@ -224,6 +231,9 @@ func appMain() int {
 	}
 	if len(decoded.Calls) != len(result.Program.Calls) {
 		t.Fatalf("decoded calls = %d, want %d", len(decoded.Calls), len(result.Program.Calls))
+	}
+	if len(decoded.Refs) != len(result.Program.Refs) || len(decoded.Selectors) != len(result.Program.Selectors) {
+		t.Fatalf("decoded resolution = %d/%d, want %d/%d", len(decoded.Refs), len(decoded.Selectors), len(result.Program.Refs), len(result.Program.Selectors))
 	}
 }
 
@@ -495,6 +505,17 @@ func assertUnitCall(t *testing.T, program unit.Program, ownerKind int, ownerInde
 		}
 	}
 	t.Fatalf("call owner=%d/%d %s.%s args=%v not found in %#v", ownerKind, ownerIndex, base, callee, args, program.Calls)
+}
+
+func assertUnitRef(t *testing.T, program unit.Program, ownerKind int, ownerIndex int, kind int, name string) {
+	t.Helper()
+	for i := 0; i < len(program.Refs); i++ {
+		ref := program.Refs[i]
+		if ref.OwnerKind == ownerKind && ref.OwnerIndex == ownerIndex && ref.Kind == kind && tokenTextUnit(program, ref.Token) == name {
+			return
+		}
+	}
+	t.Fatalf("ref owner=%d/%d kind=%d name=%s not found in %#v", ownerKind, ownerIndex, kind, name, program.Refs)
 }
 
 func tokenTextUnit(program unit.Program, tok int) string {

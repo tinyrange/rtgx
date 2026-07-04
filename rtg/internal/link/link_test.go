@@ -173,6 +173,9 @@ func Value(i int) int {
 	if len(program.Calls) != 1 {
 		t.Fatalf("linked calls = %#v, want 1", program.Calls)
 	}
+	if len(program.Selectors) != 1 {
+		t.Fatalf("linked selectors = %#v, want 1", program.Selectors)
+	}
 	composite := program.Composites[0]
 	if composite.OwnerKind != unit.OwnerDecl || composite.OwnerIndex != values || linkedSpanText(program, composite.TypeStart, composite.TypeEnd) != "[]int" {
 		t.Fatalf("linked composite = %#v, owner decl %d", composite, values)
@@ -206,6 +209,23 @@ func Value(i int) int {
 		len(call.Args) != 1 ||
 		linkedSpanText(program, call.Args[0].StartTok, call.Args[0].EndTok) != "1" {
 		t.Fatalf("linked call = %#v, owner func %d", call, appMain)
+	}
+	selector := program.Selectors[0]
+	if selector.OwnerKind != unit.OwnerFunc || selector.OwnerIndex != appMain || selector.Kind != unit.SelectorImport ||
+		linkedTokenText(program, selector.BaseTok) != "lib" ||
+		linkedTokenText(program, selector.NameTok) != "Value" ||
+		selector.BaseKind != unit.RefImport {
+		t.Fatalf("linked selector = %#v, owner func %d", selector, appMain)
+	}
+	foundLibRef := false
+	for i := 0; i < len(program.Refs); i++ {
+		ref := program.Refs[i]
+		if ref.OwnerKind == unit.OwnerFunc && ref.OwnerIndex == appMain && ref.Kind == unit.RefImport && linkedTokenText(program, ref.Token) == "lib" {
+			foundLibRef = true
+		}
+	}
+	if !foundLibRef {
+		t.Fatalf("linked lib ref not found in %#v", program.Refs)
 	}
 }
 

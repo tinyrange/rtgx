@@ -173,6 +173,20 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		}
 		dst.Calls = append(dst.Calls, call)
 	}
+	for i := 0; i < len(src.Refs); i++ {
+		ref, ok := mapRef(src.Refs[i], oldToNew, finalEOF, declOffset, funcOffset)
+		if !ok {
+			return false
+		}
+		dst.Refs = append(dst.Refs, ref)
+	}
+	for i := 0; i < len(src.Selectors); i++ {
+		selector, ok := mapSelector(src.Selectors[i], oldToNew, finalEOF, declOffset, funcOffset)
+		if !ok {
+			return false
+		}
+		dst.Selectors = append(dst.Selectors, selector)
+	}
 	if hasNext && (len(src.Text) == 0 || src.Text[len(src.Text)-1] != '\n') {
 		dst.Text = append(dst.Text, '\n')
 	}
@@ -264,6 +278,28 @@ func mapCall(call unit.Call, oldToNew []int, eof int, declOffset int, funcOffset
 		call.Args[i] = mapExprSpan(call.Args[i], oldToNew, eof)
 	}
 	return call, true
+}
+
+func mapRef(ref unit.NameRef, oldToNew []int, eof int, declOffset int, funcOffset int) (unit.NameRef, bool) {
+	ownerIndex, ok := mapOwner(ref.OwnerKind, ref.OwnerIndex, declOffset, funcOffset)
+	if !ok {
+		return ref, false
+	}
+	ref.OwnerIndex = ownerIndex
+	ref.Token = mapToken(oldToNew, ref.Token, eof)
+	return ref, true
+}
+
+func mapSelector(selector unit.Selector, oldToNew []int, eof int, declOffset int, funcOffset int) (unit.Selector, bool) {
+	ownerIndex, ok := mapOwner(selector.OwnerKind, selector.OwnerIndex, declOffset, funcOffset)
+	if !ok {
+		return selector, false
+	}
+	selector.OwnerIndex = ownerIndex
+	selector.BaseTok = mapToken(oldToNew, selector.BaseTok, eof)
+	selector.DotTok = mapToken(oldToNew, selector.DotTok, eof)
+	selector.NameTok = mapToken(oldToNew, selector.NameTok, eof)
+	return selector, true
 }
 
 func mapExprSpan(span unit.ExprSpan, oldToNew []int, eof int) unit.ExprSpan {

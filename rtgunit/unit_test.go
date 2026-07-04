@@ -135,6 +135,27 @@ func appMain() int { return values[0] }
 		ArgsEnd:    20,
 		Args:       []ExprSpan{{StartTok: 19, EndTok: 20}},
 	}}
+	program.Refs = []NameRef{{
+		OwnerKind:  OwnerFunc,
+		OwnerIndex: 0,
+		Kind:       RefPackage,
+		Token:      17,
+		Index:      0,
+		Package:    0,
+	}}
+	program.Selectors = []Selector{{
+		OwnerKind:   OwnerFunc,
+		OwnerIndex:  0,
+		Kind:        SelectorImport,
+		BaseTok:     17,
+		DotTok:      18,
+		NameTok:     19,
+		BaseKind:    RefImport,
+		BaseIndex:   0,
+		BasePackage: 0,
+		Package:     0,
+		Symbol:      0,
+	}}
 	data, err := Marshal(program)
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
@@ -167,6 +188,12 @@ func appMain() int { return values[0] }
 	}
 	if len(decoded.Calls) != 1 || decoded.Calls[0].Kind != CallPackage || decoded.Calls[0].Args[0] != program.Calls[0].Args[0] {
 		t.Fatalf("decoded calls = %#v, want %#v", decoded.Calls, program.Calls)
+	}
+	if len(decoded.Refs) != 1 || decoded.Refs[0] != program.Refs[0] {
+		t.Fatalf("decoded refs = %#v, want %#v", decoded.Refs, program.Refs)
+	}
+	if len(decoded.Selectors) != 1 || decoded.Selectors[0] != program.Selectors[0] {
+		t.Fatalf("decoded selectors = %#v, want %#v", decoded.Selectors, program.Selectors)
 	}
 }
 

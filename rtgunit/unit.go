@@ -24,6 +24,8 @@ const (
 	TagAssigns = uint16(13)
 	TagReturns = uint16(14)
 	TagCalls   = uint16(15)
+	TagRefs    = uint16(16)
+	TagSels    = uint16(17)
 )
 
 const (
@@ -170,6 +172,43 @@ type Call struct {
 	Args       []ExprSpan
 }
 
+const (
+	RefUnknown = iota
+	RefScope
+	RefPackage
+	RefImport
+	RefBuiltin
+	RefLabel
+)
+
+type NameRef struct {
+	OwnerKind  int
+	OwnerIndex int
+	Kind       int
+	Token      int
+	Index      int
+	Package    int
+}
+
+const (
+	SelectorUnknown = iota
+	SelectorImport
+)
+
+type Selector struct {
+	OwnerKind   int
+	OwnerIndex  int
+	Kind        int
+	BaseTok     int
+	DotTok      int
+	NameTok     int
+	BaseKind    int
+	BaseIndex   int
+	BasePackage int
+	Package     int
+	Symbol      int
+}
+
 type Program struct {
 	Package    string
 	Text       []byte
@@ -181,6 +220,8 @@ type Program struct {
 	Assigns    []Assignment
 	Returns    []Return
 	Calls      []Call
+	Refs       []NameRef
+	Selectors  []Selector
 }
 
 type sourceToken struct {
@@ -242,6 +283,8 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagAssigns, encodeAssignments(program.Assigns)),
 		NewNode(TagReturns, encodeReturns(program.Returns)),
 		NewNode(TagCalls, encodeCalls(program.Calls)),
+		NewNode(TagRefs, encodeRefs(program.Refs)),
+		NewNode(TagSels, encodeSelectors(program.Selectors)),
 	)
 
 	var out bytes.Buffer
@@ -284,11 +327,15 @@ func Unmarshal(data []byte) (Program, error) {
 	var assignData []byte
 	var returnData []byte
 	var callData []byte
+	var refData []byte
+	var selectorData []byte
 	seenIndexes := false
 	seenComps := false
 	seenAssigns := false
 	seenReturns := false
 	seenCalls := false
+	seenRefs := false
+	seenSelectors := false
 	pos := rootStart
 	for pos < rootEnd {
 		if pos+6 > rootEnd {
@@ -351,6 +398,18 @@ func Unmarshal(data []byte) (Program, error) {
 			}
 			seenCalls = true
 			callData = payload
+		case TagRefs:
+			if seenRefs {
+				return program, fmt.Errorf("duplicate ref table")
+			}
+			seenRefs = true
+			refData = payload
+		case TagSels:
+			if seenSelectors {
+				return program, fmt.Errorf("duplicate selector table")
+			}
+			seenSelectors = true
+			selectorData = payload
 		default:
 			return program, fmt.Errorf("unknown unit child tag %d", tag)
 		}
@@ -401,6 +460,20 @@ func Unmarshal(data []byte) (Program, error) {
 			return program, err
 		}
 		program.Calls = calls
+	}
+	if seenRefs {
+		refs, err := decodeRefs(refData)
+		if err != nil {
+			return program, err
+		}
+		program.Refs = refs
+	}
+	if seenSelectors {
+		selectors, err := decodeSelectors(selectorData)
+		if err != nil {
+			return program, err
+		}
+		program.Selectors = selectors
 	}
 	if len(program.Tokens) == 0 {
 		return program, fmt.Errorf("unit missing token table")
@@ -1308,6 +1381,39 @@ func encodeCalls(calls []Call) []byte {
 	return out
 }
 
+func encodeRefs(refs []NameRef) []byte {
+	var out []byte
+	out = appendVarint(out, len(refs))
+	for _, ref := range refs {
+		out = appendVarint(out, ref.OwnerKind)
+		out = appendVarint(out, ref.OwnerIndex)
+		out = appendVarint(out, ref.Kind)
+		out = appendVarint(out, ref.Token)
+		out = appendNullable(out, ref.Index)
+		out = appendNullable(out, ref.Package)
+	}
+	return out
+}
+
+func encodeSelectors(selectors []Selector) []byte {
+	var out []byte
+	out = appendVarint(out, len(selectors))
+	for _, selector := range selectors {
+		out = appendVarint(out, selector.OwnerKind)
+		out = appendVarint(out, selector.OwnerIndex)
+		out = appendVarint(out, selector.Kind)
+		out = appendVarint(out, selector.BaseTok)
+		out = appendVarint(out, selector.DotTok)
+		out = appendVarint(out, selector.NameTok)
+		out = appendVarint(out, selector.BaseKind)
+		out = appendNullable(out, selector.BaseIndex)
+		out = appendNullable(out, selector.BasePackage)
+		out = appendNullable(out, selector.Package)
+		out = appendNullable(out, selector.Symbol)
+	}
+	return out
+}
+
 func appendSpanList(out []byte, spans []ExprSpan) []byte {
 	out = appendVarint(out, len(spans))
 	for _, span := range spans {
@@ -1793,6 +1899,144 @@ func decodeCalls(data []byte) ([]Call, error) {
 	return calls, nil
 }
 
+func decodeRefs(data []byte) ([]NameRef, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid ref count")
+	}
+	pos = next
+	refs := make([]NameRef, 0, count)
+	for i := 0; i < count; i++ {
+		ownerKind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid ref %d owner kind", i)
+		}
+		pos = n
+		ownerIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid ref %d owner index", i)
+		}
+		pos = n
+		kind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid ref %d kind", i)
+		}
+		pos = n
+		token, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid ref %d token", i)
+		}
+		pos = n
+		index, n, ok := readNullable(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid ref %d index", i)
+		}
+		pos = n
+		pkg, n, ok := readNullable(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid ref %d package", i)
+		}
+		pos = n
+		refs = append(refs, NameRef{
+			OwnerKind:  ownerKind,
+			OwnerIndex: ownerIndex,
+			Kind:       kind,
+			Token:      token,
+			Index:      index,
+			Package:    pkg,
+		})
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing ref data")
+	}
+	return refs, nil
+}
+
+func decodeSelectors(data []byte) ([]Selector, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid selector count")
+	}
+	pos = next
+	selectors := make([]Selector, 0, count)
+	for i := 0; i < count; i++ {
+		ownerKind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid selector %d owner kind", i)
+		}
+		pos = n
+		ownerIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid selector %d owner index", i)
+		}
+		pos = n
+		kind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid selector %d kind", i)
+		}
+		pos = n
+		baseTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid selector %d base", i)
+		}
+		pos = n
+		dotTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid selector %d dot", i)
+		}
+		pos = n
+		nameTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid selector %d name", i)
+		}
+		pos = n
+		baseKind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid selector %d base kind", i)
+		}
+		pos = n
+		baseIndex, n, ok := readNullable(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid selector %d base index", i)
+		}
+		pos = n
+		basePackage, n, ok := readNullable(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid selector %d base package", i)
+		}
+		pos = n
+		pkg, n, ok := readNullable(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid selector %d package", i)
+		}
+		pos = n
+		symbol, n, ok := readNullable(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid selector %d symbol", i)
+		}
+		pos = n
+		selectors = append(selectors, Selector{
+			OwnerKind:   ownerKind,
+			OwnerIndex:  ownerIndex,
+			Kind:        kind,
+			BaseTok:     baseTok,
+			DotTok:      dotTok,
+			NameTok:     nameTok,
+			BaseKind:    baseKind,
+			BaseIndex:   baseIndex,
+			BasePackage: basePackage,
+			Package:     pkg,
+			Symbol:      symbol,
+		})
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing selector data")
+	}
+	return selectors, nil
+}
+
 func readSpanList(data []byte, pos int) ([]ExprSpan, int, bool) {
 	count, n, ok := readVarint(data, pos)
 	if !ok {
@@ -1814,6 +2058,18 @@ func readSpanList(data []byte, pos int) ([]ExprSpan, int, bool) {
 		spans = append(spans, ExprSpan{StartTok: startTok, EndTok: startTok + tokCount})
 	}
 	return spans, pos, true
+}
+
+func appendNullable(out []byte, v int) []byte {
+	return appendVarint(out, v+1)
+}
+
+func readNullable(data []byte, pos int) (int, int, bool) {
+	value, next, ok := readVarint(data, pos)
+	if !ok {
+		return 0, pos, false
+	}
+	return value - 1, next, true
 }
 
 func appendVarint(out []byte, v int) []byte {

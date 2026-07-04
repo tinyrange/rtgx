@@ -276,6 +276,9 @@ func (b *unitBuilder) addCheckedDecls(info check.PackageInfo, files []fileTokens
 		if !b.addDeclCalls(declInfo, files[declInfo.File].oldToNew, ownerIndex) {
 			return false
 		}
+		if !b.addDeclResolution(declInfo, files[declInfo.File].oldToNew, ownerIndex) {
+			return false
+		}
 	}
 	return true
 }
@@ -308,6 +311,9 @@ func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens
 			return false
 		}
 		if !b.addBodyCalls(body, files[body.File].oldToNew, ownerIndex) {
+			return false
+		}
+		if !b.addBodyResolution(body, files[body.File].oldToNew, ownerIndex) {
 			return false
 		}
 	}
@@ -366,6 +372,26 @@ func (b *unitBuilder) addDeclCalls(decl check.DeclInfo, oldToNew []int, ownerInd
 	return true
 }
 
+func (b *unitBuilder) addDeclResolution(decl check.DeclInfo, oldToNew []int, ownerIndex int) bool {
+	for i := 0; i < len(decl.Refs); i++ {
+		ref, ok := mapNameRef(decl.Refs[i], oldToNew, b.finalEOF, unit.OwnerDecl, ownerIndex)
+		if !ok {
+			b.setErr(EmitErrCheck, decl.File, decl.Token)
+			return false
+		}
+		b.program.Refs = append(b.program.Refs, ref)
+	}
+	for i := 0; i < len(decl.Selectors); i++ {
+		selector, ok := mapSelectorRef(decl.Selectors[i], oldToNew, b.finalEOF, unit.OwnerDecl, ownerIndex)
+		if !ok {
+			b.setErr(EmitErrCheck, decl.File, decl.Token)
+			return false
+		}
+		b.program.Selectors = append(b.program.Selectors, selector)
+	}
+	return true
+}
+
 func (b *unitBuilder) addBodyFlow(body check.FuncBody, oldToNew []int, funcIndex int) bool {
 	for i := 0; i < len(body.Assigns); i++ {
 		assign, ok := mapAssignment(body.Assigns[i], oldToNew, b.finalEOF, funcIndex)
@@ -382,6 +408,26 @@ func (b *unitBuilder) addBodyFlow(body check.FuncBody, oldToNew []int, funcIndex
 			return false
 		}
 		b.program.Returns = append(b.program.Returns, ret)
+	}
+	return true
+}
+
+func (b *unitBuilder) addBodyResolution(body check.FuncBody, oldToNew []int, ownerIndex int) bool {
+	for i := 0; i < len(body.Refs); i++ {
+		ref, ok := mapNameRef(body.Refs[i], oldToNew, b.finalEOF, unit.OwnerFunc, ownerIndex)
+		if !ok {
+			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
+			return false
+		}
+		b.program.Refs = append(b.program.Refs, ref)
+	}
+	for i := 0; i < len(body.Selectors); i++ {
+		selector, ok := mapSelectorRef(body.Selectors[i], oldToNew, b.finalEOF, unit.OwnerFunc, ownerIndex)
+		if !ok {
+			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
+			return false
+		}
+		b.program.Selectors = append(b.program.Selectors, selector)
 	}
 	return true
 }
@@ -448,6 +494,42 @@ func mapCompositeExpr(composite check.CompositeExpr, oldToNew []int, eof int, ow
 			return out, false
 		}
 		out.Elems = append(out.Elems, mapped)
+	}
+	return out, true
+}
+
+func mapNameRef(ref check.NameRef, oldToNew []int, eof int, ownerKind int, ownerIndex int) (unit.NameRef, bool) {
+	out := unit.NameRef{
+		OwnerKind:  ownerKind,
+		OwnerIndex: ownerIndex,
+		Kind:       ref.Kind,
+		Token:      mapToken(oldToNew, ref.Token, eof),
+		Index:      ref.Index,
+		Package:    ref.Package,
+	}
+	if ownerIndex < 0 || out.Token < 0 || out.Index < -1 || out.Package < -1 {
+		return out, false
+	}
+	return out, true
+}
+
+func mapSelectorRef(selector check.SelectorRef, oldToNew []int, eof int, ownerKind int, ownerIndex int) (unit.Selector, bool) {
+	out := unit.Selector{
+		OwnerKind:   ownerKind,
+		OwnerIndex:  ownerIndex,
+		Kind:        selector.Kind,
+		BaseTok:     mapToken(oldToNew, selector.BaseToken, eof),
+		DotTok:      mapToken(oldToNew, selector.DotToken, eof),
+		NameTok:     mapToken(oldToNew, selector.NameToken, eof),
+		BaseKind:    selector.BaseRef.Kind,
+		BaseIndex:   selector.BaseRef.Index,
+		BasePackage: selector.BaseRef.Package,
+		Package:     selector.Package,
+		Symbol:      selector.Symbol,
+	}
+	if ownerIndex < 0 || out.BaseTok < 0 || out.DotTok < 0 || out.NameTok < 0 ||
+		out.BaseIndex < -1 || out.BasePackage < -1 || out.Package < -1 || out.Symbol < -1 {
+		return out, false
 	}
 	return out, true
 }

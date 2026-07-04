@@ -17,6 +17,8 @@ const (
 	TagAssigns = 13
 	TagReturns = 14
 	TagCalls   = 15
+	TagRefs    = 16
+	TagSels    = 17
 )
 
 const (
@@ -162,6 +164,43 @@ type Call struct {
 	Args       []ExprSpan
 }
 
+const (
+	RefUnknown = iota
+	RefScope
+	RefPackage
+	RefImport
+	RefBuiltin
+	RefLabel
+)
+
+type NameRef struct {
+	OwnerKind  int
+	OwnerIndex int
+	Kind       int
+	Token      int
+	Index      int
+	Package    int
+}
+
+const (
+	SelectorUnknown = iota
+	SelectorImport
+)
+
+type Selector struct {
+	OwnerKind   int
+	OwnerIndex  int
+	Kind        int
+	BaseTok     int
+	DotTok      int
+	NameTok     int
+	BaseKind    int
+	BaseIndex   int
+	BasePackage int
+	Package     int
+	Symbol      int
+}
+
 type Program struct {
 	Package    string
 	Text       []byte
@@ -173,6 +212,8 @@ type Program struct {
 	Assigns    []Assignment
 	Returns    []Return
 	Calls      []Call
+	Refs       []NameRef
+	Selectors  []Selector
 }
 
 func Marshal(program Program) ([]byte, bool) {
@@ -211,6 +252,14 @@ func Marshal(program Program) ([]byte, bool) {
 	if !ok {
 		return nil, false
 	}
+	refData, ok := encodeRefs(program.Refs, len(program.Tokens), len(program.Decls), len(program.Funcs))
+	if !ok {
+		return nil, false
+	}
+	selectorData, ok := encodeSelectors(program.Selectors, len(program.Tokens), len(program.Decls), len(program.Funcs))
+	if !ok {
+		return nil, false
+	}
 	var root []byte
 	root = appendNode(root, TagPackage, []byte(program.Package))
 	root = appendNode(root, TagText, program.Text)
@@ -222,6 +271,8 @@ func Marshal(program Program) ([]byte, bool) {
 	root = appendNode(root, TagAssigns, assignData)
 	root = appendNode(root, TagReturns, returnData)
 	root = appendNode(root, TagCalls, callData)
+	root = appendNode(root, TagRefs, refData)
+	root = appendNode(root, TagSels, selectorData)
 
 	out := make([]byte, 0, 14+len(root))
 	out = append(out, 'R', 'T', 'G', 'U')
@@ -258,6 +309,8 @@ func Unmarshal(data []byte) (Program, bool) {
 	assignData := []byte{}
 	returnData := []byte{}
 	callData := []byte{}
+	refData := []byte{}
+	selectorData := []byte{}
 	seenPackage := false
 	seenText := false
 	seenTokens := false
@@ -268,6 +321,8 @@ func Unmarshal(data []byte) (Program, bool) {
 	seenAssigns := false
 	seenReturns := false
 	seenCalls := false
+	seenRefs := false
+	seenSelectors := false
 	pos := rootStart
 	for pos < rootEnd {
 		if pos+6 > rootEnd {
@@ -349,6 +404,18 @@ func Unmarshal(data []byte) (Program, bool) {
 			}
 			seenCalls = true
 			callData = payload
+		} else if tag == TagRefs {
+			if seenRefs {
+				return program, false
+			}
+			seenRefs = true
+			refData = payload
+		} else if tag == TagSels {
+			if seenSelectors {
+				return program, false
+			}
+			seenSelectors = true
+			selectorData = payload
 		} else {
 			return program, false
 		}
@@ -399,6 +466,20 @@ func Unmarshal(data []byte) (Program, bool) {
 			return program, false
 		}
 		program.Calls = calls
+	}
+	if seenRefs {
+		refs, ok := decodeRefs(refData, len(program.Tokens), len(program.Decls), len(program.Funcs))
+		if !ok {
+			return program, false
+		}
+		program.Refs = refs
+	}
+	if seenSelectors {
+		selectors, ok := decodeSelectors(selectorData, len(program.Tokens), len(program.Decls), len(program.Funcs))
+		if !ok {
+			return program, false
+		}
+		program.Selectors = selectors
 	}
 	return program, true
 }
@@ -1157,6 +1238,200 @@ func decodeCalls(data []byte, tokenLimit int, declLimit int, funcLimit int) ([]C
 	return calls, true
 }
 
+func encodeRefs(refs []NameRef, tokenLimit int, declLimit int, funcLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(refs)*7+1)
+	out = appendVarint(out, len(refs))
+	for i := 0; i < len(refs); i++ {
+		ref := refs[i]
+		if !validOwner(ref.OwnerKind, ref.OwnerIndex, declLimit, funcLimit) ||
+			ref.Kind < RefUnknown || ref.Kind > RefLabel ||
+			!validToken(tokenLimit, ref.Token) ||
+			!validNullable(ref.Index) ||
+			!validNullable(ref.Package) {
+			return nil, false
+		}
+		out = appendVarint(out, ref.OwnerKind)
+		out = appendVarint(out, ref.OwnerIndex)
+		out = appendVarint(out, ref.Kind)
+		out = appendVarint(out, ref.Token)
+		out = appendNullable(out, ref.Index)
+		out = appendNullable(out, ref.Package)
+	}
+	return out, true
+}
+
+func decodeRefs(data []byte, tokenLimit int, declLimit int, funcLimit int) ([]NameRef, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	refs := make([]NameRef, 0, count)
+	for i := 0; i < count; i++ {
+		ownerKind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		ownerIndex, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		kind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		token, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		index, ok := readNullable(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		pkg, ok := readNullable(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		ref := NameRef{
+			OwnerKind:  ownerKind,
+			OwnerIndex: ownerIndex,
+			Kind:       kind,
+			Token:      token,
+			Index:      index,
+			Package:    pkg,
+		}
+		if !validOwner(ref.OwnerKind, ref.OwnerIndex, declLimit, funcLimit) ||
+			ref.Kind < RefUnknown || ref.Kind > RefLabel ||
+			!validToken(tokenLimit, ref.Token) ||
+			!validNullable(ref.Index) ||
+			!validNullable(ref.Package) {
+			return nil, false
+		}
+		refs = append(refs, ref)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return refs, true
+}
+
+func encodeSelectors(selectors []Selector, tokenLimit int, declLimit int, funcLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(selectors)*12+1)
+	out = appendVarint(out, len(selectors))
+	for i := 0; i < len(selectors); i++ {
+		selector := selectors[i]
+		if !validOwner(selector.OwnerKind, selector.OwnerIndex, declLimit, funcLimit) ||
+			selector.Kind < SelectorUnknown || selector.Kind > SelectorImport ||
+			!validToken(tokenLimit, selector.BaseTok) ||
+			!validToken(tokenLimit, selector.DotTok) ||
+			!validToken(tokenLimit, selector.NameTok) ||
+			selector.BaseKind < RefUnknown || selector.BaseKind > RefLabel ||
+			!validNullable(selector.BaseIndex) ||
+			!validNullable(selector.BasePackage) ||
+			!validNullable(selector.Package) ||
+			!validNullable(selector.Symbol) {
+			return nil, false
+		}
+		out = appendVarint(out, selector.OwnerKind)
+		out = appendVarint(out, selector.OwnerIndex)
+		out = appendVarint(out, selector.Kind)
+		out = appendVarint(out, selector.BaseTok)
+		out = appendVarint(out, selector.DotTok)
+		out = appendVarint(out, selector.NameTok)
+		out = appendVarint(out, selector.BaseKind)
+		out = appendNullable(out, selector.BaseIndex)
+		out = appendNullable(out, selector.BasePackage)
+		out = appendNullable(out, selector.Package)
+		out = appendNullable(out, selector.Symbol)
+	}
+	return out, true
+}
+
+func decodeSelectors(data []byte, tokenLimit int, declLimit int, funcLimit int) ([]Selector, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	selectors := make([]Selector, 0, count)
+	for i := 0; i < count; i++ {
+		ownerKind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		ownerIndex, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		kind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		baseTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		dotTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		nameTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		baseKind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		baseIndex, ok := readNullable(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		basePackage, ok := readNullable(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		pkg, ok := readNullable(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		symbol, ok := readNullable(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		selector := Selector{
+			OwnerKind:   ownerKind,
+			OwnerIndex:  ownerIndex,
+			Kind:        kind,
+			BaseTok:     baseTok,
+			DotTok:      dotTok,
+			NameTok:     nameTok,
+			BaseKind:    baseKind,
+			BaseIndex:   baseIndex,
+			BasePackage: basePackage,
+			Package:     pkg,
+			Symbol:      symbol,
+		}
+		if !validOwner(selector.OwnerKind, selector.OwnerIndex, declLimit, funcLimit) ||
+			selector.Kind < SelectorUnknown || selector.Kind > SelectorImport ||
+			!validToken(tokenLimit, selector.BaseTok) ||
+			!validToken(tokenLimit, selector.DotTok) ||
+			!validToken(tokenLimit, selector.NameTok) ||
+			selector.BaseKind < RefUnknown || selector.BaseKind > RefLabel ||
+			!validNullable(selector.BaseIndex) ||
+			!validNullable(selector.BasePackage) ||
+			!validNullable(selector.Package) ||
+			!validNullable(selector.Symbol) {
+			return nil, false
+		}
+		selectors = append(selectors, selector)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return selectors, true
+}
+
 func appendExprSpans(out []byte, spans []ExprSpan, tokenLimit int, ok *bool) []byte {
 	out = appendVarint(out, len(spans))
 	for i := 0; i < len(spans); i++ {
@@ -1211,6 +1486,22 @@ func validSpan(tokenLimit int, start int, end int) bool {
 
 func validToken(tokenLimit int, tok int) bool {
 	return tok >= 0 && tok < tokenLimit
+}
+
+func validNullable(v int) bool {
+	return v >= -1
+}
+
+func appendNullable(out []byte, v int) []byte {
+	return appendVarint(out, v+1)
+}
+
+func readNullable(data []byte, pos *int) (int, bool) {
+	value, ok := readVarint(data, pos)
+	if !ok {
+		return 0, false
+	}
+	return value - 1, true
 }
 
 func appendNode(out []byte, tag int, payload []byte) []byte {

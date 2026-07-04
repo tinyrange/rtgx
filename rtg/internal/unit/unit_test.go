@@ -142,6 +142,27 @@ func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 		ArgsEnd:    14,
 		Args:       []ExprSpan{{StartTok: 13, EndTok: 14}},
 	}}
+	program.Refs = []NameRef{{
+		OwnerKind:  OwnerFunc,
+		OwnerIndex: 0,
+		Kind:       RefPackage,
+		Token:      13,
+		Index:      0,
+		Package:    0,
+	}}
+	program.Selectors = []Selector{{
+		OwnerKind:   OwnerFunc,
+		OwnerIndex:  0,
+		Kind:        SelectorImport,
+		BaseTok:     13,
+		DotTok:      13,
+		NameTok:     13,
+		BaseKind:    RefImport,
+		BaseIndex:   0,
+		BasePackage: 0,
+		Package:     0,
+		Symbol:      0,
+	}}
 	data, ok := Marshal(program)
 	if !ok {
 		t.Fatal("Marshal failed")
@@ -344,7 +365,8 @@ func equalPrograms(left Program, right Program) bool {
 	}
 	if len(left.Tokens) != len(right.Tokens) || len(left.Decls) != len(right.Decls) || len(left.Funcs) != len(right.Funcs) ||
 		len(left.Indexes) != len(right.Indexes) || len(left.Composites) != len(right.Composites) ||
-		len(left.Assigns) != len(right.Assigns) || len(left.Returns) != len(right.Returns) || len(left.Calls) != len(right.Calls) {
+		len(left.Assigns) != len(right.Assigns) || len(left.Returns) != len(right.Returns) || len(left.Calls) != len(right.Calls) ||
+		len(left.Refs) != len(right.Refs) || len(left.Selectors) != len(right.Selectors) {
 		return false
 	}
 	for i := 0; i < len(left.Tokens); i++ {
@@ -439,6 +461,16 @@ func equalPrograms(left Program, right Program) bool {
 			if left.Calls[i].Args[j] != right.Calls[i].Args[j] {
 				return false
 			}
+		}
+	}
+	for i := 0; i < len(left.Refs); i++ {
+		if left.Refs[i] != right.Refs[i] {
+			return false
+		}
+	}
+	for i := 0; i < len(left.Selectors); i++ {
+		if left.Selectors[i] != right.Selectors[i] {
+			return false
 		}
 	}
 	return true
