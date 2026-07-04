@@ -34,13 +34,14 @@ type Program struct {
 }
 
 type PackageInfo struct {
-	Name    string
-	Symbols []Symbol
-	Imports []Import
-	Decls   []DeclInfo
-	Types   []TypeInfo
-	Methods []MethodInfo
-	Bodies  []FuncBody
+	Name      string
+	Symbols   []Symbol
+	Imports   []Import
+	Decls     []DeclInfo
+	DeclOrder []int
+	Types     []TypeInfo
+	Methods   []MethodInfo
+	Bodies    []FuncBody
 }
 
 type Symbol struct {
@@ -209,6 +210,7 @@ func checkPackage(graph load.Graph, pkgIndex int, checked []PackageInfo) (Packag
 		}
 	}
 	sortDecls(info.Decls)
+	info.DeclOrder = buildDeclOrder(info.Decls)
 	for i := 0; i < len(info.Decls); i++ {
 		decl := info.Decls[i]
 		if decl.Kind == SymbolType {

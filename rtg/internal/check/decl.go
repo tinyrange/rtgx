@@ -247,6 +247,23 @@ func sortDecls(decls []DeclInfo) {
 	}
 }
 
+func buildDeclOrder(decls []DeclInfo) []int {
+	order := make([]int, len(decls))
+	for i := 0; i < len(decls); i++ {
+		order[i] = i
+	}
+	for i := 1; i < len(order); i++ {
+		item := order[i]
+		j := i - 1
+		for j >= 0 && declIndexAfter(decls, order[j], item) {
+			order[j+1] = order[j]
+			j--
+		}
+		order[j+1] = item
+	}
+	return order
+}
+
 func declAfter(left DeclInfo, right DeclInfo) bool {
 	if left.Name != right.Name {
 		return left.Name > right.Name
@@ -255,4 +272,19 @@ func declAfter(left DeclInfo, right DeclInfo) bool {
 		return left.File > right.File
 	}
 	return left.Token > right.Token
+}
+
+func declIndexAfter(decls []DeclInfo, left int, right int) bool {
+	leftDecl := decls[left]
+	rightDecl := decls[right]
+	if leftDecl.File != rightDecl.File {
+		return leftDecl.File > rightDecl.File
+	}
+	if leftDecl.Token != rightDecl.Token {
+		return leftDecl.Token > rightDecl.Token
+	}
+	if leftDecl.Kind != rightDecl.Kind {
+		return leftDecl.Kind > rightDecl.Kind
+	}
+	return leftDecl.Name > rightDecl.Name
 }

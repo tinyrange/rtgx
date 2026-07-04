@@ -234,6 +234,8 @@ func later() int { return 4 }
 	assertDeclValues(t, file, root, "current", []string{"packageValue", "later()"})
 	assertDeclValues(t, file, root, "next", []string{"packageValue", "later()"})
 	assertDeclValues(t, file, root, "item", nil)
+	assertDeclLookupOrder(t, root, []string{"current", "item", "left", "next", "packageValue", "right"})
+	assertDeclSourceOrder(t, root, []string{"packageValue", "left", "right", "current", "next", "item"})
 }
 
 func TestCheckGraphLocalDeclarations(t *testing.T) {
@@ -735,6 +737,34 @@ func assertDeclValues(t *testing.T, file syntax.File, info PackageInfo, name str
 		t.Fatalf("decl %q not found in %#v", name, info.Decls)
 	}
 	assertExprSpans(t, file, info.Decls[index].Values, values)
+}
+
+func assertDeclLookupOrder(t *testing.T, info PackageInfo, names []string) {
+	t.Helper()
+	if len(info.Decls) != len(names) {
+		t.Fatalf("decls = %#v, want %v", info.Decls, names)
+	}
+	for i := 0; i < len(names); i++ {
+		if info.Decls[i].Name != names[i] {
+			t.Fatalf("decl lookup order %d = %q, want %q in %#v", i, info.Decls[i].Name, names[i], info.Decls)
+		}
+	}
+}
+
+func assertDeclSourceOrder(t *testing.T, info PackageInfo, names []string) {
+	t.Helper()
+	if len(info.DeclOrder) != len(names) {
+		t.Fatalf("decl order = %#v, want %v", info.DeclOrder, names)
+	}
+	for i := 0; i < len(names); i++ {
+		index := info.DeclOrder[i]
+		if index < 0 || index >= len(info.Decls) {
+			t.Fatalf("decl order %d index = %d in %#v", i, index, info.DeclOrder)
+		}
+		if info.Decls[index].Name != names[i] {
+			t.Fatalf("decl source order %d = %q, want %q in %#v", i, info.Decls[index].Name, names[i], info.DeclOrder)
+		}
+	}
 }
 
 func assertLocalDeclSpan(t *testing.T, file syntax.File, body FuncBody, name string, kind int, typ string, value string, alias bool) {
