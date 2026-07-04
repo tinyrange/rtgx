@@ -40,6 +40,15 @@ type targetConfig struct {
 
 const crossArchTestsEnv = "RTG_CROSS_ARCH_TESTS"
 
+const frontendPerformanceCompilerEnv = "RTG_FRONTEND"
+const frontendPerformanceSourceEnv = "RTG_FRONTEND_SOURCE"
+const frontendPerformanceTargetEnv = "RTG_FRONTEND_TARGET"
+const frontendPerformanceDefaultSource = "rtg/cmd/rtg"
+const frontendPerformanceAttempts = 3
+const frontendPerformanceMaxElapsed = 500 * time.Millisecond
+const frontendPerformanceMaxRSSKB = 32 * 1024
+const frontendPerformanceMaxBinarySize = 1024 * 1024
+
 func getCompilerFiles(config targetConfig) ([]string, error) {
 	var files []string
 
@@ -607,6 +616,117 @@ func runHostCompilerBinaryForTarget(t *testing.T, target compilerTarget, path st
 	return nil
 }
 
+func frontendPerformanceTarget(t *testing.T) string {
+	t.Helper()
+	if target := os.Getenv(frontendPerformanceTargetEnv); target != "" {
+		if !strings.HasPrefix(target, "linux/") {
+			t.Fatalf("%s=%s is not runnable by the frontend performance gate", frontendPerformanceTargetEnv, target)
+		}
+		return target
+	}
+	if runtime.GOOS != "linux" {
+		t.Skipf("frontend performance gate requires Linux host, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	switch runtime.GOARCH {
+	case "amd64", "386", "arm":
+		return "linux/" + runtime.GOARCH
+	case "arm64":
+		return "linux/aarch64"
+	default:
+		t.Skipf("unsupported frontend performance host architecture %s", runtime.GOARCH)
+		return ""
+	}
+}
+
+func frontendPerformanceSource(t *testing.T) string {
+	t.Helper()
+	if source := os.Getenv(frontendPerformanceSourceEnv); source != "" {
+		abs, err := filepath.Abs(source)
+		if err != nil {
+			t.Fatalf("failed to resolve %s=%s: %v", frontendPerformanceSourceEnv, source, err)
+		}
+		return abs
+	}
+	if _, err := os.Stat(frontendPerformanceDefaultSource); err != nil {
+		if os.IsNotExist(err) {
+			t.Skipf("no frontend source found at %s; set %s to run the frontend performance gate",
+				frontendPerformanceDefaultSource, frontendPerformanceSourceEnv)
+		}
+		t.Fatalf("failed to stat frontend source %s: %v", frontendPerformanceDefaultSource, err)
+	}
+	abs, err := filepath.Abs(frontendPerformanceDefaultSource)
+	if err != nil {
+		t.Fatalf("failed to resolve frontend source %s: %v", frontendPerformanceDefaultSource, err)
+	}
+	return abs
+}
+
+func frontendPerformanceStage0(t *testing.T, source string, outDir string) string {
+	t.Helper()
+	if compiler := os.Getenv(frontendPerformanceCompilerEnv); compiler != "" {
+		return compiler
+	}
+	stage0 := filepath.Join(outDir, "rtg-stage0")
+	result, err := runCommandInDir(t, ".", "go", "build", "-o", stage0, source)
+	if err != nil {
+		t.Fatalf("frontend stage0 host build failed: %v", err)
+	}
+	if result.exitCode != 0 {
+		t.Fatalf("frontend stage0 host build failed with exit code %d\nstdout: %sstderr: %s",
+			result.exitCode, result.stdout, result.stderr)
+	}
+	return stage0
+}
+
+func runFrontendCompile(t *testing.T, compiler string, target string, source string, output string) {
+	t.Helper()
+	result, err := runCommandInDir(t, ".", compiler, "-t", target, "-s", "-o", output, source)
+	if err != nil {
+		t.Fatalf("frontend compile failed: %v", err)
+	}
+	if result.exitCode != 0 {
+		t.Fatalf("frontend compile failed with exit code %d\nstdout: %sstderr: %s",
+			result.exitCode, result.stdout, result.stderr)
+	}
+}
+
+func runMeasuredFrontendCompile(t *testing.T, compiler string, target string, source string, output string, rssFile string) (time.Duration, int) {
+	t.Helper()
+	timeArgs := []string{
+		"-f", "%e %M",
+		"-o", rssFile,
+		compiler,
+		"-t", target,
+		"-s",
+		"-o", output,
+		source,
+	}
+	cmd := exec.Command("/usr/bin/time", timeArgs...)
+	cmd.Dir = "."
+	cmd.Env = os.Environ()
+	combined, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("resource-measured frontend self-host failed: %v\nOutput: %s", err, string(combined))
+	}
+	rssData, err := os.ReadFile(rssFile)
+	if err != nil {
+		t.Fatalf("failed to read frontend compile resource usage: %v", err)
+	}
+	rssFields := strings.Fields(string(rssData))
+	if len(rssFields) < 2 {
+		t.Fatalf("failed to read frontend compile resource usage %q", string(rssData))
+	}
+	elapsedSeconds, err := strconv.ParseFloat(rssFields[0], 64)
+	if err != nil {
+		t.Fatalf("failed to parse frontend compile elapsed time %q: %v", string(rssData), err)
+	}
+	maxRSS, err := strconv.Atoi(rssFields[len(rssFields)-1])
+	if err != nil {
+		t.Fatalf("failed to parse frontend compile max RSS %q: %v", string(rssData), err)
+	}
+	return time.Duration(elapsedSeconds * float64(time.Second)), maxRSS
+}
+
 func TestCompilerTargetDiagnostics(t *testing.T) {
 	if runtime.GOOS+"/"+runtime.GOARCH != "linux/amd64" {
 		t.Skipf("compiler target diagnostics require linux/amd64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)
@@ -923,5 +1043,63 @@ func TestCompilerPerformance(t *testing.T) {
 					bestElapsed, bestRSS, compilerInfo.Size(), strings.Join(failures, "; "))
 			}
 		})
+	}
+}
+
+// The replacement frontend must self-host quickly enough to stay usable as it
+// grows. Stage0 builds stage1, stage1 builds stage2, and the measured run is
+// stage2 building the stripped stage3 compiler.
+func TestFrontendCompilerPerformance(t *testing.T) {
+	source := frontendPerformanceSource(t)
+	target := frontendPerformanceTarget(t)
+	outDir := t.TempDir()
+
+	stage0 := frontendPerformanceStage0(t, source, outDir)
+	stage1 := filepath.Join(outDir, "rtg-stage1")
+	stage2 := filepath.Join(outDir, "rtg-stage2")
+	runFrontendCompile(t, stage0, target, source, stage1)
+	runFrontendCompile(t, stage1, target, source, stage2)
+
+	bestElapsed := 24 * time.Hour
+	bestRSS := 1 << 30
+	var bestSize int64 = 1 << 62
+	for attempt := 0; attempt < frontendPerformanceAttempts; attempt++ {
+		stage3 := filepath.Join(outDir, fmt.Sprintf("rtg-stage3-%d", attempt))
+		rssFile := filepath.Join(outDir, fmt.Sprintf("frontend-rss-%d", attempt))
+		elapsed, maxRSS := runMeasuredFrontendCompile(t, stage2, target, source, stage3, rssFile)
+		stage3Info, err := os.Stat(stage3)
+		if err != nil {
+			t.Fatalf("failed to stat frontend stage3 compiler: %v", err)
+		}
+		stage3Size := stage3Info.Size()
+		if elapsed < bestElapsed {
+			bestElapsed = elapsed
+		}
+		if maxRSS < bestRSS {
+			bestRSS = maxRSS
+		}
+		if stage3Size < bestSize {
+			bestSize = stage3Size
+		}
+		if elapsed <= frontendPerformanceMaxElapsed &&
+			maxRSS <= frontendPerformanceMaxRSSKB &&
+			stage3Size <= frontendPerformanceMaxBinarySize {
+			return
+		}
+	}
+
+	var failures []string
+	if bestElapsed > frontendPerformanceMaxElapsed {
+		failures = append(failures, fmt.Sprintf("stage3 self-host runtime %s > %s", bestElapsed, frontendPerformanceMaxElapsed))
+	}
+	if bestRSS > frontendPerformanceMaxRSSKB {
+		failures = append(failures, fmt.Sprintf("stage3 self-host max RSS %dKB > %dKB", bestRSS, frontendPerformanceMaxRSSKB))
+	}
+	if bestSize > frontendPerformanceMaxBinarySize {
+		failures = append(failures, fmt.Sprintf("stage3 compiler binary size %dB > %dB", bestSize, frontendPerformanceMaxBinarySize))
+	}
+	if len(failures) > 0 {
+		t.Fatalf("frontend performance limits failed: best stage3 self-host runtime=%s, best max RSS=%dKB, best stage3 compiler binary size=%dB; failures: %s",
+			bestElapsed, bestRSS, bestSize, strings.Join(failures, "; "))
 	}
 }

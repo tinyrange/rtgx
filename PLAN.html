@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RTG Frontend Scope</title>
+  <title>RTG Frontend Rebuild Plan</title>
   <style>
     body {
       margin: 2rem;
-      max-width: 820px;
+      max-width: 880px;
       color: #1f2328;
       font: 16px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
@@ -19,7 +19,7 @@
     }
 
     h2 {
-      margin: 1.5rem 0 0.5rem;
+      margin: 1.75rem 0 0.5rem;
       font-size: 1.25rem;
     }
 
@@ -27,9 +27,14 @@
       margin: 0 0 1rem;
     }
 
+    ol,
     ul {
       margin: 0 0 1rem;
       padding-left: 1.35rem;
+    }
+
+    li {
+      margin: 0.35rem 0;
     }
 
     code {
@@ -43,83 +48,94 @@
   </style>
 </head>
 <body>
-  <h1>RTG Frontend Scope</h1>
+  <h1>RTG Frontend Rebuild Plan</h1>
   <p>
-    The limitation sweep is resolved only in the diagnostic sense. Ordinary Go
-    forms currently rejected by the frontend are in scope and must be
-    implemented over time unless they are listed in the explicit exclusions
-    below. The exclusion list is closed: every non-excluded Go feature belongs
-    in the frontend plan, even when the current implementation only has a
-    diagnostic or a narrow lowering for that form.
-  </p>
-  <p>
-    Existing diagnostics or partial implementations for maps, interfaces,
-    arrays, function values, dynamic dispatch, <code>defer</code>,
-    <code>panic</code>, <code>recover</code>, and other ordinary Go features
-    are temporary implementation gaps. They must not be treated as language
-    policy exclusions.
-  </p>
-  <p>
-    For avoidance of doubt, <code>defer</code>, <code>panic</code>, and
-    <code>recover</code> are required frontend semantics. The frontend scope is
-    ordinary Go minus only goroutines, channels, <code>select</code>, cgo, and
-    generics.
-  </p>
-  <p>
-    Backend omissions in <code>SUBSET.md</code> do not exclude a feature from
-    the frontend. When a normal Go construct is not part of the backend subset,
-    the frontend should parse, check, and lower it into platform-independent
-    units unless that construct is one of the explicit exclusions below.
+    The old <code>rtg/</code> frontend was removed because it grew into a
+    collection of feature-specific rewrites that could pass local examples
+    without remaining a useful compiler. The replacement should be built as a
+    small compiler pipeline with explicit contracts, stage gates, and stable
+    units from the start.
   </p>
 
-  <h2>Required Frontend Work</h2>
-  <p>
-    These features should be supported by the frontend. This list calls out the
-    known large items, but it is not a second exclusion boundary. Keep clear
-    diagnostics until each feature has a concrete implementation plan, stable
-    unit representation, runtime support where needed, and tests.
-  </p>
+  <h2>Lessons To Integrate</h2>
   <ul>
-    <li>maps; inert named map type declarations, including nested map type text, references to other inert map type declarations, homogeneous grouped declarations, local inert declarations, and unused map-containing type declarations such as structs with map fields or slices of maps, now erase before backend compilation when the named type is not used as a value or is used only by supported named map literals. Blank-discarded empty composite literals of map-containing named types, such as <code>_ = T{}</code>, also erase before backend compilation, including map fields whose value type is a direct anonymous struct. Discard-only pure map literals, including nested explicit map literals, discarded map literals whose non-pure values are direct calls, discard-only slices or fixed arrays of direct map literals, and discard-only <code>make(map[K]V)</code> with an absent, pure integer, or direct-call capacity now erase before backend compilation after preserving lowerable call side effects. <code>delete</code> on a direct pure map literal or direct pure <code>make(map[K]V)</code> erases when the key is also pure, and <code>delete</code> on a direct map literal whose non-pure values are direct calls or direct <code>make(map[K]V)</code> whose capacity is a direct call preserves those calls before erasing when the key is pure. <code>len</code> of a direct pure map literal lowers to a constant, <code>len</code> of a direct map literal whose non-pure values are direct calls preserves those calls before lowering to a constant, <code>len(make(map[K]V))</code> lowers to zero when the optional capacity is pure integer or a direct call, direct pure map-literal indexing with a known scalar key lowers to the matched scalar value or a simple scalar, pointer, or slice zero value for missing keys, direct map-literal indexing whose non-pure values are direct calls preserves those calls before lowering to the matched value or zero value, and direct <code>make(map[K]V)</code> indexing lowers to a simple zero value after preserving a direct-call capacity. Local and imported named map literals such as <code>Table{"a": 1}</code> or <code>dep.Table{"a": 1}</code> now desugar into the same direct map literal path for supported static/direct contexts. Direct pure map-literal comma-ok lookups now lower to a value plus boolean constant, direct map-literal comma-ok lookups whose non-pure values are direct calls preserve those calls before lowering to a value plus boolean constant, direct <code>make(map[K]V)</code> comma-ok lookups lower to zero plus <code>false</code> after preserving a direct-call capacity, direct pure map-literal or <code>make(map[K]V)</code> ranges lower to ordinary loops, direct map-literal ranges whose non-pure values are direct calls preserve those calls before lowering to ordinary loops, and direct <code>make(map[K]V)</code> ranges preserve a direct-call capacity before lowering to an empty loop. Local static map aliases initialized from pure forms, named map literals, or lowerable direct map literals/<code>make(map[K]V)</code> expressions with direct-call initializer side effects still erase before backend compilation for blank discards such as <code>_ = m</code>, <code>len(m)</code>, <code>m[k]</code>, comma-ok lookup, <code>range m</code>, sequential <code>delete(m, key)</code> with a pure comparable key, sequential <code>m[key] = value</code> assignments, supported sequential compound assignments such as <code>m[key] += value</code> when the key is pure and the value is a compatible pure scalar literal, identifier, direct call evaluated once into a temp, int binary expression over those operands evaluated once into a temp, string concatenation expression over those operands evaluated once into a temp, or bool comparison expression over those operands evaluated once into a temp, and sequential <code>m[key]++</code>/<code>m[key]--</code> for numeric values. Map storage, value-carrying allocation, dynamic mutation, <code>delete</code> on dynamic map values, non-static map value operations, value-carrying named map types outside these static literal contexts, and value-carrying non-empty map-containing values remain frontend work</li>
-    <li>interfaces, type assertions, type switches, and dynamic dispatch; inert named interface type declarations, including embedded interface references, homogeneous grouped declarations, local inert declarations, inert named <code>any</code> declarations, and unused type declarations containing direct <code>interface{}</code> or <code>any</code> fields/elements, now erase before backend compilation when the named type is not used as a value. Zero-value or explicit <code>nil</code>-initialized local <code>interface{}</code> and <code>any</code> variables used only by an immediate blank discard, direct <code>nil</code> equality/inequality comparisons, or statically mismatched comma-ok type assertions also erase before backend compilation. Unexported same-package functions with unused <code>interface{}</code> or <code>any</code> parameters now erase those parameters and side-effect-free erased call arguments before backend compilation, and direct, computed, or short-circuit same-package function-call erased arguments in call statements, deferred call statements, simple assignments, local var initializers, whole <code>if</code> conditions, simple or classic <code>for</code> conditions, whole <code>switch</code> tags, or whole returned call expressions lower by preserving those calls first when source-order side effects remain intact. Unexported same-package functions with a single discarded <code>interface{}</code> or <code>any</code> return now erase the result type and side-effect-free return value before backend compilation, including cross-file discarded calls, and direct same-package function-call return expressions, recursively nested direct-call arguments, computed direct-call argument expressions, short-circuit computed direct-call argument expressions, and bare lowerable unary, binary, or short-circuit return expressions with same-package direct-call operands lower by preserving those calls before the erased return. Static local <code>interface{}</code> or <code>any</code> variables initialized from simple scalar literals or statically known <code>nil</code> now lower through matching type assertions, matching and mismatched comma-ok assertions, mismatched single-result assertions in blank-discard, new short-declaration, assignment to an existing simple identifier, local var-declaration, direct call-statement or deferred call-statement forms where the assertion is the first argument, direct bool <code>if</code>- or <code>for</code>-condition, direct <code>switch</code> tag, or return statement forms where the assertion is the first operand through string panic semantics, static type switches, assigned static type switches with a distinct binding name when the concrete case is present, and assigned static type switches whose selected default or no-case path does not require a value-carrying binding. Static variables initialized from local or imported named struct literals such as <code>Box{Value: 1}</code> or <code>dep.Box{Value: 1}</code>, plus pointer forms such as <code>&amp;Box{Value: 1}</code> or <code>&amp;dep.Box{Value: 1}</code>, now also lower through matching single-result and comma-ok assertions, mismatched comma-ok assertions to known local/imported named structs or pointer-to-structs, matching static type switches, and assigned static type switches when the concrete struct or pointer-to-struct case is present or the selected default/no-case path does not require a value-carrying binding. Value-carrying interface values, value-carrying <code>any</code> values, used interface returns, exported or imported interface returns, broader interface return expression side effects outside those lowerable unary, binary, short-circuit, and direct-call forms, used interface parameters, broader erased interface argument side effects outside call statements, deferred call statements, simple assignments, local var initializers, whole <code>if</code> conditions, simple or classic <code>for</code> conditions, whole <code>switch</code> tags, or whole returned call expressions, dynamic assertions, broader single-result mismatched assertion expression contexts that require panic semantics, selected default type-switch bindings used as real interface values, dynamic type switches, and dynamic dispatch remain required frontend work</li>
-    <li>arrays; inert named fixed-array type declarations, including references to other inert array type declarations, grouped declarations, and local inert declarations, now erase before backend compilation when the named type is not used as a value. Local fixed/inferred array literals, discard-only pure fixed/inferred array literals including nested arrays and slices of arrays, discard-only array literals including nested arrays with direct-call element side effects, local fixed-array declarations, simple one-dimensional named fixed-array value types including function-local named fixed-array types, simple one-dimensional struct fields, simple one-dimensional direct and named function parameters and results, indexing, <code>len</code>, <code>cap</code>, <code>range</code>, equality/inequality comparisons for local arrays, simple named array values and named array literals, imported named array literals, imported top-level fixed-array values, direct literals, direct fixed-array-returning calls, direct named struct field selectors, indexed struct field selectors, and imported struct field selectors, local assignment copies from known array locals, simple named array locals, or imported top-level fixed-array values, direct named/nested/promoted/indexed/imported struct field selector copies on source or destination sides, indexed struct field element assignments, and direct known local, imported, or generated function-literal array-parameter argument copies from known local arrays, simple named array locals, imported named array locals, imported top-level fixed-array values, or named/nested/promoted/indexed/imported struct field selectors now lower through slice-backed storage with temporary evaluation for call operands, while value-carrying named nested arrays, discarded array expressions whose side effects are not direct calls, dynamic array-parameter copies, and broader array value-copy semantics remain frontend work</li>
-    <li>function values, closures, method values, and method expressions; inert named function type declarations such as <code>type F func(int) int</code>, aliases to named function types such as <code>type G F</code>, homogeneous grouped declarations, local inert declarations, and unused type declarations containing direct function fields or elements now erase before backend compilation when the named type is not used as a value. Static aliases to known functions such as <code>f := add; f(x)</code>, discard-only function or method values such as <code>_ = add</code>, <code>_ = f</code>, <code>_ = v.M</code>, and <code>_ = func() int { return 1 }</code>, static function-literal aliases such as <code>f := func(x int) int { y = y + x; return y }; f(1)</code>, and immediately-invoked function literals such as <code>func(x int) int { y = y + x; return y }(1)</code> now lower to concrete synthetic functions with typed captures passed as hidden value or pointer parameters, including direct or function-local named fixed-array parameters lowered through caller-side array copies, static bound method aliases such as <code>f := v.M; f()</code>, including promoted methods on named local or composite-literal receivers, direct method-expression calls such as <code>T.M(v)</code>, static method-expression aliases such as <code>f := T.M; f(v)</code>, and direct static callback calls such as <code>apply(add, 1)</code>, <code>apply(dep.Add, 1)</code>, <code>dep.Apply(dep.Add, 1)</code>, <code>apply(T.M, v)</code>, <code>f := T.M; apply(f, v)</code>, <code>apply(func(a int, b int) int { return a + b }, 1)</code>, <code>f := func(a int, b int) int { return a + b }; apply(f, 1)</code>, <code>type Callback func(int) int; apply(add, 1)</code>, <code>type Alias Callback; apply(add, 1)</code>, <code>dep.Apply(dep.Add, 1)</code> where the imported wrapper uses named function type parameters and helper calls from its defining package, <code>apply(v.M, 1)</code>, <code>apply(dep.Box{Value: 1}.Value)</code>, or <code>f := v.M; apply(f, 1)</code> where <code>apply</code> has a function-typed parameter now lower to concrete specialized wrapper functions across package boundaries. Direct function-literal callback arguments and static function-literal callback aliases can capture typed locals through hidden value or pointer parameters, direct named function type or alias callback parameters lower through the same static callback path, imported wrappers with named function type callback parameters specialize in the caller unit while retaining references to helper symbols from their own package, and direct method-value callback arguments or static method-value callback aliases on named-local, imported, promoted, or composite-literal receivers lower through hidden receiver parameters, while storing, passing non-static aliases, returning, or generally closing over function values, including value-carrying function-containing types, remains tied to full function-value support</li>
-    <li><code>defer</code>, <code>panic</code>, and <code>recover</code>, including Go-compatible unwind behavior in frontend-lowered code; these are required frontend features, not exclusions. Current support covers direct-call defers, deferred immediately-invoked function literals with typed captures lowered through pointer environments, nested typed captures, variadic expansion, loop-defer LIFO stacks, panic propagation while evaluating static, loop, and function-literal defer direct-call arguments before the current defer is registered, multi-result direct-call returns in functions with defers, same-package panic propagation after direct call statements, imported direct-call string panic propagation across package unit boundaries, direct call statements with direct-call arguments, call statement recursively nested direct-call arguments, assignment statements with direct-call operands, assignment direct calls with direct-call arguments, direct-call <code>if</code>, <code>switch</code>, and <code>for</code> conditions, condition direct calls with direct-call arguments, classic <code>for</code> init and post statements with direct-call operands, classic <code>for</code> conditions with direct calls, combined classic <code>for</code> headers with direct-call init/condition/post sections when the post rewrite is safe, single-expression direct-call returns, return direct calls with direct-call arguments, multi-operand returns containing direct-call operands, unrecovered string-panic entrypoint failures, and the first string-panic recovery path; completing the full runtime semantics remains required frontend work</li>
-    <li>complex numbers, imaginary literals, <code>complex</code>, <code>real</code>, and <code>imag</code>; inert named <code>complex64</code> and <code>complex128</code> type declarations, plus unused type declarations containing direct <code>complex64</code> or <code>complex128</code> fields/elements, now erase before backend compilation when unused. Reducible <code>real(complex(a, b))</code>, <code>imag(complex(a, b))</code>, <code>real(1+2i)</code>, and <code>imag(1+2i)</code> forms now lower when no first-class complex value reaches the backend, including side-effecting floating-point operands evaluated once in source order. Discard-only pure imaginary literals, pure <code>complex</code> calls, discarded <code>complex</code> calls with direct same-package <code>float64</code>-returning call operands, binary discarded expressions composed from those lowerable complex operands, and local <code>complex64</code>/<code>complex128</code> variables or short declarations initialized from lowerable complex expressions then used only by a blank discard now erase before backend compilation after preserving call side effects in source order. Static complex aliases, including inferred aliases and explicit local <code>complex64</code>/<code>complex128</code> declarations initialized from lowerable complex literals or <code>complex</code> calls, now lower through component temporaries when their only uses are direct <code>real(alias)</code> and <code>imag(alias)</code> calls. General first-class complex values, value-carrying named complex types, value-carrying complex-containing types, and broader side-effecting discarded complex expressions remain frontend work</li>
-    <li><code>fallthrough</code>, plus labeled <code>break</code> and <code>continue</code>; valid fallthrough and labeled loop/switch control now lower through generated labels and gotos before backend compilation, while invalid final fallthrough and invalid labeled targets remain frontend diagnostics</li>
-    <li><code>range</code> over all supported iterable values, including arrays, slices, strings, and maps once maps land</li>
-    <li>full slice expressions, <code>x[a:b:c]</code>; three-index slicing now preserves explicit capacity bounds in backend slice descriptors, and <code>cap</code> checks/lowers for local slices, globals, selectors, literals, calls, <code>make</code>, and full slices</li>
-    <li><code>init</code> functions and package initializers that call functions</li>
-    <li>local type declarations; grouped and single function-local type declarations now hoist to generated package-level type declarations before backend compilation, including local scalar, slice, and struct types used by local values</li>
-    <li>embedded fields, promoted selectors, anonymous struct types, and other ordinary struct forms; simple embedded value/pointer fields, promoted selectors on named local values, direct composite literals, and imported package values, promoted method calls on named local values and composite literals, plus static promoted method aliases and direct promoted method-value callback arguments on named local values and composite literals now lower to explicit backend fields/selectors/functions. Simple named struct equality and inequality comparisons now lower field-wise for local, parameter, same-package global, imported global, same-package or imported direct literal, and same-package or imported direct struct-returning call values when the struct is empty or every field is a backend-comparable scalar, pointer, direct or named one-dimensional fixed array of those element types, or nested named struct whose fields satisfy the same rule. Literal and call operands are evaluated once through generated temporaries before field-wise lowering. Simple local anonymous struct variables, literals, initialized variables, slices, named struct fields, named struct slice fields, named struct pointer fields with arbitrary pointer depth, named struct pointer-slice fields, top-level anonymous struct variables, top-level anonymous struct aliases, top-level named slices with anonymous struct elements, top-level function signatures, and erased map-containing named types with direct anonymous struct map values such as <code>var x struct{ A int }</code>, <code>x := struct{ A int }{1}</code>, <code>var y struct{ A int } = struct{ A int }{1}</code>, <code>var g = struct{ A int }{1}</code>, <code>xs := []struct{ A int }{{1}}</code>, <code>type Alias = struct{ A int }</code>, <code>type Rows []struct{ A int }</code>, <code>type T struct{ Field struct{ A int }; Rows []struct{ A int }; Ptr *struct{ A int }; Fields []*struct{ A int }; Triple ***struct{ A int }; M map[string]struct{ B int } }</code>, and <code>func f(v struct{ A int }) struct{ A int }</code> now lower through generated package-level struct types or erase before backend compilation when value-free, while value-carrying map/interface/function/slice field composites and full anonymous type checking remain frontend work</li>
-    <li>ordinary literals, builtins, import forms, and compiler intrinsics such as <code>unsafe</code>; <code>new</code> now lowers scalar, pointer, named struct, and slice targets through arena-backed storage or generated slice-descriptor helpers so returned pointers remain valid. <code>unsafe.Sizeof</code> now lowers fixed-size operands, target-aware word-sized operands such as <code>int</code>, pointers, strings, slices, simple fixed one-dimensional array literals, direct and named nested fixed-array operands, simple named structs whose fields have supported sizes, and named aliases of supported forms to constants, while value-carrying named nested arrays, recursive structs, and full target-aware layout support remain frontend work</li>
-    <li><code>go:embed</code>; file embeds into package-level <code>string</code> and <code>[]byte</code> variables now rewrite during loading, including quoted patterns for file names with spaces, duplicate or multiple patterns, multiple directive lines, and glob patterns when the complete pattern set resolves to exactly one file. <code>embed.FS</code> and directory tree embeds remain frontend work</li>
-    <li>import forms; blank imports now load packages for init side effects without exposing a local package name, and dot imports resolve exported dependency functions, values, and types as unqualified frontend names. Duplicate local import names, ordinary unused imports, and remaining Go-compatible import edge cases continue to be checked at the frontend boundary</li>
-    <li>broader <code>rtg/std</code> compatibility when repository code or the frontend benefits from it; <code>strconv.ParseInt</code>, <code>strings.ReplaceAll</code>, and <code>bytes.Buffer</code> constructors now have frontend fixture coverage, while the remaining common packages and selectors should be added only when they unblock real source compatibility</li>
+    <li>Tests must lead the implementation. The <code>rtg_tests/</code> corpus is the acceptance contract; quick tests should always run, extended tests can remain opt-in.</li>
+    <li>Self-hosting cannot be treated as a late milestone. The frontend should pass hello-world, package loading, quick corpus, stage1, stage2, and stage3 gates in that order.</li>
+    <li>Partial erasure is not feature support. A feature is supported only when the compiler has typed semantics, stable lowering, diagnostics for unsupported edge cases, and tests.</li>
+    <li>The backend subset stays small. Ordinary Go features outside <code>SUBSET.md</code> belong in the frontend unless they are one of the closed exclusions: goroutines, channels, <code>select</code>, cgo, or generics.</li>
+    <li>The unit format must be real infrastructure, not a side effect of file emission. Units should be deterministic, binary, distributable, and usable in memory by a separate linker stage.</li>
+    <li>The package and module model must come before broad language work. Import resolution, package initialization, symbol ownership, and linker boundaries are the shape every later feature must fit.</li>
+    <li>Runtime intrinsics should stay hidden behind lowering. User-facing target-specific escape hatches such as syscalls and static links should not leak into portable frontend semantics.</li>
+    <li>Do not grow <code>rtg/std</code> speculatively. Add compatibility packages only when compiler code, real example code, or an acceptance test benefits from them.</li>
+    <li>Every miscompile gets a minimal reproducer before feature work continues. Regressions belong in <code>tests/</code> for backend bugs or <code>rtg_tests/</code> for frontend bugs.</li>
+    <li>Performance gates should exist early. The frontend should track wall time and max RSS for self-hosting before complexity hides the source of regressions.</li>
   </ul>
 
-  <h2>Explicit Exclusions</h2>
-  <p>
-    This is the closed list of unsupported Go features for now. There are no
-    other language exclusions. Everything else, including runtime control-flow
-    semantics such as <code>defer</code>, <code>panic</code>, and
-    <code>recover</code>, should be treated as frontend work, with backend
-    changes required only when the feature is added to <code>SUBSET.md</code>.
-  </p>
-  <ul>
-    <li>goroutines</li>
-    <li>channels</li>
-    <li><code>select</code></li>
-    <li>cgo</li>
-    <li>generics</li>
-  </ul>
+  <h2>Architecture</h2>
+  <ol>
+    <li>Loader: resolve <code>go.mod</code>, package directories, imports, files, build tags needed by RTG, and deterministic package order.</li>
+    <li>Parser: accept ordinary Go syntax for the in-scope language and produce precise diagnostics for excluded forms.</li>
+    <li>Checker: assign types, constants, methods, package symbols, and initialization order without depending on the host Go toolchain at runtime.</li>
+    <li>Lowerer: translate typed Go into a small platform-independent unit model that can express all frontend-supported features over the backend subset.</li>
+    <li>Unit encoder: write and read deterministic binary units with stable symbol names, relocations, metadata, and versioning.</li>
+    <li>Linker: combine package units in memory, resolve symbols, order initializers, include runtime support, and emit one backend input unit.</li>
+    <li>Driver: provide <code>rtg ./cmd/app</code>, <code>-t os/arch</code>, output selection, diagnostics, and cache controls without changing frontend semantics.</li>
+  </ol>
 
-  <h2>Backend Boundary</h2>
+  <h2>First Bridge</h2>
   <p>
-    If a feature is added to <code>SUBSET.md</code>, it becomes a backend
-    compiler requirement. Otherwise, implement it in <code>rtg/</code> by
-    lowering ordinary Go into stable platform-independent units before it
-    reaches the backend.
+    The first implementation step is a parsed source-to-unit bridge for the
+    existing backend subset. A host-Go converter reads current backend test
+    programs, writes a dense TLV unit, and the backend accepts that unit through
+    its compiler input path. This is not the final frontend, but it makes the
+    unit format executable immediately and gives the next compiler a concrete
+    binary contract to emit.
   </p>
+  <p>
+    The initial unit carries a token text pool, backend token table, top-level
+    declaration table, and function table. The current backend decodes those
+    binary tables directly into its program representation, skipping source
+    scanning and top-level parsing while keeping the existing expression,
+    statement, type, and code-generation machinery. Later milestones can
+    replace token ranges with denser typed statement and expression nodes
+    without changing the outer unit contract.
+  </p>
+
+  <h2>Milestones</h2>
+  <ol>
+    <li>Define the binary unit format and linker API before implementing broad language features.</li>
+    <li>Build the minimal loader, parser, checker, lowerer, linker, and driver needed for hello world.</li>
+    <li>Compile one package with multiple files and deterministic package initialization.</li>
+    <li>Compile a small imported package graph into separate units, then link it in memory.</li>
+    <li>Pass the quick <code>rtg_tests/</code> corpus through the frontend and backend.</li>
+    <li>Reach stage1 self-hosting with the smallest frontend that can compile itself.</li>
+    <li>Reach stage2 and stage3 self-hosting with byte-for-byte stable or intentionally explained output differences.</li>
+    <li>Enable performance gates for frontend self-hosting and keep them visible in CI.</li>
+    <li>Expand toward the extended corpus by feature group, with each group adding diagnostics, implementation, and tests together.</li>
+  </ol>
+
+  <h2>Feature Policy</h2>
+  <p>
+    The frontend target is ordinary Go minus goroutines, channels,
+    <code>select</code>, cgo, and generics. Maps, interfaces, arrays, function
+    values, dynamic dispatch, <code>defer</code>, <code>panic</code>,
+    <code>recover</code>, complex numbers, unsafe intrinsics, package
+    initialization, import forms, and common builtins are in scope.
+  </p>
+  <p>
+    Features should be added vertically: syntax, type checking, lowering,
+    runtime/linker support, diagnostics, and tests should land together for a
+    narrow slice. Avoid broad placeholder implementations that only erase
+    unsupported values or special-case one source shape.
+  </p>
+
+  <h2>Validation</h2>
+  <ul>
+    <li><code>go test ./rtg_tests</code> remains the fast frontend corpus check.</li>
+    <li>Extended corpus tests remain environment-gated until they are cheap enough to run routinely.</li>
+    <li>Top-level backend harness tests remain the authority for backend behavior and cross-target output.</li>
+    <li>Frontend self-hosting should report stage, wall time, max RSS, output size, and target set.</li>
+    <li>CI should run the quick frontend corpus, backend tests on supported runners, and the current self-hosting gate once the replacement frontend exists.</li>
+  </ul>
 </body>
 </html>
