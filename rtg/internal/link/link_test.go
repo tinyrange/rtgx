@@ -57,6 +57,38 @@ func Value() int { return answer }
 	}
 }
 
+func TestLinkBuildUsesSerializedPackageUnitData(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/pkg/lib"
+
+func appMain() int { return lib.Value() }
+`)},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
+
+func Value() int { return 42 }
+`)},
+	})
+	for i := 0; i < len(result.Units); i++ {
+		result.Units[i].Program = unit.Program{}
+	}
+	linked := LinkBuild(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuild failed after clearing in-memory programs: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if len(linked.Program.Funcs) != 2 {
+		t.Fatalf("linked func count = %d, want 2", len(linked.Program.Funcs))
+	}
+
+	result.Units[0].Data = append(result.Units[0].Data, 0)
+	linked = LinkBuild(result)
+	if linked.Ok || linked.Error != LinkErrUnit || linked.ErrorPackage != 0 {
+		t.Fatalf("corrupt serialized unit result = %#v", linked)
+	}
+}
+
 func TestLinkUnitsAdjustsTokenOffsets(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

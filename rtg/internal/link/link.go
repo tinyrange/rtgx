@@ -28,9 +28,9 @@ func LinkBuild(result build.Result) Result {
 	if result.Root < 0 || result.Root >= len(result.Units) {
 		return linkFail(out, LinkErrRoot, -1)
 	}
-	program, ok := LinkUnits(result.Units, result.Root)
+	program, pkg, ok := LinkUnitData(result.Units, result.Root)
 	if !ok {
-		return linkFail(out, LinkErrUnit, -1)
+		return linkFail(out, LinkErrUnit, pkg)
 	}
 	data, ok := unit.Marshal(program)
 	if !ok {
@@ -41,19 +41,52 @@ func LinkBuild(result build.Result) Result {
 	return out
 }
 
+func LinkUnitData(units []build.PackageUnit, root int) (unit.Program, int, bool) {
+	if root < 0 || root >= len(units) {
+		return unit.Program{}, -1, false
+	}
+	programs := make([]unit.Program, len(units))
+	for i := 0; i < len(units); i++ {
+		prog, ok := unit.Unmarshal(units[i].Data)
+		if !ok {
+			return unit.Program{}, i, false
+		}
+		if units[i].Name != "" && prog.Package != units[i].Name {
+			return unit.Program{}, i, false
+		}
+		programs[i] = prog
+	}
+	program, ok := LinkPrograms(programs, root, units[root].Name)
+	if !ok {
+		return unit.Program{}, -1, false
+	}
+	return program, -1, true
+}
+
 func LinkUnits(units []build.PackageUnit, root int) (unit.Program, bool) {
 	if root < 0 || root >= len(units) {
 		return unit.Program{}, false
 	}
-	program := unit.Program{Package: units[root].Name}
-	finalEOF := countLinkedTokens(units)
-	lineOffset := 0
+	programs := make([]unit.Program, len(units))
 	for i := 0; i < len(units); i++ {
-		ok := appendProgram(&program, units[i].Program, finalEOF, lineOffset, i+1 < len(units))
+		programs[i] = units[i].Program
+	}
+	return LinkPrograms(programs, root, units[root].Name)
+}
+
+func LinkPrograms(programs []unit.Program, root int, rootName string) (unit.Program, bool) {
+	if root < 0 || root >= len(programs) || rootName == "" {
+		return unit.Program{}, false
+	}
+	program := unit.Program{Package: rootName}
+	finalEOF := countLinkedTokens(programs)
+	lineOffset := 0
+	for i := 0; i < len(programs); i++ {
+		ok := appendProgram(&program, programs[i], finalEOF, lineOffset, i+1 < len(programs))
 		if !ok {
 			return unit.Program{}, false
 		}
-		lineOffset = nextLineOffset(lineOffset, units[i].Program.Text, i+1 < len(units))
+		lineOffset = nextLineOffset(lineOffset, programs[i].Text, i+1 < len(programs))
 	}
 	program.Tokens = append(program.Tokens, unit.Token{
 		Kind:  unit.TokenEOF,
@@ -109,10 +142,10 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 	return true
 }
 
-func countLinkedTokens(units []build.PackageUnit) int {
+func countLinkedTokens(programs []unit.Program) int {
 	count := 0
-	for i := 0; i < len(units); i++ {
-		tokens := units[i].Program.Tokens
+	for i := 0; i < len(programs); i++ {
+		tokens := programs[i].Tokens
 		for j := 0; j < len(tokens); j++ {
 			if tokens[j].Kind != unit.TokenEOF {
 				count++
