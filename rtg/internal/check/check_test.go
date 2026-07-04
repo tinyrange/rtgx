@@ -363,6 +363,50 @@ func Value() int { return 4 }
 	assertPackageSelectorCall(t, prog, body, "lib", "Value")
 }
 
+func TestCheckGraphAssignmentsAndReturns(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func appMain(param int) (first int, second int) {
+	first, second = pair()
+	second += len("x")
+	value := first + second
+	return value, second
+}
+
+func pair() (int, int) {
+	return 1, 2
+}
+`)},
+	})
+	prog := CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	root := prog.Packages[0]
+	bodyIndex := LookupFuncBody(root, "appMain")
+	if bodyIndex < 0 {
+		t.Fatalf("appMain body not found: %#v", root.Bodies)
+	}
+	body := root.Bodies[bodyIndex]
+	file := prog.Graph.Packages[0].Files[body.File].File
+	if len(body.Assigns) != 3 {
+		t.Fatalf("appMain assignments = %#v, want 3", body.Assigns)
+	}
+	assertAssign(t, file, body.Assigns[0], AssignSet, []string{"first", "second"}, []string{"pair()"})
+	assertAssign(t, file, body.Assigns[1], AssignAdd, []string{"second"}, []string{"len(\"x\")"})
+	assertAssign(t, file, body.Assigns[2], AssignDefine, []string{"value"}, []string{"first + second"})
+	assertReturnValues(t, file, body.Returns, [][]string{{"value", "second"}})
+
+	pairIndex := LookupFuncBody(root, "pair")
+	if pairIndex < 0 {
+		t.Fatalf("pair body not found: %#v", root.Bodies)
+	}
+	pairBody := root.Bodies[pairIndex]
+	pairFile := prog.Graph.Packages[0].Files[pairBody.File].File
+	assertReturnValues(t, pairFile, pairBody.Returns, [][]string{{"1", "2"}})
+}
+
 func TestCheckGraphDuplicateParamScope(t *testing.T) {
 	graph := testGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -776,6 +820,51 @@ func assertPackageSelectorCall(t *testing.T, prog Program, body FuncBody, base s
 	}
 	if call.Symbol < 0 || call.Symbol >= len(prog.Packages[call.Package].Symbols) || prog.Packages[call.Package].Symbols[call.Symbol].Name != name {
 		t.Fatalf("package selector call %s.%s symbol = %d in %#v", base, name, call.Symbol, prog.Packages[call.Package].Symbols)
+	}
+}
+
+func assertAssign(t *testing.T, file syntax.File, assign AssignInfo, kind int, targets []string, values []string) {
+	t.Helper()
+	if assign.Kind != kind {
+		t.Fatalf("assignment kind = %d, want %d: %#v", assign.Kind, kind, assign)
+	}
+	if len(assign.Targets) != len(targets) {
+		t.Fatalf("assignment targets = %#v, want %v", assign.Targets, targets)
+	}
+	for i := 0; i < len(targets); i++ {
+		target := assign.Targets[i]
+		if target.Name != targets[i] {
+			t.Fatalf("assignment target %d = %q, want %q in %#v", i, target.Name, targets[i], assign.Targets)
+		}
+		if target.Ref.Kind != RefScope {
+			t.Fatalf("assignment target %q ref = %#v, want scope ref", target.Name, target.Ref)
+		}
+		if got := spanText(file, target.Span.StartTok, target.Span.EndTok); got != targets[i] {
+			t.Fatalf("assignment target %q span = %q", target.Name, got)
+		}
+	}
+	assertExprSpans(t, file, assign.Values, values)
+}
+
+func assertReturnValues(t *testing.T, file syntax.File, returns []ReturnInfo, want [][]string) {
+	t.Helper()
+	if len(returns) != len(want) {
+		t.Fatalf("returns = %#v, want %v", returns, want)
+	}
+	for i := 0; i < len(want); i++ {
+		assertExprSpans(t, file, returns[i].Values, want[i])
+	}
+}
+
+func assertExprSpans(t *testing.T, file syntax.File, spans []ExprSpan, want []string) {
+	t.Helper()
+	if len(spans) != len(want) {
+		t.Fatalf("expr spans = %#v, want %v", spans, want)
+	}
+	for i := 0; i < len(want); i++ {
+		if got := spanText(file, spans[i].StartTok, spans[i].EndTok); got != want[i] {
+			t.Fatalf("expr span %d = %q, want %q in %#v", i, got, want[i], spans)
+		}
 	}
 }
 
