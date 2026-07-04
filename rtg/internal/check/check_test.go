@@ -406,6 +406,14 @@ type reader interface {
 	assertType(t, file, root, "callback", TypeFunc, false, "func(int) string")
 	assertType(t, file, root, "face", TypeInterface, false, "interface { Value() int }")
 	assertType(t, file, root, "reader", TypeInterface, false, "interface {\n\tEmbedded\n\tRead(p []byte) (n int, err error)\n\tClose() error\n}")
+	assertTypeShape(t, file, root, "table", "", "string", "int")
+	assertTypeShape(t, file, root, "values", "", "", "int")
+	assertTypeShape(t, file, root, "fixed", "4", "", "int")
+	assertTypeShape(t, file, root, "ptr", "", "", "item")
+
+	callback := root.Types[LookupType(root, "callback")]
+	assertSignatureFields(t, file, callback.Signature.Params, []string{":int"})
+	assertSignatureFields(t, file, callback.Signature.Results, []string{":string"})
 
 	item := root.Types[LookupType(root, "item")]
 	assertField(t, file, item.Fields, "value", "int")
@@ -1145,6 +1153,24 @@ func assertType(t *testing.T, file syntax.File, info PackageInfo, name string, k
 	}
 	if got := spanText(file, tp.TypeStart, tp.TypeEnd); got != typ {
 		t.Fatalf("type %q span = %q, want %q", name, got, typ)
+	}
+}
+
+func assertTypeShape(t *testing.T, file syntax.File, info PackageInfo, name string, lenText string, keyText string, elemText string) {
+	t.Helper()
+	index := LookupType(info, name)
+	if index < 0 {
+		t.Fatalf("type %q not found in %#v", name, info.Types)
+	}
+	tp := info.Types[index]
+	if got := spanText(file, tp.LenStart, tp.LenEnd); got != lenText {
+		t.Fatalf("type %q len span = %q, want %q", name, got, lenText)
+	}
+	if got := spanText(file, tp.KeyStart, tp.KeyEnd); got != keyText {
+		t.Fatalf("type %q key span = %q, want %q", name, got, keyText)
+	}
+	if got := spanText(file, tp.ElemStart, tp.ElemEnd); got != elemText {
+		t.Fatalf("type %q elem span = %q, want %q", name, got, elemText)
 	}
 }
 

@@ -24,6 +24,13 @@ type TypeInfo struct {
 	Alias            bool
 	TypeStart        int
 	TypeEnd          int
+	LenStart         int
+	LenEnd           int
+	KeyStart         int
+	KeyEnd           int
+	ElemStart        int
+	ElemEnd          int
+	Signature        FuncSignature
 	Fields           []Field
 	InterfaceMethods []InterfaceMethod
 	InterfaceEmbeds  []InterfaceEmbed
@@ -50,6 +57,12 @@ func buildTypeInfo(file syntax.File, decl DeclInfo, declIndex int) TypeInfo {
 		Alias:     decl.Alias,
 		TypeStart: decl.TypeStart,
 		TypeEnd:   decl.TypeEnd,
+		LenStart:  -1,
+		LenEnd:    -1,
+		KeyStart:  -1,
+		KeyEnd:    -1,
+		ElemStart: -1,
+		ElemEnd:   -1,
 	}
 	if out.Kind == TypeStruct {
 		open := findTypeTopLevelChar(file, decl.TypeStart, decl.TypeEnd, '{')
@@ -63,6 +76,14 @@ func buildTypeInfo(file syntax.File, decl DeclInfo, declIndex int) TypeInfo {
 		if open >= 0 && close > open && close <= decl.TypeEnd {
 			out.InterfaceMethods, out.InterfaceEmbeds = parseInterfaceElements(file, open+1, close-1)
 		}
+	} else if out.Kind == TypeMap {
+		out.KeyStart, out.KeyEnd, out.ElemStart, out.ElemEnd = parseMapTypeShape(file, decl.TypeStart, decl.TypeEnd)
+	} else if out.Kind == TypeSlice || out.Kind == TypeArray {
+		out.LenStart, out.LenEnd, out.ElemStart, out.ElemEnd = parseArrayTypeShape(file, decl.TypeStart, decl.TypeEnd)
+	} else if out.Kind == TypePointer {
+		out.ElemStart, out.ElemEnd = trimTypeSpan(file, decl.TypeStart+1, decl.TypeEnd)
+	} else if out.Kind == TypeFunc {
+		out.Signature = parseFuncTypeSignature(file, decl.TypeStart, decl.TypeEnd)
 	}
 	return out
 }
@@ -96,6 +117,69 @@ func classifyType(file syntax.File, start int, end int) int {
 		return TypeNamed
 	}
 	return TypeOther
+}
+
+func parseMapTypeShape(file syntax.File, start int, end int) (int, int, int, int) {
+	if start+1 >= end || !tokCharIs(file, start+1, '[') {
+		return -1, -1, -1, -1
+	}
+	close := findTypeMatching(file, start+1, '[', ']')
+	if close <= start+2 || close > end {
+		return -1, -1, -1, -1
+	}
+	keyStart, keyEnd := trimTypeSpan(file, start+2, close-1)
+	elemStart, elemEnd := trimTypeSpan(file, close, end)
+	return keyStart, keyEnd, elemStart, elemEnd
+}
+
+func parseArrayTypeShape(file syntax.File, start int, end int) (int, int, int, int) {
+	if start >= end || !tokCharIs(file, start, '[') {
+		return -1, -1, -1, -1
+	}
+	close := findTypeMatching(file, start, '[', ']')
+	if close <= start || close > end {
+		return -1, -1, -1, -1
+	}
+	lenStart := -1
+	lenEnd := -1
+	if close-start > 2 {
+		lenStart, lenEnd = trimTypeSpan(file, start+1, close-1)
+	}
+	elemStart, elemEnd := trimTypeSpan(file, close, end)
+	return lenStart, lenEnd, elemStart, elemEnd
+}
+
+func parseFuncTypeSignature(file syntax.File, start int, end int) FuncSignature {
+	if start+1 >= end || !tokCharIs(file, start+1, '(') {
+		return FuncSignature{}
+	}
+	paramsEnd := findTypeMatching(file, start+1, '(', ')')
+	if paramsEnd <= start+1 || paramsEnd > end {
+		return FuncSignature{}
+	}
+	resultStart := -1
+	resultEnd := -1
+	if paramsEnd < end {
+		resultStart, resultEnd = trimTypeSpan(file, paramsEnd, end)
+	}
+	return buildSignatureFromParts(file, -1, -1, start+1, paramsEnd, resultStart, resultEnd)
+}
+
+func trimTypeSpan(file syntax.File, start int, end int) (int, int) {
+	for start < end && isTypeSpanSeparator(file, start) {
+		start++
+	}
+	for end > start && isTypeSpanSeparator(file, end-1) {
+		end--
+	}
+	if start >= end {
+		return -1, -1
+	}
+	return start, end
+}
+
+func isTypeSpanSeparator(file syntax.File, tok int) bool {
+	return tokCharIs(file, tok, ';') || tokCharIs(file, tok, ',')
 }
 
 func parseStructFields(file syntax.File, start int, end int) []Field {
