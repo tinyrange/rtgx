@@ -4,7 +4,9 @@ package driver
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -175,6 +177,50 @@ func TestHostEnvHelpers(t *testing.T) {
 	}
 }
 
+func TestRunCommandWithRealBackendCompilesMainEntrypoint(t *testing.T) {
+	target, ok := hostRunnableTarget()
+	if !ok {
+		t.Skipf("no directly runnable frontend target for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	repoRoot := driverRepoRoot(t)
+	dir := writeHostMainCase(t)
+	backend := filepath.Join(t.TempDir(), "rtgx-backend")
+	cmd := exec.Command("go", "build", "-o", backend, ".")
+	cmd.Dir = repoRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("backend build failed: %v\n%s", err, string(out))
+	}
+
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd failed: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir failed: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(oldwd); err != nil {
+			t.Fatalf("restore Chdir failed: %v", err)
+		}
+	}()
+
+	result := RunCommand(
+		[]string{"rtg", "-t", target, "-s", "-o", "app", "./cmd/app"},
+		[]string{BackendEnv + "=" + backend},
+		nil,
+	)
+	if !result.Ok {
+		t.Fatalf("RunCommand failed: err=%d path=%q compile=%#v", result.Error, result.ErrorPath, result.Compile)
+	}
+	out, err := exec.Command(filepath.Join(dir, "app")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("compiled app failed: %v\n%s", err, string(out))
+	}
+	if string(out) != "PASS\n" {
+		t.Fatalf("compiled app output = %q", string(out))
+	}
+}
+
 func writeHostCase(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -192,4 +238,64 @@ func appMain() int { return 0 }
 		t.Fatalf("failed to write main.go: %v", err)
 	}
 	return dir
+}
+
+func writeHostMainCase(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/case\n"), 0o644); err != nil {
+		t.Fatalf("failed to write go.mod: %v", err)
+	}
+	appDir := filepath.Join(dir, "cmd", "app")
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatalf("failed to create app dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "main.go"), []byte(`package main
+
+func calc(a int, b int, c int) int {
+	total := (a + b) * c
+	total = total - b
+	total = total + a%5
+	return total
+}
+
+func main() {
+	if calc(3, 5, 2) == 14 {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main.go: %v", err)
+	}
+	return dir
+}
+
+func driverRepoRoot(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
+}
+
+func hostRunnableTarget() (string, bool) {
+	if runtime.GOOS != "linux" {
+		return "", false
+	}
+	if runtime.GOARCH == "amd64" {
+		return "linux/amd64", true
+	}
+	if runtime.GOARCH == "386" {
+		return "linux/386", true
+	}
+	if runtime.GOARCH == "arm" {
+		return "linux/arm", true
+	}
+	if runtime.GOARCH == "arm64" {
+		return "linux/aarch64", true
+	}
+	return "", false
 }
