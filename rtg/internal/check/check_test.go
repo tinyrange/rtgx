@@ -348,6 +348,55 @@ type reader interface {
 	assertInterfaceMethod(t, file, reader, "Close", nil, []string{":error"})
 }
 
+func TestCheckGraphTypeReferences(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import lib "example.com/case/pkg/lib"
+
+type item struct {
+	value int
+	imported lib.Item
+}
+
+type alias = lib.Item
+var current item
+
+func appMain(param lib.Item) item {
+	type local = item
+	var next local
+	var other []lib.Item
+	_ = next
+	_ = other
+	return current
+}
+`)},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
+
+type Item struct {
+	Value int
+}
+`)},
+	})
+	prog := CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	root := prog.Packages[len(prog.Packages)-1]
+	assertTypeRef(t, root.TypeRefs, "", "int", TypeRefBuiltin)
+	assertTypeRef(t, root.TypeRefs, "lib", "Item", TypeRefImportSelector)
+	assertTypeRef(t, root.TypeRefs, "", "item", TypeRefPackage)
+
+	bodyIndex := LookupFuncBody(root, "appMain")
+	if bodyIndex < 0 {
+		t.Fatalf("appMain body not found: %#v", root.Bodies)
+	}
+	body := root.Bodies[bodyIndex]
+	assertTypeRef(t, body.TypeRefs, "lib", "Item", TypeRefImportSelector)
+	assertTypeRef(t, body.TypeRefs, "", "item", TypeRefPackage)
+	assertTypeRef(t, body.TypeRefs, "", "local", TypeRefScope)
+}
+
 func TestCheckGraphMethodSets(t *testing.T) {
 	graph := testGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -850,6 +899,21 @@ func assertInterfaceEmbed(t *testing.T, file syntax.File, tp TypeInfo, typ strin
 		}
 	}
 	t.Fatalf("interface embed %q not found in %#v", typ, tp.InterfaceEmbeds)
+}
+
+func assertTypeRef(t *testing.T, refs []TypeRef, base string, name string, kind int) {
+	t.Helper()
+	index := LookupTypeRef(refs, base, name, kind)
+	if index < 0 {
+		t.Fatalf("type ref %s.%s kind %d not found in %#v", base, name, kind, refs)
+	}
+	ref := refs[index]
+	if kind == TypeRefPackage && (ref.Package < 0 || ref.Symbol < 0) {
+		t.Fatalf("package type ref %q unresolved: %#v", name, ref)
+	}
+	if kind == TypeRefImportSelector && (ref.Package < 0 || ref.Symbol < 0) {
+		t.Fatalf("import selector type ref %s.%s unresolved: %#v", base, name, ref)
+	}
 }
 
 func assertSignatureFields(t *testing.T, file syntax.File, fields []Field, want []string) {

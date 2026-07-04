@@ -40,6 +40,7 @@ type PackageInfo struct {
 	Decls     []DeclInfo
 	DeclOrder []int
 	Types     []TypeInfo
+	TypeRefs  []TypeRef
 	Methods   []MethodInfo
 	Bodies    []FuncBody
 }
@@ -102,6 +103,7 @@ type FuncBody struct {
 	Selectors []SelectorRef
 	Calls     []CallRef
 	Locals    []LocalDeclInfo
+	TypeRefs  []TypeRef
 	Assigns   []AssignInfo
 	Returns   []ReturnInfo
 }
@@ -219,6 +221,7 @@ func checkPackage(graph load.Graph, pkgIndex int, checked []PackageInfo) (Packag
 		}
 	}
 	sortTypes(info.Types)
+	info.TypeRefs = buildPackageTypeRefs(pkg, info, checked)
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Funcs); i++ {
@@ -242,9 +245,10 @@ func checkPackage(graph load.Graph, pkgIndex int, checked []PackageInfo) (Packag
 			selectors := buildFuncSelectors(file, fileIndex, info, checked, body, scope)
 			calls := buildFuncCalls(file, fileIndex, info, checked, body, scope)
 			locals := buildFuncLocalDecls(file, fileIndex, body, scope)
+			typeRefs := buildFuncTypeRefs(file, fileIndex, info, checked, signature, locals, scope)
 			assigns := buildFuncAssignments(file, fileIndex, info, body, scope)
 			returns := buildFuncReturns(file, body)
-			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Signature: signature, Body: body, Scope: scope, Refs: refs, Selectors: selectors, Calls: calls, Locals: locals, Assigns: assigns, Returns: returns})
+			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Signature: signature, Body: body, Scope: scope, Refs: refs, Selectors: selectors, Calls: calls, Locals: locals, TypeRefs: typeRefs, Assigns: assigns, Returns: returns})
 		}
 	}
 	buildMethodSets(&info, pkg)
