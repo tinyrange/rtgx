@@ -89,6 +89,16 @@ func TestMarshalRoundTripInternalDecoder(t *testing.T) {
 
 func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 	program := declProgram()
+	program.DeclMeta = []DeclMeta{{
+		DeclIndex:  0,
+		Symbol:     -1,
+		ValueIndex: 0,
+		TypeStart:  -1,
+		TypeEnd:    -1,
+		ValueStart: 5,
+		ValueEnd:   6,
+		Values:     []ExprSpan{{StartTok: 5, EndTok: 6}},
+	}}
 	program.Signatures = []FuncSignature{{
 		FuncIndex: 0,
 		Results:   []Field{{NameTok: -1, TypeStart: 10, TypeEnd: 11}},
@@ -407,6 +417,7 @@ func equalPrograms(left Program, right Program) bool {
 		return false
 	}
 	if len(left.Tokens) != len(right.Tokens) || len(left.Decls) != len(right.Decls) || len(left.Funcs) != len(right.Funcs) ||
+		len(left.DeclMeta) != len(right.DeclMeta) ||
 		len(left.Signatures) != len(right.Signatures) ||
 		len(left.Types) != len(right.Types) ||
 		len(left.TypeRefs) != len(right.TypeRefs) ||
@@ -429,6 +440,24 @@ func equalPrograms(left Program, right Program) bool {
 	for i := 0; i < len(left.Funcs); i++ {
 		if left.Funcs[i] != right.Funcs[i] {
 			return false
+		}
+	}
+	for i := 0; i < len(left.DeclMeta); i++ {
+		if left.DeclMeta[i].DeclIndex != right.DeclMeta[i].DeclIndex ||
+			left.DeclMeta[i].Symbol != right.DeclMeta[i].Symbol ||
+			left.DeclMeta[i].ValueIndex != right.DeclMeta[i].ValueIndex ||
+			left.DeclMeta[i].TypeStart != right.DeclMeta[i].TypeStart ||
+			left.DeclMeta[i].TypeEnd != right.DeclMeta[i].TypeEnd ||
+			left.DeclMeta[i].ValueStart != right.DeclMeta[i].ValueStart ||
+			left.DeclMeta[i].ValueEnd != right.DeclMeta[i].ValueEnd ||
+			left.DeclMeta[i].Alias != right.DeclMeta[i].Alias ||
+			len(left.DeclMeta[i].Values) != len(right.DeclMeta[i].Values) {
+			return false
+		}
+		for j := 0; j < len(left.DeclMeta[i].Values); j++ {
+			if left.DeclMeta[i].Values[j] != right.DeclMeta[i].Values[j] {
+				return false
+			}
 		}
 	}
 	for i := 0; i < len(left.Signatures); i++ {

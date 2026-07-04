@@ -193,6 +193,9 @@ func appMain() int {
 	if len(result.Program.Types) != 1 {
 		t.Fatalf("types = %#v, want 1", result.Program.Types)
 	}
+	if len(result.Program.DeclMeta) != len(result.Program.Decls) {
+		t.Fatalf("decl metadata = %#v, want %d", result.Program.DeclMeta, len(result.Program.Decls))
+	}
 	if len(result.Program.Signatures) != len(result.Program.Funcs) {
 		t.Fatalf("signatures = %#v, want %d", result.Program.Signatures, len(result.Program.Funcs))
 	}
@@ -214,6 +217,9 @@ func appMain() int {
 		t.Fatalf("unit rows missing: decls=%#v funcs=%#v", result.Program.Decls, result.Program.Funcs)
 	}
 	assertUnitType(t, result.Program, "item", unit.TypeStruct, item, "struct { value int }", "", "", "")
+	assertUnitDeclMeta(t, result.Program, item, "struct { value int }", "", nil, false)
+	assertUnitDeclMeta(t, result.Program, global, "", "[]int{1, 2, 3}", []string{"[]int{1, 2, 3}"}, false)
+	assertUnitDeclMeta(t, result.Program, picked, "", "choose(global[1])", []string{"choose(global[1])"}, false)
 	assertUnitSignature(t, result.Program, choose, nil, []string{"v:int"}, []string{":int"})
 	assertUnitSignature(t, result.Program, appMain, nil, nil, []string{":int"})
 	assertUnitComposite(t, result.Program, unit.OwnerDecl, global, "[]int", []string{"1", "2", "3"})
@@ -256,6 +262,9 @@ func appMain() int {
 	}
 	if len(decoded.Types) != len(result.Program.Types) {
 		t.Fatalf("decoded types = %d, want %d", len(decoded.Types), len(result.Program.Types))
+	}
+	if len(decoded.DeclMeta) != len(result.Program.DeclMeta) {
+		t.Fatalf("decoded decl metadata = %d, want %d", len(decoded.DeclMeta), len(result.Program.DeclMeta))
 	}
 	if len(decoded.Signatures) != len(result.Program.Signatures) {
 		t.Fatalf("decoded signatures = %d, want %d", len(decoded.Signatures), len(result.Program.Signatures))
@@ -500,6 +509,32 @@ func assertUnitType(t *testing.T, program unit.Program, name string, kind int, d
 		return
 	}
 	t.Fatalf("type name=%s kind=%d decl=%d not found in %#v", name, kind, decl, program.Types)
+}
+
+func assertUnitDeclMeta(t *testing.T, program unit.Program, declIndex int, typ string, value string, values []string, alias bool) {
+	t.Helper()
+	for i := 0; i < len(program.DeclMeta); i++ {
+		meta := program.DeclMeta[i]
+		if meta.DeclIndex != declIndex || meta.Alias != alias {
+			continue
+		}
+		if unitSpanText(program, meta.TypeStart, meta.TypeEnd) != typ {
+			t.Fatalf("decl meta %d type = %q, want %q", declIndex, unitSpanText(program, meta.TypeStart, meta.TypeEnd), typ)
+		}
+		if unitSpanText(program, meta.ValueStart, meta.ValueEnd) != value {
+			t.Fatalf("decl meta %d value = %q, want %q", declIndex, unitSpanText(program, meta.ValueStart, meta.ValueEnd), value)
+		}
+		if len(meta.Values) != len(values) {
+			t.Fatalf("decl meta %d values = %#v, want %v", declIndex, meta.Values, values)
+		}
+		for j := 0; j < len(values); j++ {
+			if got := unitSpanText(program, meta.Values[j].StartTok, meta.Values[j].EndTok); got != values[j] {
+				t.Fatalf("decl meta %d value %d = %q, want %q", declIndex, j, got, values[j])
+			}
+		}
+		return
+	}
+	t.Fatalf("decl metadata index=%d alias=%v not found in %#v", declIndex, alias, program.DeclMeta)
 }
 
 func assertUnitSignature(t *testing.T, program unit.Program, funcIndex int, receiver []string, params []string, results []string) {

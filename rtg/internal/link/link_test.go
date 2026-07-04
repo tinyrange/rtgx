@@ -162,6 +162,8 @@ func Value(i int) int {
 	if numbers < 0 || values < 0 || valueFn < 0 || appMain < 0 {
 		t.Fatalf("linked rows missing: decls=%#v funcs=%#v", program.Decls, program.Funcs)
 	}
+	assertLinkedDeclMeta(t, program, numbers, "[]int", "", nil)
+	assertLinkedDeclMeta(t, program, values, "", "[]int{1, 2}", []string{"[]int{1, 2}"})
 	assertLinkedSignature(t, program, valueFn, nil, []string{"i:int"}, []string{":int"})
 	assertLinkedSignature(t, program, appMain, nil, nil, []string{":int"})
 	if len(program.Types) != 1 {
@@ -374,6 +376,32 @@ func assertLinkedSignature(t *testing.T, program unit.Program, funcIndex int, re
 		return
 	}
 	t.Fatalf("linked signature func=%d not found in %#v", funcIndex, program.Signatures)
+}
+
+func assertLinkedDeclMeta(t *testing.T, program unit.Program, declIndex int, typ string, value string, values []string) {
+	t.Helper()
+	for i := 0; i < len(program.DeclMeta); i++ {
+		meta := program.DeclMeta[i]
+		if meta.DeclIndex != declIndex {
+			continue
+		}
+		if linkedSpanText(program, meta.TypeStart, meta.TypeEnd) != typ {
+			t.Fatalf("linked decl meta %d type = %q, want %q", declIndex, linkedSpanText(program, meta.TypeStart, meta.TypeEnd), typ)
+		}
+		if linkedSpanText(program, meta.ValueStart, meta.ValueEnd) != value {
+			t.Fatalf("linked decl meta %d value = %q, want %q", declIndex, linkedSpanText(program, meta.ValueStart, meta.ValueEnd), value)
+		}
+		if len(meta.Values) != len(values) {
+			t.Fatalf("linked decl meta %d values = %#v, want %v", declIndex, meta.Values, values)
+		}
+		for j := 0; j < len(values); j++ {
+			if got := linkedSpanText(program, meta.Values[j].StartTok, meta.Values[j].EndTok); got != values[j] {
+				t.Fatalf("linked decl meta %d value %d = %q, want %q", declIndex, j, got, values[j])
+			}
+		}
+		return
+	}
+	t.Fatalf("linked decl metadata index=%d not found in %#v", declIndex, program.DeclMeta)
 }
 
 func assertLinkedFields(t *testing.T, program unit.Program, fields []unit.Field, want []string) {

@@ -282,6 +282,12 @@ func (b *unitBuilder) addCheckedDecls(info check.PackageInfo, files []fileTokens
 		}
 		ownerIndex := len(b.program.Decls) - 1
 		b.declRows[index] = ownerIndex
+		meta, ok := b.mapDeclMeta(declInfo, files[declInfo.File].oldToNew, ownerIndex)
+		if !ok {
+			b.setErr(EmitErrCheck, declInfo.File, declInfo.Token)
+			return false
+		}
+		b.program.DeclMeta = append(b.program.DeclMeta, meta)
 		if !b.addDeclShapes(declInfo, files[declInfo.File].oldToNew, ownerIndex) {
 			return false
 		}
@@ -293,6 +299,39 @@ func (b *unitBuilder) addCheckedDecls(info check.PackageInfo, files []fileTokens
 		}
 	}
 	return true
+}
+
+func (b *unitBuilder) mapDeclMeta(decl check.DeclInfo, oldToNew []int, declIndex int) (unit.DeclMeta, bool) {
+	typeStart, typeEnd, ok := mapNullableTokenSpan(decl.TypeStart, decl.TypeEnd, oldToNew, b.finalEOF)
+	if !ok {
+		return unit.DeclMeta{}, false
+	}
+	valueStart, valueEnd, ok := mapNullableTokenSpan(decl.ValueStart, decl.ValueEnd, oldToNew, b.finalEOF)
+	if !ok {
+		return unit.DeclMeta{}, false
+	}
+	out := unit.DeclMeta{
+		DeclIndex:  declIndex,
+		Symbol:     decl.Symbol,
+		ValueIndex: decl.ValueIndex,
+		TypeStart:  typeStart,
+		TypeEnd:    typeEnd,
+		ValueStart: valueStart,
+		ValueEnd:   valueEnd,
+		Values:     make([]unit.ExprSpan, 0, len(decl.Values)),
+		Alias:      decl.Alias,
+	}
+	if declIndex < 0 || out.Symbol < -1 || out.ValueIndex < 0 {
+		return out, false
+	}
+	for i := 0; i < len(decl.Values); i++ {
+		span, ok := mapExprSpan(decl.Values[i], oldToNew, b.finalEOF)
+		if !ok {
+			return out, false
+		}
+		out.Values = append(out.Values, span)
+	}
+	return out, true
 }
 
 func (b *unitBuilder) addCheckedTypes(info check.PackageInfo, files []fileTokens) bool {

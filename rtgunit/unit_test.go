@@ -86,6 +86,16 @@ func appMain() int { return values[0] }
 	localNamePos := localNameTok * tokenStride
 	localNameStart := readTokenStart(program.Tokens, localNamePos)
 	localNameSize := int(program.Tokens[localNamePos+4]) | int(program.Tokens[localNamePos+5])<<8
+	program.DeclMeta = []DeclMeta{{
+		DeclIndex:  0,
+		Symbol:     -1,
+		ValueIndex: 0,
+		TypeStart:  -1,
+		TypeEnd:    -1,
+		ValueStart: 4,
+		ValueEnd:   12,
+		Values:     []ExprSpan{{StartTok: 4, EndTok: 12}},
+	}}
 	program.Signatures = []FuncSignature{{
 		FuncIndex: 0,
 		Results:   []Field{{NameTok: -1, TypeStart: 17, TypeEnd: 18}},
@@ -223,6 +233,9 @@ func appMain() int { return values[0] }
 	}
 	if len(decoded.Signatures) != 1 || len(decoded.Signatures[0].Results) != 1 || decoded.Signatures[0].Results[0] != program.Signatures[0].Results[0] {
 		t.Fatalf("decoded signatures = %#v, want %#v", decoded.Signatures, program.Signatures)
+	}
+	if len(decoded.DeclMeta) != 1 || len(decoded.DeclMeta[0].Values) != 1 || decoded.DeclMeta[0].Values[0] != program.DeclMeta[0].Values[0] {
+		t.Fatalf("decoded decl metadata = %#v, want %#v", decoded.DeclMeta, program.DeclMeta)
 	}
 	if len(decoded.Locals) != 1 || decoded.Locals[0].Kind != rtgTokVar || decoded.Locals[0].Values[0] != program.Locals[0].Values[0] {
 		t.Fatalf("decoded locals = %#v, want %#v", decoded.Locals, program.Locals)

@@ -125,6 +125,13 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		decl.EndTok = mapToken(oldToNew, decl.EndTok, finalEOF)
 		dst.Decls = append(dst.Decls, decl)
 	}
+	for i := 0; i < len(src.DeclMeta); i++ {
+		meta, ok := mapDeclMeta(src.DeclMeta[i], oldToNew, finalEOF, declOffset)
+		if !ok {
+			return false
+		}
+		dst.DeclMeta = append(dst.DeclMeta, meta)
+	}
 	for i := 0; i < len(src.Funcs); i++ {
 		fn := src.Funcs[i]
 		fn.NameStart += textOffset
@@ -219,6 +226,26 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		dst.Text = append(dst.Text, '\n')
 	}
 	return true
+}
+
+func mapDeclMeta(meta unit.DeclMeta, oldToNew []int, eof int, declOffset int) (unit.DeclMeta, bool) {
+	if meta.DeclIndex < 0 {
+		return meta, false
+	}
+	meta.DeclIndex += declOffset
+	var ok bool
+	meta.TypeStart, meta.TypeEnd, ok = mapNullableSpan(meta.TypeStart, meta.TypeEnd, oldToNew, eof)
+	if !ok {
+		return meta, false
+	}
+	meta.ValueStart, meta.ValueEnd, ok = mapNullableSpan(meta.ValueStart, meta.ValueEnd, oldToNew, eof)
+	if !ok {
+		return meta, false
+	}
+	for i := 0; i < len(meta.Values); i++ {
+		meta.Values[i] = mapExprSpan(meta.Values[i], oldToNew, eof)
+	}
+	return meta, true
 }
 
 func mapSignature(sig unit.FuncSignature, oldToNew []int, eof int, funcOffset int) (unit.FuncSignature, bool) {

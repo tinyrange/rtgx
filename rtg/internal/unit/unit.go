@@ -23,6 +23,7 @@ const (
 	TagTypeRefs = 19
 	TagLocals   = 20
 	TagSigs     = 21
+	TagDeclMeta = 22
 )
 
 const (
@@ -64,6 +65,18 @@ type Decl struct {
 	NameEnd   int
 	StartTok  int
 	EndTok    int
+}
+
+type DeclMeta struct {
+	DeclIndex  int
+	Symbol     int
+	ValueIndex int
+	TypeStart  int
+	TypeEnd    int
+	ValueStart int
+	ValueEnd   int
+	Values     []ExprSpan
+	Alias      bool
 }
 
 type Func struct {
@@ -288,6 +301,7 @@ type Program struct {
 	Text       []byte
 	Tokens     []Token
 	Decls      []Decl
+	DeclMeta   []DeclMeta
 	Funcs      []Func
 	Signatures []FuncSignature
 	Types      []TypeInfo
@@ -311,6 +325,10 @@ func Marshal(program Program) ([]byte, bool) {
 		return nil, false
 	}
 	declData, ok := encodeDecls(program.Decls)
+	if !ok {
+		return nil, false
+	}
+	declMetaData, ok := encodeDeclMeta(program.DeclMeta, len(program.Tokens), len(program.Decls))
 	if !ok {
 		return nil, false
 	}
@@ -367,6 +385,7 @@ func Marshal(program Program) ([]byte, bool) {
 	root = appendNode(root, TagText, program.Text)
 	root = appendNode(root, TagTokens, tokenData)
 	root = appendNode(root, TagDecls, declData)
+	root = appendNode(root, TagDeclMeta, declMetaData)
 	root = appendNode(root, TagFuncs, funcData)
 	root = appendNode(root, TagSigs, sigData)
 	root = appendNode(root, TagTypes, typeData)
@@ -410,6 +429,7 @@ func Unmarshal(data []byte) (Program, bool) {
 		return program, false
 	}
 	tokenData := []byte{}
+	declMetaData := []byte{}
 	sigData := []byte{}
 	typeData := []byte{}
 	typeRefData := []byte{}
@@ -425,6 +445,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	seenText := false
 	seenTokens := false
 	seenDecls := false
+	seenDeclMeta := false
 	seenFuncs := false
 	seenSigs := false
 	seenTypes := false
@@ -478,6 +499,12 @@ func Unmarshal(data []byte) (Program, bool) {
 				return program, false
 			}
 			program.Decls = decls
+		} else if tag == TagDeclMeta {
+			if seenDeclMeta {
+				return program, false
+			}
+			seenDeclMeta = true
+			declMetaData = payload
 		} else if tag == TagFuncs {
 			if seenFuncs {
 				return program, false
@@ -570,6 +597,13 @@ func Unmarshal(data []byte) (Program, bool) {
 		return program, false
 	}
 	program.Tokens = tokens
+	if seenDeclMeta {
+		declMeta, ok := decodeDeclMeta(declMetaData, len(program.Tokens), len(program.Decls))
+		if !ok {
+			return program, false
+		}
+		program.DeclMeta = declMeta
+	}
 	if seenSigs {
 		sigs, ok := decodeSignatures(sigData, len(program.Tokens), len(program.Funcs))
 		if !ok {
@@ -802,6 +836,95 @@ func decodeDecls(data []byte) ([]Decl, bool) {
 		return nil, false
 	}
 	return decls, true
+}
+
+func encodeDeclMeta(metas []DeclMeta, tokenLimit int, declLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(metas)*12+1)
+	out = appendVarint(out, len(metas))
+	ok := true
+	for i := 0; i < len(metas); i++ {
+		meta := metas[i]
+		if meta.DeclIndex < 0 || meta.DeclIndex >= declLimit ||
+			!validNullable(meta.Symbol) ||
+			meta.ValueIndex < 0 {
+			return nil, false
+		}
+		out = appendVarint(out, meta.DeclIndex)
+		out = appendNullable(out, meta.Symbol)
+		out = appendVarint(out, meta.ValueIndex)
+		if meta.Alias {
+			out = appendVarint(out, 1)
+		} else {
+			out = appendVarint(out, 0)
+		}
+		out = appendNullableSpan(out, meta.TypeStart, meta.TypeEnd, tokenLimit, &ok)
+		out = appendNullableSpan(out, meta.ValueStart, meta.ValueEnd, tokenLimit, &ok)
+		out = appendExprSpans(out, meta.Values, tokenLimit, &ok)
+		if !ok {
+			return nil, false
+		}
+	}
+	return out, true
+}
+
+func decodeDeclMeta(data []byte, tokenLimit int, declLimit int) ([]DeclMeta, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	metas := make([]DeclMeta, 0, count)
+	for i := 0; i < count; i++ {
+		declIndex, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		symbol, ok := readNullable(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		valueIndex, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		aliasValue, ok := readVarint(data, &pos)
+		if !ok || aliasValue > 1 {
+			return nil, false
+		}
+		typeStart, typeEnd, ok := readNullableSpan(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		valueStart, valueEnd, ok := readNullableSpan(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		values, ok := readExprSpans(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		meta := DeclMeta{
+			DeclIndex:  declIndex,
+			Symbol:     symbol,
+			ValueIndex: valueIndex,
+			TypeStart:  typeStart,
+			TypeEnd:    typeEnd,
+			ValueStart: valueStart,
+			ValueEnd:   valueEnd,
+			Values:     values,
+			Alias:      aliasValue == 1,
+		}
+		if meta.DeclIndex < 0 || meta.DeclIndex >= declLimit ||
+			!validNullable(meta.Symbol) ||
+			meta.ValueIndex < 0 {
+			return nil, false
+		}
+		metas = append(metas, meta)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return metas, true
 }
 
 func encodeFuncs(funcs []Func) ([]byte, bool) {

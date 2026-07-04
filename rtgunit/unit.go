@@ -30,6 +30,7 @@ const (
 	TagTypeRefs = uint16(19)
 	TagLocals   = uint16(20)
 	TagSigs     = uint16(21)
+	TagDeclMeta = uint16(22)
 )
 
 const (
@@ -72,6 +73,18 @@ type Decl struct {
 	NameEnd   int
 	StartTok  int
 	EndTok    int
+}
+
+type DeclMeta struct {
+	DeclIndex  int
+	Symbol     int
+	ValueIndex int
+	TypeStart  int
+	TypeEnd    int
+	ValueStart int
+	ValueEnd   int
+	Values     []ExprSpan
+	Alias      bool
 }
 
 type Func struct {
@@ -296,6 +309,7 @@ type Program struct {
 	Text       []byte
 	Tokens     []byte
 	Decls      []Decl
+	DeclMeta   []DeclMeta
 	Funcs      []Func
 	Signatures []FuncSignature
 	Types      []TypeInfo
@@ -363,6 +377,7 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagText, program.Text),
 		NewNode(TagTokens, tokens),
 		NewNode(TagDecls, encodeDecls(program.Decls)),
+		NewNode(TagDeclMeta, encodeDeclMeta(program.DeclMeta)),
 		NewNode(TagFuncs, encodeFuncs(program.Funcs)),
 		NewNode(TagSigs, encodeSignatures(program.Signatures)),
 		NewNode(TagTypes, encodeTypes(program.Types)),
@@ -412,6 +427,7 @@ func Unmarshal(data []byte) (Program, error) {
 		return program, fmt.Errorf("invalid root length")
 	}
 	var tokenData []byte
+	var declMetaData []byte
 	var sigData []byte
 	var typeData []byte
 	var typeRefData []byte
@@ -423,6 +439,7 @@ func Unmarshal(data []byte) (Program, error) {
 	var callData []byte
 	var refData []byte
 	var selectorData []byte
+	seenDeclMeta := false
 	seenSigs := false
 	seenTypes := false
 	seenTypeRefs := false
@@ -460,6 +477,12 @@ func Unmarshal(data []byte) (Program, error) {
 				return program, err
 			}
 			program.Decls = decls
+		case TagDeclMeta:
+			if seenDeclMeta {
+				return program, fmt.Errorf("duplicate decl metadata table")
+			}
+			seenDeclMeta = true
+			declMetaData = payload
 		case TagFuncs:
 			funcs, err := decodeFuncs(payload)
 			if err != nil {
@@ -548,6 +571,13 @@ func Unmarshal(data []byte) (Program, error) {
 		return program, err
 	}
 	program.Tokens = tokens
+	if seenDeclMeta {
+		declMeta, err := decodeDeclMeta(declMetaData)
+		if err != nil {
+			return program, err
+		}
+		program.DeclMeta = declMeta
+	}
 	if seenSigs {
 		sigs, err := decodeSignatures(sigData)
 		if err != nil {
@@ -1427,6 +1457,25 @@ func encodeDecls(decls []Decl) []byte {
 	return out
 }
 
+func encodeDeclMeta(metas []DeclMeta) []byte {
+	var out []byte
+	out = appendVarint(out, len(metas))
+	for _, meta := range metas {
+		out = appendVarint(out, meta.DeclIndex)
+		out = appendNullable(out, meta.Symbol)
+		out = appendVarint(out, meta.ValueIndex)
+		if meta.Alias {
+			out = appendVarint(out, 1)
+		} else {
+			out = appendVarint(out, 0)
+		}
+		out = appendNullableSpan(out, meta.TypeStart, meta.TypeEnd)
+		out = appendNullableSpan(out, meta.ValueStart, meta.ValueEnd)
+		out = appendSpanList(out, meta.Values)
+	}
+	return out
+}
+
 func encodeFuncs(funcs []Func) []byte {
 	var out []byte
 	out = appendVarint(out, len(funcs))
@@ -1710,6 +1759,68 @@ func decodeDecls(data []byte) ([]Decl, error) {
 		return nil, fmt.Errorf("trailing decl data")
 	}
 	return decls, nil
+}
+
+func decodeDeclMeta(data []byte) ([]DeclMeta, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid decl metadata count")
+	}
+	pos = next
+	metas := make([]DeclMeta, 0, count)
+	for i := 0; i < count; i++ {
+		declIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid decl metadata %d decl", i)
+		}
+		pos = n
+		symbol, n, ok := readNullable(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid decl metadata %d symbol", i)
+		}
+		pos = n
+		valueIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid decl metadata %d value index", i)
+		}
+		pos = n
+		aliasValue, n, ok := readVarint(data, pos)
+		if !ok || aliasValue > 1 {
+			return nil, fmt.Errorf("invalid decl metadata %d alias", i)
+		}
+		pos = n
+		typeStart, typeEnd, n, ok := readNullableSpan(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid decl metadata %d type span", i)
+		}
+		pos = n
+		valueStart, valueEnd, n, ok := readNullableSpan(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid decl metadata %d value span", i)
+		}
+		pos = n
+		values, n, ok := readSpanList(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid decl metadata %d values", i)
+		}
+		pos = n
+		metas = append(metas, DeclMeta{
+			DeclIndex:  declIndex,
+			Symbol:     symbol,
+			ValueIndex: valueIndex,
+			TypeStart:  typeStart,
+			TypeEnd:    typeEnd,
+			ValueStart: valueStart,
+			ValueEnd:   valueEnd,
+			Values:     values,
+			Alias:      aliasValue == 1,
+		})
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing decl metadata")
+	}
+	return metas, nil
 }
 
 func decodeFuncs(data []byte) ([]Func, error) {
