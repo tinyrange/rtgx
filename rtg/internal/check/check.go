@@ -84,6 +84,7 @@ type FuncBody struct {
 	Scope     FuncScope
 	Refs      []NameRef
 	Selectors []SelectorRef
+	Calls     []CallRef
 }
 
 func CheckGraph(graph load.Graph) Program {
@@ -219,7 +220,8 @@ func checkPackage(graph load.Graph, pkgIndex int, checked []PackageInfo) (Packag
 			}
 			refs := buildFuncRefs(file, fileIndex, info, body, scope)
 			selectors := buildFuncSelectors(file, fileIndex, info, checked, body, scope)
-			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Signature: signature, Body: body, Scope: scope, Refs: refs, Selectors: selectors})
+			calls := buildFuncCalls(file, fileIndex, info, checked, body, scope)
+			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Signature: signature, Body: body, Scope: scope, Refs: refs, Selectors: selectors, Calls: calls})
 		}
 	}
 	buildMethodSets(&info, pkg)

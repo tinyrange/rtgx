@@ -358,6 +358,9 @@ func Value() int { return 4 }
 	assertBodyRef(t, body, "len", RefBuiltin)
 	assertBodyRef(t, body, "done", RefLabel)
 	assertPackageSelector(t, prog, body, "lib", "Value")
+	assertPackageCall(t, prog, body, "later")
+	assertBuiltinCall(t, body, "len")
+	assertPackageSelectorCall(t, prog, body, "lib", "Value")
 }
 
 func TestCheckGraphDuplicateParamScope(t *testing.T) {
@@ -736,6 +739,43 @@ func assertPackageSelector(t *testing.T, prog Program, body FuncBody, base strin
 	target := prog.Packages[selector.Package]
 	if selector.Symbol < 0 || selector.Symbol >= len(target.Symbols) || target.Symbols[selector.Symbol].Name != name {
 		t.Fatalf("selector %s.%s symbol = %d in package %#v", base, name, selector.Symbol, target)
+	}
+}
+
+func assertPackageCall(t *testing.T, prog Program, body FuncBody, name string) {
+	t.Helper()
+	index := LookupCall(body, "", name, CallPackage)
+	if index < 0 {
+		t.Fatalf("package call %q not found in %#v", name, body.Calls)
+	}
+	call := body.Calls[index]
+	if call.Package < 0 || call.Package >= len(prog.Packages) {
+		t.Fatalf("package call %q package = %d", name, call.Package)
+	}
+	if call.Symbol < 0 || call.Symbol >= len(prog.Packages[call.Package].Symbols) || prog.Packages[call.Package].Symbols[call.Symbol].Name != name {
+		t.Fatalf("package call %q symbol = %d in %#v", name, call.Symbol, prog.Packages[call.Package].Symbols)
+	}
+}
+
+func assertBuiltinCall(t *testing.T, body FuncBody, name string) {
+	t.Helper()
+	if LookupCall(body, "", name, CallBuiltin) < 0 {
+		t.Fatalf("builtin call %q not found in %#v", name, body.Calls)
+	}
+}
+
+func assertPackageSelectorCall(t *testing.T, prog Program, body FuncBody, base string, name string) {
+	t.Helper()
+	index := LookupCall(body, base, name, CallImportSelector)
+	if index < 0 {
+		t.Fatalf("package selector call %s.%s not found in %#v", base, name, body.Calls)
+	}
+	call := body.Calls[index]
+	if call.Package < 0 || call.Package >= len(prog.Packages) {
+		t.Fatalf("package selector call %s.%s package = %d", base, name, call.Package)
+	}
+	if call.Symbol < 0 || call.Symbol >= len(prog.Packages[call.Package].Symbols) || prog.Packages[call.Package].Symbols[call.Symbol].Name != name {
+		t.Fatalf("package selector call %s.%s symbol = %d in %#v", base, name, call.Symbol, prog.Packages[call.Package].Symbols)
 	}
 }
 
