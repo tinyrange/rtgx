@@ -385,7 +385,7 @@ import lib "example.com/case/pkg/lib"
 const packageValue = 3
 
 func appMain(param int) int {
-	local := lib.Value() + packageValue + later() + len("x")
+	local := lib.Value(param, packageValue) + later(param + 1) + len("x")
 	if local > param {
 		goto done
 	}
@@ -393,11 +393,11 @@ done:
 	return local
 }
 
-func later() int { return 2 }
+func later(value int) int { return value }
 `)},
 		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
 
-func Value() int { return 4 }
+func Value(left int, right int) int { return 4 }
 `)},
 	})
 	prog := CheckGraph(graph)
@@ -410,6 +410,7 @@ func Value() int { return 4 }
 		t.Fatalf("appMain body not found: %#v", root.Bodies)
 	}
 	body := root.Bodies[bodyIndex]
+	file := prog.Graph.Packages[len(prog.Packages)-1].Files[body.File].File
 	assertBodyRef(t, body, "param", RefScope)
 	assertBodyRef(t, body, "local", RefScope)
 	assertBodyRef(t, body, "packageValue", RefPackage)
@@ -421,6 +422,9 @@ func Value() int { return 4 }
 	assertPackageCall(t, prog, body, "later")
 	assertBuiltinCall(t, body, "len")
 	assertPackageSelectorCall(t, prog, body, "lib", "Value")
+	assertCallArgs(t, file, body, "lib", "Value", CallImportSelector, []string{"param", "packageValue"})
+	assertCallArgs(t, file, body, "", "later", CallPackage, []string{"param + 1"})
+	assertCallArgs(t, file, body, "", "len", CallBuiltin, []string{`"x"`})
 }
 
 func TestCheckGraphAssignmentsAndReturns(t *testing.T) {
@@ -923,6 +927,15 @@ func assertPackageSelectorCall(t *testing.T, prog Program, body FuncBody, base s
 	if call.Symbol < 0 || call.Symbol >= len(prog.Packages[call.Package].Symbols) || prog.Packages[call.Package].Symbols[call.Symbol].Name != name {
 		t.Fatalf("package selector call %s.%s symbol = %d in %#v", base, name, call.Symbol, prog.Packages[call.Package].Symbols)
 	}
+}
+
+func assertCallArgs(t *testing.T, file syntax.File, body FuncBody, base string, name string, kind int, args []string) {
+	t.Helper()
+	index := LookupCall(body, base, name, kind)
+	if index < 0 {
+		t.Fatalf("call %s.%s kind %d not found in %#v", base, name, kind, body.Calls)
+	}
+	assertExprSpans(t, file, body.Calls[index].Args, args)
 }
 
 func assertAssign(t *testing.T, file syntax.File, assign AssignInfo, kind int, targets []string, values []string) {

@@ -19,6 +19,7 @@ type CallRef struct {
 	DotToken    int
 	ArgsStart   int
 	ArgsEnd     int
+	Args        []ExprSpan
 	Ref         NameRef
 	Selector    SelectorRef
 	Package     int
@@ -107,15 +108,15 @@ func appendExprCalls(calls []CallRef, file syntax.File, fileIndex int, info Pack
 			continue
 		}
 		if callee-1 >= start && tokenTextIs(file, callee-1, ".") && callee-2 >= start && file.Tokens[callee-2].Kind == syntax.TokenIdent {
-			calls = append(calls, resolveSelectorCall(fileIndex, info, checked, scope, tokenString(file, callee-2), tokenString(file, callee), callee-2, callee-1, callee, i, closeTok-1))
+			calls = append(calls, resolveSelectorCall(file, fileIndex, info, checked, scope, tokenString(file, callee-2), tokenString(file, callee), callee-2, callee-1, callee, i, closeTok-1))
 		} else {
-			calls = append(calls, resolveDirectCall(fileIndex, info, scope, tokenString(file, callee), callee, i, closeTok-1))
+			calls = append(calls, resolveDirectCall(file, fileIndex, info, scope, tokenString(file, callee), callee, i, closeTok-1))
 		}
 	}
 	return calls
 }
 
-func resolveDirectCall(fileIndex int, info PackageInfo, scope FuncScope, name string, callee int, argsStart int, argsEnd int) CallRef {
+func resolveDirectCall(file syntax.File, fileIndex int, info PackageInfo, scope FuncScope, name string, callee int, argsStart int, argsEnd int) CallRef {
 	ref := resolveNameRef(fileIndex, info, scope, name, callee)
 	call := CallRef{
 		Kind:        CallUnknown,
@@ -125,6 +126,7 @@ func resolveDirectCall(fileIndex int, info PackageInfo, scope FuncScope, name st
 		DotToken:    -1,
 		ArgsStart:   argsStart + 1,
 		ArgsEnd:     argsEnd,
+		Args:        splitExprList(file, argsStart+1, argsEnd),
 		Ref:         ref,
 		Package:     -1,
 		Symbol:      -1,
@@ -141,7 +143,7 @@ func resolveDirectCall(fileIndex int, info PackageInfo, scope FuncScope, name st
 	return call
 }
 
-func resolveSelectorCall(fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, base string, name string, baseTok int, dotTok int, callee int, argsStart int, argsEnd int) CallRef {
+func resolveSelectorCall(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, base string, name string, baseTok int, dotTok int, callee int, argsStart int, argsEnd int) CallRef {
 	selector := resolveSelector(fileIndex, info, checked, scope, base, name, baseTok, dotTok, callee)
 	call := CallRef{
 		Kind:        CallUnknown,
@@ -152,6 +154,7 @@ func resolveSelectorCall(fileIndex int, info PackageInfo, checked []PackageInfo,
 		DotToken:    dotTok,
 		ArgsStart:   argsStart + 1,
 		ArgsEnd:     argsEnd,
+		Args:        splitExprList(file, argsStart+1, argsEnd),
 		Selector:    selector,
 		Package:     -1,
 		Symbol:      -1,
