@@ -41,7 +41,7 @@ func BuildUnit(args []string, workDir string, stdRoot string, files []load.Sourc
 	if !options.Ok {
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
 	}
-	built := pipeline.BuildUnit(workDir, stdRoot, options.Package, files)
+	built := pipeline.BuildUnit(workDir, stdRoot, options.Package, filterSourcesForTarget(files, options.Target))
 	result.Pipeline = built
 	if !built.Ok {
 		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
@@ -64,7 +64,7 @@ func BuildFromFS(args []string, workDir string, stdRoot string, fs SourceFS) Bui
 	if !options.Ok {
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
 	}
-	sources := CollectSources(workDir, stdRoot, options.Package, fs)
+	sources := CollectSourcesForTarget(workDir, stdRoot, options.Package, options.Target, fs)
 	result.Sources = sources
 	if !sources.Ok {
 		return buildFail(result, BuildErrSource, "", sources.ErrorPath, -1, -1, -1, -1)

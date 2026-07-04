@@ -47,6 +47,48 @@ func KeepAlive(v int) {}
 	}
 }
 
+func TestCollectSourcesAppliesRTGBuildTags(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/host.go", Src: []byte(`//go:build !rtg
+
+package main
+
+import "fmt"
+
+func appMain() int { fmt.Println("host"); return 1 }
+`)},
+		{Path: "/repo/case/cmd/app/linux.go", Src: []byte(`//go:build rtg && linux && amd64
+
+package main
+
+import "example.com/case/pkg/lib"
+
+func appMain() int { return lib.Value() }
+`)},
+		{Path: "/repo/case/cmd/app/arm.go", Src: []byte(`//go:build rtg && linux && arm64
+
+package main
+
+func appMain() int { return 2 }
+`)},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
+
+func Value() int { return 42 }
+`)},
+	}}
+	result := CollectSourcesForTarget("/repo/case/cmd/app", "/std", ".", "linux/amd64", fs)
+	if !result.Ok {
+		t.Fatalf("CollectSources failed: err=%d path=%q", result.Error, result.ErrorPath)
+	}
+	want := []string{
+		"/repo/case/go.mod",
+		"/repo/case/cmd/app/linux.go",
+		"/repo/case/pkg/lib/lib.go",
+	}
+	assertSourcePaths(t, result.Files, want)
+}
+
 func TestCollectSourcesReportsErrors(t *testing.T) {
 	missingModule := CollectSources("/repo/case", "/std", "./cmd/app", memorySourceFS{})
 	if missingModule.Ok || missingModule.Error != SourceErrMissingModule {

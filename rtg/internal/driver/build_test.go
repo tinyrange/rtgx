@@ -28,6 +28,36 @@ func TestBuildUnitFromDriverOptions(t *testing.T) {
 	}
 }
 
+func TestBuildUnitFiltersBuildTaggedFiles(t *testing.T) {
+	result := BuildUnit([]string{"-t", "linux/aarch64", "-o", "app", "./cmd/app"}, "/repo/case", "/std", []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/host.go", Src: []byte(`//go:build !rtg
+
+package main
+
+var value int
+`)},
+		{Path: "/repo/case/cmd/app/rtg.go", Src: []byte(`//go:build rtg && linux && arm64
+
+package main
+
+func value() int { return 7 }
+
+func appMain() int { return value() }
+`)},
+	})
+	if !result.Ok {
+		t.Fatalf("BuildUnit failed: err=%d arg=%q at=%d pkg=%d file=%d tok=%d", result.Error, result.ErrorArg, result.ErrorAt, result.ErrorPackage, result.ErrorFile, result.ErrorToken)
+	}
+	decoded, err := rtgunit.Unmarshal(result.Unit)
+	if err != nil {
+		t.Fatalf("linked unit did not decode: %v", err)
+	}
+	if len(decoded.Decls) != 0 || len(decoded.Funcs) != 2 {
+		t.Fatalf("decoded unit decls=%d funcs=%d, want host decl skipped and two funcs", len(decoded.Decls), len(decoded.Funcs))
+	}
+}
+
 func TestBuildUnitReportsOptionError(t *testing.T) {
 	result := BuildUnit([]string{"-t", "plan9/amd64", "-o", "app", "./cmd/app"}, "/repo/case", "/std", driverTestFiles())
 	if result.Ok || result.Error != BuildErrOptions {
