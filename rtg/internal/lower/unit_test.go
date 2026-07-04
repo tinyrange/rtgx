@@ -45,6 +45,9 @@ func appMain() int {
 	if string(decoded.Text[decoded.Decls[0].NameStart:decoded.Decls[0].NameEnd]) != "answer" {
 		t.Fatalf("decl name = %q", string(decoded.Text[decoded.Decls[0].NameStart:decoded.Decls[0].NameEnd]))
 	}
+	if tokenText(decoded, decoded.Decls[0].StartTok) != "const" {
+		t.Fatalf("decl start token = %q, want const", tokenText(decoded, decoded.Decls[0].StartTok))
+	}
 	if len(decoded.Funcs) != 1 {
 		t.Fatalf("funcs = %#v", decoded.Funcs)
 	}

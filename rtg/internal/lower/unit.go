@@ -243,10 +243,18 @@ func (b *unitBuilder) addDecl(file syntax.File, decl syntax.TopDecl, nameTok int
 		Kind:      kind,
 		NameStart: name.Start,
 		NameEnd:   name.Start + name.Size,
-		StartTok:  mapToken(oldToNew, decl.StartTok, b.finalEOF),
+		StartTok:  mapDeclStartToken(file, decl, oldToNew, b.finalEOF),
 		EndTok:    mapToken(oldToNew, decl.EndTok, b.finalEOF),
 	})
 	return true
+}
+
+func mapDeclStartToken(file syntax.File, decl syntax.TopDecl, oldToNew []int, eof int) int {
+	start := decl.StartTok
+	if start > 0 && start < len(file.Tokens) && file.Tokens[start-1].Kind == decl.Kind {
+		start--
+	}
+	return mapToken(oldToNew, start, eof)
 }
 
 func (b *unitBuilder) addFunc(file syntax.File, fn syntax.FuncDecl, oldToNew []int, fileIndex int) bool {

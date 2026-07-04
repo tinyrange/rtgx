@@ -178,12 +178,61 @@ func TestHostEnvHelpers(t *testing.T) {
 }
 
 func TestRunCommandWithRealBackendCompilesMainEntrypoint(t *testing.T) {
+	runHostMainCase(t, []byte(`package main
+
+func calc(a int, b int, c int) int {
+	total := (a + b) * c
+	total = total - b
+	total = total + a%5
+	return total
+}
+
+func main() {
+	if calc(3, 5, 2) == 14 {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`))
+}
+
+func TestRunCommandWithRealBackendCompilesStructMethods(t *testing.T) {
+	runHostMainCase(t, []byte(`package main
+
+type pair struct {
+	a int
+	b int
+}
+
+func (p pair) score() int {
+	return p.a*10 + p.b
+}
+
+func (p *pair) add(v int) {
+	p.b = p.b + v
+}
+
+func main() {
+	p := pair{a: 1, b: 2}
+	p.add(3)
+	if p.score() == 15 {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`))
+}
+
+func runHostMainCase(t *testing.T, src []byte) {
+	t.Helper()
 	target, ok := hostRunnableTarget()
 	if !ok {
 		t.Skipf("no directly runnable frontend target for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	repoRoot := driverRepoRoot(t)
-	dir := writeHostMainCase(t)
+	dir := writeHostSourceCase(t, src)
 	backend := filepath.Join(t.TempDir(), "rtgx-backend")
 	cmd := exec.Command("go", "build", "-o", backend, ".")
 	cmd.Dir = repoRoot
@@ -240,7 +289,7 @@ func appMain() int { return 0 }
 	return dir
 }
 
-func writeHostMainCase(t *testing.T) string {
+func writeHostSourceCase(t *testing.T, src []byte) string {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/case\n"), 0o644); err != nil {
@@ -250,23 +299,7 @@ func writeHostMainCase(t *testing.T) string {
 	if err := os.MkdirAll(appDir, 0o755); err != nil {
 		t.Fatalf("failed to create app dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(appDir, "main.go"), []byte(`package main
-
-func calc(a int, b int, c int) int {
-	total := (a + b) * c
-	total = total - b
-	total = total + a%5
-	return total
-}
-
-func main() {
-	if calc(3, 5, 2) == 14 {
-		print("PASS\n")
-		return
-	}
-	print("FAIL\n")
-}
-`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(appDir, "main.go"), src, 0o644); err != nil {
 		t.Fatalf("failed to write main.go: %v", err)
 	}
 	return dir
