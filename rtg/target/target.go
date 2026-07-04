@@ -46,3 +46,21 @@ func List() string {
 	}
 	return out
 }
+
+func WordSize(name string) int {
+	arch := archPart(name)
+	switch arch {
+	case "386", "arm", "wasm32":
+		return 4
+	}
+	return 8
+}
+
+func archPart(name string) string {
+	for i := 0; i < len(name); i++ {
+		if name[i] == '/' {
+			return name[i+1:]
+		}
+	}
+	return name
+}

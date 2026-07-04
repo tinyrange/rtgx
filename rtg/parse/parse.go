@@ -368,7 +368,7 @@ func findNextTopLevel(toks []scan.Token, pos int) int {
 		if toks[pos].Kind == scan.EOF {
 			return pos
 		}
-		if paren == 0 && brack == 0 && brace == 0 && isTopDecl(text) {
+		if paren == 0 && brack == 0 && brace == 0 && isTopDeclAt(toks, pos) {
 			return pos
 		}
 		if text == "(" {
@@ -407,4 +407,15 @@ func skipBalanced(toks []scan.Token, pos int, open string, close string) int {
 
 func isTopDecl(text string) bool {
 	return text == "func" || text == "type" || text == "var" || text == "const"
+}
+
+func isTopDeclAt(toks []scan.Token, pos int) bool {
+	if pos < 0 || pos >= len(toks) || !isTopDecl(toks[pos].Text) {
+		return false
+	}
+	if pos == 0 {
+		return true
+	}
+	prev := toks[pos-1]
+	return prev.Text == ";" || prev.Text == "}" || prev.Line != toks[pos].Line
 }

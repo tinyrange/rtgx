@@ -1,17 +1,22 @@
 package main
 
 func rtgWasmAppendU32(out []byte, v int) []byte {
-	for {
+	for i := 0; i < 5; i++ {
 		b := byte(v & 0x7f)
 		v = v >> 7
-		if v != 0 {
-			b = b | 0x80
-		}
-		out = append(out, b)
-		if v == 0 {
+		if i == 4 {
+			b = b & 0x0f
+			out = append(out, b)
 			return out
 		}
+		if v == 0 {
+			out = append(out, b)
+			return out
+		}
+		b = b | 0x80
+		out = append(out, b)
 	}
+	return out
 }
 
 func rtgWasmAppendS32(out []byte, v int) []byte {
@@ -80,6 +85,8 @@ func rtgWasmAppendU32Fixed5(out []byte, v int) []byte {
 		v = v >> 7
 		if i < 4 {
 			b = b | 0x80
+		} else {
+			b = b & 0x0f
 		}
 		out = append(out, b)
 	}
@@ -92,6 +99,8 @@ func rtgWasmPatchU32Fixed5(out []byte, at int, v int) {
 		v = v >> 7
 		if i < 4 {
 			b = b | 0x80
+		} else {
+			b = b & 0x0f
 		}
 		out[at+i] = b
 	}
@@ -248,6 +257,14 @@ func rtgWasm32EmitCondBranch(a *rtgAsm, cond int, label int) {
 	at := len(a.code)
 	a.code = rtgAppend32(a.code, 0)
 	rtgAsmAddReloc(a, at, label)
+}
+
+func rtgWasm32EmitCallLabel(a *rtgAsm, label int, wordCount int) {
+	a.code = append(a.code, byte(rtgWasm32OpCall))
+	at := len(a.code)
+	a.code = rtgAppend32(a.code, 0)
+	rtgAsmAddReloc(a, at, label)
+	a.code = rtgAppend32(a.code, wordCount)
 }
 
 func rtgWasm32StoreParamWord(g *rtgLinearGen, reg int, offset int) bool {
@@ -447,10 +464,11 @@ func rtgWasm32AsmLoadByteRaxIndexRcx(a *rtgAsm) {
 }
 
 func rtgWasm32AsmLoadRaxIndexRcxSize(a *rtgAsm, size int) {
+	scale := size
 	if size > 4 {
 		size = 4
 	}
-	rtgWasm32EmitIndex(a, rtgWasm32OpLoadIndex, rtgWasm32RegRax, rtgWasm32RegRax, rtgWasm32RegRcx, size, 0, size)
+	rtgWasm32EmitIndex(a, rtgWasm32OpLoadIndex, rtgWasm32RegRax, rtgWasm32RegRax, rtgWasm32RegRcx, scale, 0, size)
 }
 
 func rtgWasm32AsmLoadQwordRaxIndexRcx8(a *rtgAsm) {
@@ -477,10 +495,11 @@ func rtgWasm32AsmStoreRaxMemRdxDispSize(a *rtgAsm, disp int, size int) {
 }
 
 func rtgWasm32AsmStoreRaxMemRdxRcxSize(a *rtgAsm, size int) {
+	scale := size
 	if size > 4 {
 		size = 4
 	}
-	rtgWasm32EmitIndex(a, rtgWasm32OpStoreIndex, rtgWasm32RegRax, rtgWasm32RegRdx, rtgWasm32RegRcx, size, 0, size)
+	rtgWasm32EmitIndex(a, rtgWasm32OpStoreIndex, rtgWasm32RegRax, rtgWasm32RegRdx, rtgWasm32RegRcx, scale, 0, size)
 }
 
 func rtgWasm32AsmStoreSliceStack(a *rtgAsm, offset int) {
@@ -591,7 +610,7 @@ func rtgWasm32AsmRet(a *rtgAsm) {
 }
 
 func rtgWasm32AsmCallLabel(a *rtgAsm, label int) {
-	rtgWasm32EmitBranch(a, rtgWasm32OpCall, label)
+	rtgWasm32EmitCallLabel(a, label, 0)
 }
 
 func rtgWasm32AsmJmpLabel(a *rtgAsm, label int) {
@@ -641,9 +660,11 @@ type rtgWasm32Instr struct {
 
 const rtgWasm32ProgramBase = 262144
 const rtgWasm32StackGuardSize = 16384
-const rtgWasm32ExprStackSize = 16384
-const rtgWasm32CallStackSize = 8192
-const rtgWasm32FrameStackSize = 393216
+const rtgWasm32ExprStackSize = 1048576
+const rtgWasm32CallStackSize = 65536
+const rtgWasm32FrameStackSize = 8388608
+const rtgWasm32ImageOutputCapacity = 2097152
+const rtgWasm32RoutineBodyCapacity = 8192
 const rtgWasm32ScratchIov = 0
 const rtgWasm32ScratchN = 8
 const rtgWasm32ScratchFd = 12
@@ -779,9 +800,15 @@ func rtgWasm32DecodeOne(code []byte, pc int) rtgWasm32Instr {
 		ins.next = pc + 10
 		return ins
 	}
-	if ins.op == rtgWasm32OpJmp || ins.op == rtgWasm32OpJz || ins.op == rtgWasm32OpJnz || ins.op == rtgWasm32OpCall {
+	if ins.op == rtgWasm32OpJmp || ins.op == rtgWasm32OpJz || ins.op == rtgWasm32OpJnz {
 		ins.a = rtgGet32At(code, pc+1)
 		ins.next = pc + 5
+		return ins
+	}
+	if ins.op == rtgWasm32OpCall {
+		ins.a = rtgGet32At(code, pc+1)
+		ins.b = rtgGet32At(code, pc+5)
+		ins.next = pc + 9
 		return ins
 	}
 	if ins.op == rtgWasm32OpJCond {
@@ -843,6 +870,9 @@ func rtgWasm32IsControlOp(op int) bool {
 		return true
 	}
 	if op == rtgWasm32OpJmp || op == rtgWasm32OpJz || op == rtgWasm32OpJnz || op == rtgWasm32OpJCond {
+		return true
+	}
+	if op == rtgWasm32OpCall {
 		return true
 	}
 	if op == rtgWasm32OpRet {
@@ -1453,7 +1483,8 @@ func rtgWasm32AppendInstr(out []byte, ins rtgWasm32Instr, nextIndex int, targetI
 	if ins.op == rtgWasm32OpBuildArgsEnv {
 		out = rtgWasm32AppendBuildArgsEnv(out, ins.a, ins.b, ins.c)
 		out = rtgWasm32SetPc(out, nextIndex)
-		return rtgWasmBr(out, loopDepth)
+		out = rtgWasmBr(out, loopDepth)
+		return out
 	}
 	if ins.op == rtgWasm32OpMovRegImm {
 		out = rtgWasmAppendI32Const(out, ins.b)
@@ -1701,7 +1732,7 @@ func rtgWasm32AppendDirectCall(out []byte, funcIndex int, frameSize int) []byte 
 	return out
 }
 
-func rtgWasm32AppendInstrDirect(out []byte, ins rtgWasm32Instr, nextIndex int, targetIndex int, loopDepth int, callStackBase int, frameSize int, routinePcs []int) []byte {
+func rtgWasm32AppendInstrDirect(out []byte, ins rtgWasm32Instr, nextIndex int, targetIndex int, loopDepth int, callStackBase int, frameSize int, hasFrame bool, routinePcs []int) []byte {
 	if ins.op == rtgWasm32OpExit {
 		out = rtgWasmLocalGet(out, rtgWasm32LocalRax)
 		out = rtgWasmAppendCall(out, rtgWasm32ImportProcExit)
@@ -1715,6 +1746,13 @@ func rtgWasm32AppendInstrDirect(out []byte, ins rtgWasm32Instr, nextIndex int, t
 			return out
 		}
 		out = rtgWasm32AppendDirectCall(out, rtgWasm32VmFuncBase+routineIndex, frameSize)
+		if ins.b > 6 {
+			// Direct wasm calls pass SP by value; drop caller-owned stack args.
+			out = rtgWasmLocalGet(out, rtgWasm32LocalSp)
+			out = rtgWasmAppendI32Const(out, (ins.b-6)*4)
+			out = append(out, 0x6b)
+			out = rtgWasmLocalSet(out, rtgWasm32LocalSp)
+		}
 		if loopDepth < 0 {
 			return out
 		}
@@ -1722,7 +1760,31 @@ func rtgWasm32AppendInstrDirect(out []byte, ins rtgWasm32Instr, nextIndex int, t
 		return rtgWasmBr(out, loopDepth)
 	}
 	if ins.op == rtgWasm32OpRet {
+		out = rtgWasmLocalGet(out, rtgWasm32LocalCsp)
+		out = rtgWasmAppendI32Const(out, callStackBase)
+		out = append(out, 0x46)
+		out = rtgWasmAppend2(out, 0x04, 0x40)
+		if hasFrame {
+			out = rtgWasmLocalGet(out, rtgWasm32LocalFp)
+			out = rtgWasmAppendI32Const(out, frameSize)
+			out = append(out, 0x6a)
+			out = rtgWasmLocalSet(out, rtgWasm32LocalFp)
+		}
 		out = rtgWasm32AppendStateReturn(out)
+		out = append(out, 0x05)
+		out = rtgWasmLocalGet(out, rtgWasm32LocalCsp)
+		out = rtgWasmAppendI32Const(out, 8)
+		out = append(out, 0x6b)
+		out = rtgWasmLocalTee(out, rtgWasm32LocalCsp)
+		out = rtgWasmI32Load(out, 2, 0)
+		out = rtgWasmLocalSet(out, rtgWasm32LocalPc)
+		out = rtgWasmLocalGet(out, rtgWasm32LocalCsp)
+		out = rtgWasmI32Load(out, 2, 4)
+		out = rtgWasmLocalSet(out, rtgWasm32LocalFp)
+		out = append(out, 0x0b)
+		if loopDepth >= 0 {
+			out = rtgWasmBr(out, loopDepth)
+		}
 		return out
 	}
 	out = rtgWasm32AppendInstr(out, ins, nextIndex, targetIndex, loopDepth, loopDepth+1, callStackBase, frameSize)
@@ -1782,7 +1844,8 @@ func rtgWasm32AppendUniquePc(pcs []int, pc int) []int {
 	if rtgWasm32PcInList(pcs, pc) {
 		return pcs
 	}
-	return append(pcs, pc)
+	pcs = append(pcs, pc)
+	return pcs
 }
 
 func rtgWasm32SortPcs(pcs []int) []int {
@@ -1803,10 +1866,14 @@ func rtgWasm32SymbolPcs(a *rtgAsm) []int {
 	for i := 0; i < len(a.symbols); i++ {
 		label := a.symbols[i].label
 		if label >= 0 && label < len(a.labelPos) && a.labelSet[label] {
-			pcs = rtgWasm32AppendUniquePc(pcs, a.labelPos[label])
+			pc := a.labelPos[label]
+			if !rtgWasm32PcInList(pcs, pc) {
+				pcs = append(pcs, pc)
+			}
 		}
 	}
-	return rtgWasm32SortPcs(pcs)
+	pcs = rtgWasm32SortPcs(pcs)
+	return pcs
 }
 
 func rtgWasm32RoutinePcs(a *rtgAsm, instrs []rtgWasm32Instr) []int {
@@ -1815,10 +1882,25 @@ func rtgWasm32RoutinePcs(a *rtgAsm, instrs []rtgWasm32Instr) []int {
 	for i := 0; i < len(a.symbols); i++ {
 		label := a.symbols[i].label
 		if label >= 0 && label < len(a.labelPos) && a.labelSet[label] {
-			pcs = rtgWasm32AppendUniquePc(pcs, a.labelPos[label])
+			pc := a.labelPos[label]
+			if !rtgWasm32PcInList(pcs, pc) {
+				pcs = append(pcs, pc)
+			}
 		}
 	}
-	return rtgWasm32SortPcs(pcs)
+	for i := 0; i < len(instrs); i++ {
+		ins := instrs[i]
+		if ins.op == rtgWasm32OpCall {
+			targetIndex := rtgWasm32InstrLowerBound(instrs, ins.a)
+			if targetIndex < len(instrs) && instrs[targetIndex].pc == ins.a {
+				if !rtgWasm32PcInList(pcs, ins.a) {
+					pcs = append(pcs, ins.a)
+				}
+			}
+		}
+	}
+	pcs = rtgWasm32SortPcs(pcs)
+	return pcs
 }
 
 func rtgWasm32NextPcAfter(pcs []int, pc int, limit int) int {
@@ -1928,7 +2010,7 @@ func rtgWasm32AppendDirectRoutineBody(body []byte, instrs []rtgWasm32Instr, code
 				continue
 			}
 			if i+1 < end {
-				body = rtgWasm32AppendInstrDirect(body, ins, 0, 0, -1, callStackBase, frameSize, routinePcs)
+				body = rtgWasm32AppendInstrDirect(body, ins, 0, 0, -1, callStackBase, frameSize, hasFrame, routinePcs)
 			} else {
 				nextIndex := rtgWasm32InstrIndexForPcLocal(instrs, len(instrs), ins.next)
 				nextBlock := rtgWasm32BlockForInstrFast(instrBlockIndex, nextIndex)
@@ -1941,7 +2023,7 @@ func rtgWasm32AppendDirectRoutineBody(body []byte, instrs []rtgWasm32Instr, code
 					targetIndex := rtgWasm32InstrIndexForPcLocal(instrs, len(instrs), targetPc)
 					targetBlock = rtgWasm32BlockForInstrFast(instrBlockIndex, targetIndex)
 				}
-				body = rtgWasm32AppendInstrDirect(body, ins, nextBlock, targetBlock, blockIndex, callStackBase, frameSize, routinePcs)
+				body = rtgWasm32AppendInstrDirect(body, ins, nextBlock, targetBlock, blockIndex, callStackBase, frameSize, hasFrame, routinePcs)
 			}
 			i++
 		}
@@ -1978,12 +2060,13 @@ func rtgWasm32AppendDirectStartBody(body []byte, topFunc int, exprStackBase int,
 }
 
 func rtgWasm32DirectRoutineBody(instrs []rtgWasm32Instr, codeLen int, routinePcs []int, callStackBase int, frameSize int, hasFrame bool) []byte {
-	body := make([]byte, 0, 8192)
-	return rtgWasm32AppendDirectRoutineBody(body, instrs, codeLen, routinePcs, callStackBase, frameSize, hasFrame)
+	body := make([]byte, 0, rtgWasm32RoutineBodyCapacity)
+	body = rtgWasm32AppendDirectRoutineBody(body, instrs, codeLen, routinePcs, callStackBase, frameSize, hasFrame)
+	return body
 }
 
 func rtgWasm32DirectStartBody(topFunc int, exprStackBase int, callStackBase int, frameTop int) []byte {
-	body := make([]byte, 0, 32768)
+	body := make([]byte, 0, 1024)
 	return rtgWasm32AppendDirectStartBody(body, topFunc, exprStackBase, callStackBase, frameTop)
 }
 
@@ -2109,7 +2192,8 @@ func rtgWasm32AppendCodeSectionDirect(out []byte, a *rtgAsm, instrs []rtgWasm32I
 		endIndex := rtgWasm32InstrLowerBound(instrs, endPc)
 		routineInstrs := instrs[startIndex:endIndex]
 		hasFrame := startPc != 0 && rtgWasm32PcInList(symbolPcs, startPc)
-		out = rtgWasmAppendByteVec(out, rtgWasm32DirectRoutineBody(routineInstrs, codeLen, routinePcs, callStackBase, frameSize, hasFrame))
+		routineBody := rtgWasm32DirectRoutineBody(routineInstrs, codeLen, routinePcs, callStackBase, frameSize, hasFrame)
+		out = rtgWasmAppendByteVec(out, routineBody)
 	}
 	rtgWasmPatchU32Fixed5(out, lenAt, len(out)-payloadStart)
 	return out
@@ -2136,7 +2220,7 @@ func rtgWasm32Image(a *rtgAsm) []byte {
 	callStackBase := exprStackBase + rtgWasm32ExprStackSize
 	frameTop := callStackBase + rtgWasm32CallStackSize + rtgWasm32FrameStackSize
 	memSize := bssBase + a.bssSize + rtgWasm32StackGuardSize + rtgWasm32ExprStackSize + rtgWasm32CallStackSize + rtgWasm32FrameStackSize + rtgWasm32StackGuardSize
-	out := make([]byte, 0, 1572864)
+	out := make([]byte, 0, rtgWasm32ImageOutputCapacity)
 	out = append(out, 0x00)
 	out = append(out, 0x61)
 	out = append(out, 0x73)
@@ -2171,7 +2255,7 @@ func rtgWasm32EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	oldLastRangeReturns := g.lastRangeReturns
 	var locals []rtgLocalInfo
 	var gotoLabels []rtgGlobalInfo
-	locals = make([]rtgLocalInfo, 0, 32768)
+	locals = make([]rtgLocalInfo, 0, rtgFunctionLocalCap(fn))
 	gotoLabels = make([]rtgGlobalInfo, 0, 0)
 	g.locals = locals
 	g.gotoLabels = gotoLabels
@@ -2228,7 +2312,7 @@ func rtgWasm32EmitCallWithWordCount(g *rtgLinearGen, fnIndex int, wordCount int)
 	if wordCount > 5 {
 		rtgWasm32EmitReg(a, rtgWasm32OpPopReg, rtgWasm32RegR9)
 	}
-	rtgAsmCallLabel(a, g.funcLabels[fnIndex])
+	rtgWasm32EmitCallLabel(a, g.funcLabels[fnIndex], wordCount)
 }
 
 func rtgWasm32EmitRaxRcxOp(g *rtgLinearGen, tok int) bool {
@@ -2363,6 +2447,135 @@ func rtgWasm32EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	afterLabel := rtgAsmNewLabel(a)
 	rtgAsmJmpLabel(a, afterLabel)
 	rtgAsmMarkLabel(a, g.appendAddrLabel)
+	noGrowLabel := rtgAsmNewLabel(a)
+	capNonZeroLabel := rtgAsmNewLabel(a)
+	capReadyLabel := rtgAsmNewLabel(a)
+	heapReadyLabel := rtgAsmNewLabel(a)
+	copyLoopLabel := rtgAsmNewLabel(a)
+	copyDoneLabel := rtgAsmNewLabel(a)
+	returnLabel := rtgAsmNewLabel(a)
+	rtgStringHeapOffsets(g)
+	ptrSlotOff := g.asm.bssSize
+	lenSlotOff := ptrSlotOff + 4
+	capSlotOff := lenSlotOff + 4
+	elemSizeOff := capSlotOff + 4
+	oldLenOff := elemSizeOff + 4
+	oldPtrOff := oldLenOff + 4
+	newCapOff := oldPtrOff + 4
+	allocSizeOff := newCapOff + 4
+	copySizeOff := allocSizeOff + 4
+	destOff := copySizeOff + 4
+	copyIndexOff := destOff + 4
+	g.asm.bssSize += 44
+
+	rtgWasm32EmitMem(a, rtgWasm32OpLoadMem, rtgWasm32RegR8, rtgWasm32RegRsi, 0, 4)
+	rtgWasm32EmitMem(a, rtgWasm32OpLoadMem, rtgWasm32RegRcx, rtgWasm32RegR9, 0, 4)
+	rtgWasm32EmitRegReg(a, rtgWasm32OpCmpRegReg, rtgWasm32RegR8, rtgWasm32RegRcx)
+	rtgWasm32EmitCondBranch(a, rtgWasm32CondLt, noGrowLabel)
+
+	rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegRax, rtgWasm32RegRdx)
+	rtgAsmStoreRaxBss(a, elemSizeOff)
+	rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegRax, rtgWasm32RegRdi)
+	rtgAsmStoreRaxBss(a, ptrSlotOff)
+	rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegRax, rtgWasm32RegRsi)
+	rtgAsmStoreRaxBss(a, lenSlotOff)
+	rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegRax, rtgWasm32RegR9)
+	rtgAsmStoreRaxBss(a, capSlotOff)
+	rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegRax, rtgWasm32RegR8)
+	rtgAsmStoreRaxBss(a, oldLenOff)
+	rtgWasm32EmitMem(a, rtgWasm32OpLoadMem, rtgWasm32RegRax, rtgWasm32RegRdi, 0, 4)
+	rtgAsmStoreRaxBss(a, oldPtrOff)
+
+	rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegRax, rtgWasm32RegRcx)
+	rtgAsmCmpRaxImm8(a, 0)
+	rtgAsmJnzLabel(a, capNonZeroLabel)
+	rtgWasm32EmitRegImm(a, rtgWasm32OpMovRegImm, rtgWasm32RegRcx, 16)
+	rtgAsmJmpLabel(a, capReadyLabel)
+	rtgAsmMarkLabel(a, capNonZeroLabel)
+	rtgWasm32EmitRegReg(a, rtgWasm32OpAddRegReg, rtgWasm32RegRcx, rtgWasm32RegR8)
+	rtgAsmMarkLabel(a, capReadyLabel)
+	rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegRax, rtgWasm32RegRcx)
+	rtgAsmStoreRaxBss(a, newCapOff)
+	rtgAsmLoadRaxBss(a, elemSizeOff)
+	rtgAsmPushRax(a)
+	rtgAsmLoadRaxBss(a, newCapOff)
+	rtgAsmPopRcx(a)
+	rtgWasm32EmitRegReg(a, rtgWasm32OpMulRegReg, rtgWasm32RegRax, rtgWasm32RegRcx)
+	rtgAsmStoreRaxBss(a, allocSizeOff)
+
+	rtgAsmLoadRaxBss(a, g.stringHeapOff)
+	rtgAsmCmpRaxImm8(a, 0)
+	rtgAsmJnzLabel(a, heapReadyLabel)
+	rtgAsmMovRaxBssAddr(a, g.stringHeapDataOff)
+	rtgAsmStoreRaxBss(a, g.stringHeapOff)
+	rtgAsmMarkLabel(a, heapReadyLabel)
+	rtgAsmLoadRaxBss(a, g.stringHeapOff)
+	rtgAsmStoreRaxBss(a, destOff)
+	rtgAsmLoadRaxBss(a, allocSizeOff)
+	rtgAsmMovRcxRax(a)
+	rtgAsmLoadRaxBss(a, g.stringHeapOff)
+	rtgAsmAddRaxRcx(a)
+	rtgAsmStoreRaxBss(a, g.stringHeapOff)
+
+	rtgAsmLoadRaxBss(a, oldLenOff)
+	rtgAsmPushRax(a)
+	rtgAsmLoadRaxBss(a, elemSizeOff)
+	rtgAsmMovRdxRax(a)
+	rtgAsmPopRax(a)
+	rtgWasm32EmitRegReg(a, rtgWasm32OpMulRegReg, rtgWasm32RegRax, rtgWasm32RegRdx)
+	rtgAsmStoreRaxBss(a, copySizeOff)
+	rtgAsmMovRaxImm(a, 0)
+	rtgAsmStoreRaxBss(a, copyIndexOff)
+	rtgAsmMarkLabel(a, copyLoopLabel)
+	rtgAsmLoadRaxBss(a, copyIndexOff)
+	rtgAsmPushRax(a)
+	rtgAsmLoadRaxBss(a, copySizeOff)
+	rtgAsmPopRcx(a)
+	rtgAsmCmpRcxRaxSet(a, 0x9d)
+	rtgAsmCmpRaxImm8(a, 0)
+	rtgAsmJnzLabel(a, copyDoneLabel)
+	rtgAsmLoadRaxBss(a, copyIndexOff)
+	rtgAsmPushRax(a)
+	rtgAsmLoadRaxBss(a, oldPtrOff)
+	rtgAsmPopRcx(a)
+	rtgAsmLoadByteRaxIndexRcx(a)
+	rtgAsmPushRax(a)
+	rtgAsmLoadRaxBss(a, copyIndexOff)
+	rtgAsmPushRax(a)
+	rtgAsmLoadRaxBss(a, destOff)
+	rtgAsmMovRdxRax(a)
+	rtgAsmPopRcx(a)
+	rtgAsmPopRax(a)
+	rtgAsmStoreRaxMemRdxRcxSize(a, 1)
+	rtgAsmLoadRaxBss(a, copyIndexOff)
+	rtgAsmIncRax(a)
+	rtgAsmStoreRaxBss(a, copyIndexOff)
+	rtgAsmJmpLabel(a, copyLoopLabel)
+	rtgAsmMarkLabel(a, copyDoneLabel)
+
+	rtgAsmLoadRaxBss(a, ptrSlotOff)
+	rtgAsmPushRax(a)
+	rtgAsmLoadRaxBss(a, destOff)
+	rtgAsmPopRdx(a)
+	rtgAsmStoreRaxMemRdxDisp(a, 0)
+	rtgAsmLoadRaxBss(a, capSlotOff)
+	rtgAsmPushRax(a)
+	rtgAsmLoadRaxBss(a, newCapOff)
+	rtgAsmPopRdx(a)
+	rtgAsmStoreRaxMemRdxDisp(a, 0)
+	rtgAsmLoadRaxBss(a, lenSlotOff)
+	rtgAsmPushRax(a)
+	rtgAsmLoadRaxBss(a, oldLenOff)
+	rtgAsmIncRax(a)
+	rtgAsmPopRdx(a)
+	rtgAsmStoreRaxMemRdxDisp(a, 0)
+	rtgAsmLoadRaxBss(a, copySizeOff)
+	rtgAsmMovRcxRax(a)
+	rtgAsmLoadRaxBss(a, destOff)
+	rtgAsmAddRaxRcx(a)
+	rtgAsmJmpLabel(a, returnLabel)
+
+	rtgAsmMarkLabel(a, noGrowLabel)
 	rtgWasm32EmitMem(a, rtgWasm32OpLoadMem, rtgWasm32RegRcx, rtgWasm32RegRsi, 0, 4)
 	rtgWasm32EmitMem(a, rtgWasm32OpLoadMem, rtgWasm32RegRax, rtgWasm32RegRdi, 0, 4)
 	rtgWasm32EmitRegReg(a, rtgWasm32OpMulRegReg, rtgWasm32RegRcx, rtgWasm32RegRdx)
@@ -2370,6 +2583,7 @@ func rtgWasm32EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	rtgWasm32EmitMem(a, rtgWasm32OpLoadMem, rtgWasm32RegRcx, rtgWasm32RegRsi, 0, 4)
 	rtgWasm32AsmIncRcx(a)
 	rtgWasm32EmitMem(a, rtgWasm32OpStoreMem, rtgWasm32RegRcx, rtgWasm32RegRsi, 0, 4)
+	rtgAsmMarkLabel(a, returnLabel)
 	rtgAsmRet(a)
 	rtgAsmMarkLabel(a, afterLabel)
 	return g.appendAddrLabel

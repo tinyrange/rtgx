@@ -14,7 +14,7 @@ func rtg386EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	oldLastRangeReturns := g.lastRangeReturns
 	var locals []rtgLocalInfo
 	var gotoLabels []rtgGlobalInfo
-	locals = make([]rtgLocalInfo, 0, 32768)
+	locals = make([]rtgLocalInfo, 0, rtgFunctionLocalCap(fn))
 	gotoLabels = make([]rtgGlobalInfo, 0, 0)
 	g.locals = locals
 	g.gotoLabels = gotoLabels
@@ -236,6 +236,13 @@ func rtg386AsmMemDisp(a *rtgAsm, disp int, op int, disp8 int, disp32 int) {
 	}
 	rtgAsmEmit8(a, disp32)
 	rtgAsmEmit32(a, disp)
+}
+
+func rtg386AsmJccLabel(a *rtgAsm, op int, label int) {
+	rtgAsmEmit2(a, 0x0f, op)
+	at := len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddReloc(a, at, label)
 }
 
 func rtg386AsmLoadQwordRaxIndexRcx8(a *rtgAsm) {
@@ -635,15 +642,8 @@ func rtg386EmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool 
 		return false
 	}
 	if e.kind == rtgExprIndex {
-		left := &ep.exprs[e.left]
-		if left.kind != rtgExprIdent {
-			return false
-		}
-		localIndex := rtgFindLocalIndex(g, left.nameStart, left.nameEnd)
-		if localIndex < 0 {
-			return false
-		}
-		t := rtgResolveType(meta, g.locals[localIndex].typ)
+		leftType := rtgInferParsedExprType(g, ep, e.left)
+		t := rtgResolveType(meta, leftType)
 		if t.kind != rtgTypeSlice {
 			return false
 		}
@@ -655,11 +655,13 @@ func rtg386EmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool 
 			return false
 		}
 		rtgAsmPushRax(a)
-		rtgAsmLoadRaxStack(a, g.locals[localIndex].offset)
+		if !rtgEmitSlicePtrLen(g, ep, e.left) {
+			return false
+		}
 		rtgAsmPopRcx(a)
 		rtgAsmShlRcxImm(a, 4)
 		rtgAsmMovRdxRax(a)
-		rtgAsmEmit24(a, 0x08048b)
+		rtgAsmLoadQwordRaxIndexRcxDisp(a, 0)
 		rtgAsmAddRdxRcx(a)
 		rtgAsmMemDisp(a, 8, 0x8b48, 0x52, 0x92)
 		return true
@@ -749,9 +751,6 @@ func rtg386EmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool
 			return false
 		}
 		rtgEmitCopyStackToMemRdx(g, g.locals[localIndex].offset, 0, size)
-		if !rtgEmitCopyReturnedStructSliceFields(g, resultType, g.locals[localIndex].offset, 0) {
-			return false
-		}
 		return true
 	}
 	if e.kind == rtgExprIndex {
@@ -813,10 +812,11 @@ func rtg386EmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool
 		if rtgTypeSize(meta, meta.funcs[fnIndex].resultType) != size {
 			return false
 		}
+		fn := &meta.funcs[fnIndex]
 		wordCount := 1
 		for i := e.argCount - 1; i >= 0; i-- {
 			argIndex := ep.args[e.firstArg+i]
-			words := rtgEmitCallArgReverse(g, ep, argIndex)
+			words := rtgEmitCallParamArgReverse(g, ep, argIndex, fn.firstParam+i)
 			if words < 0 {
 				return false
 			}
@@ -954,6 +954,13 @@ func rtg386EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			} else {
 				rtgAsmNormalizeRaxForKind(a, rtgTypeInt32)
 			}
+			return true
+		}
+		if e.argCount == 1 && callee == rtgIdentCap {
+			if !rtgEmitSlicePtrCap(g, ep, ep.args[e.firstArg]) {
+				return false
+			}
+			rtgAsmEmit16(a, 0x5851)
 			return true
 		}
 		if e.argCount == 1 && callee == rtgIdentLen {
@@ -1260,13 +1267,9 @@ func rtg386EmitFloatBinaryExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool 
 func rtg386EmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSliceLocation, elemSize int) bool {
 	a := &g.asm
 	if loc.mem {
-		if loc.expr < 0 || loc.expr >= len(locEp.exprs) {
+		if !rtgEmitSliceLocationHeaderAddressRdx(g, locEp, loc) {
 			return false
 		}
-		if !rtgEmitSelectorAddressRdx(g, locEp, loc.expr) {
-			return false
-		}
-		rtg386EmitEnsureMemSlice(g, elemSize)
 		rtgAsmEmit16(a, 0x5f52)
 		rtgAsmEmit16(a, 0x728d)
 		rtgAsmEmit8(a, 8)
@@ -1283,7 +1286,6 @@ func rtg386EmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSlic
 		rtgAsmAddAbsReloc(a, at, loc.offset+8, rtgAbsBssReloc)
 		return true
 	}
-	rtgEmitEnsureLocalSlice(g, loc.offset, elemSize)
 	rtgAsmLeaRdiStack(a, loc.offset)
 	rtgAsmLeaRsiStack(a, loc.offset-8)
 	return true
@@ -1318,6 +1320,66 @@ func rtg386EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	afterLabel := rtgAsmNewLabel(a)
 	rtgAsmJmpLabel(a, afterLabel)
 	rtgAsmMarkLabel(a, g.appendAddrLabel)
+	noGrowLabel := rtgAsmNewLabel(a)
+	capNonZeroLabel := rtgAsmNewLabel(a)
+	capReadyLabel := rtgAsmNewLabel(a)
+	heapReadyLabel := rtgAsmNewLabel(a)
+	rtgStringHeapOffsets(g)
+	rtgAsmEmit16(a, 0x0e8b)
+	rtgAsmEmit3(a, 0x8b, 0x46, 8)
+	rtgAsmEmit16(a, 0xc139)
+	rtg386AsmJccLabel(a, 0x8c, noGrowLabel)
+	rtgAsmEmit8(a, 0x57)
+	rtgAsmEmit8(a, 0x56)
+	rtgAsmPushRdx(a)
+	rtgAsmPushRcx(a)
+	rtgAsmEmit3(a, 0x8b, 0x46, 8)
+	rtgAsmEmit16(a, 0xc085)
+	rtg386AsmJccLabel(a, 0x85, capNonZeroLabel)
+	rtgAsmMovRaxImm(a, 16)
+	rtgAsmJmpLabel(a, capReadyLabel)
+	rtgAsmMarkLabel(a, capNonZeroLabel)
+	rtgAsmAddRaxRcx(a)
+	rtgAsmMarkLabel(a, capReadyLabel)
+	rtgAsmPushRax(a)
+	rtgAsmMovRcxRax(a)
+	rtgAsmEmit3(a, 0x0f, 0xaf, 0x4c)
+	rtgAsmEmit2(a, 0x24, 8)
+	rtgAsmLoadRaxBss(a, g.stringHeapOff)
+	rtgAsmCmpRaxImm8(a, 0)
+	rtgAsmJnzLabel(a, heapReadyLabel)
+	rtgAsmMovRaxBssAddr(a, g.stringHeapDataOff)
+	rtgAsmStoreRaxBss(a, g.stringHeapOff)
+	rtgAsmMarkLabel(a, heapReadyLabel)
+	rtgAsmLoadRaxBss(a, g.stringHeapOff)
+	rtgAsmPushRax(a)
+	rtgAsmAddRaxRcx(a)
+	rtgAsmStoreRaxBss(a, g.stringHeapOff)
+	rtgAsmEmit3(a, 0x8b, 0x3c, 0x24)
+	rtgAsmEmit4(a, 0x8b, 0x74, 0x24, 20)
+	rtgAsmEmit16(a, 0x368b)
+	rtgAsmEmit4(a, 0x8b, 0x4c, 0x24, 8)
+	rtgAsmEmit4(a, 0x8b, 0x44, 0x24, 12)
+	rtgAsmEmit3(a, 0x0f, 0xaf, 0xc8)
+	rtgAsmEmit16(a, 0xa4f3)
+	rtgAsmEmit4(a, 0x8b, 0x7c, 0x24, 20)
+	rtgAsmEmit3(a, 0x8b, 0x04, 0x24)
+	rtgAsmEmit16(a, 0x0789)
+	rtgAsmEmit4(a, 0x8b, 0x74, 0x24, 16)
+	rtgAsmEmit4(a, 0x8b, 0x44, 0x24, 4)
+	rtgAsmEmit3(a, 0x89, 0x46, 8)
+	rtgAsmEmit3(a, 0x8b, 0x04, 0x24)
+	rtgAsmEmit4(a, 0x8b, 0x4c, 0x24, 8)
+	rtgAsmEmit4(a, 0x8b, 0x54, 0x24, 12)
+	rtgAsmEmit3(a, 0x0f, 0xaf, 0xca)
+	rtgAsmAddRaxRcx(a)
+	rtgAsmEmit4(a, 0x8b, 0x74, 0x24, 16)
+	rtgAsmEmit4(a, 0x8b, 0x4c, 0x24, 8)
+	rtgAsmIncRcx(a)
+	rtgAsmEmit16(a, 0x0e89)
+	rtgAsmEmit3(a, 0x83, 0xc4, 24)
+	rtgAsmRet(a)
+	rtgAsmMarkLabel(a, noGrowLabel)
 	rtgAsmEmit16(a, 0x0e8b)
 	rtgAsmEmit16(a, 0x078b)
 	rtgAsmEmit24(a, 0xcaaf0f)

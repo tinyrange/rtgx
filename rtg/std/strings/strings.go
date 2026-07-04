@@ -71,6 +71,21 @@ func Contains(s string, substr string) bool {
 	return Index(s, substr) >= 0
 }
 
+func ContainsAny(s string, chars string) bool {
+	i := 0
+	for i < len(s) {
+		j := 0
+		for j < len(chars) {
+			if s[i] == chars[j] {
+				return true
+			}
+			j = j + 1
+		}
+		i = i + 1
+	}
+	return false
+}
+
 func Index(s string, substr string) int {
 	n := len(substr)
 	if n == 0 {
@@ -160,6 +175,61 @@ func Repeat(s string, count int) string {
 		i = i + 1
 	}
 	return string(out)
+}
+
+func ReplaceAll(s string, old string, new string) string {
+	var out []byte
+	if len(old) == 0 {
+		out = appendString(out, new)
+		i := 0
+		for i < len(s) {
+			width := replaceAllRuneWidth(s[i])
+			if i+width > len(s) {
+				width = 1
+			}
+			j := 0
+			for j < width {
+				out = append(out, s[i+j])
+				j = j + 1
+			}
+			out = appendString(out, new)
+			i = i + width
+		}
+		return string(out)
+	}
+	i := 0
+	for i < len(s) {
+		if i <= len(s)-len(old) && equalAt(s, old, i) {
+			out = appendString(out, new)
+			i = i + len(old)
+		} else {
+			out = append(out, s[i])
+			i = i + 1
+		}
+	}
+	return string(out)
+}
+
+func appendString(out []byte, s string) []byte {
+	i := 0
+	for i < len(s) {
+		out = append(out, s[i])
+		i = i + 1
+	}
+	return out
+}
+
+func replaceAllRuneWidth(c byte) int {
+	if c < 128 {
+		return 1
+	}
+	if c < 224 {
+		return 2
+	}
+	if c < 240 {
+		return 3
+	}
+	return 4
 }
 
 func equalAt(s string, substr string, start int) bool {

@@ -209,6 +209,18 @@ func (s *sourceInfoScanner) tokenTextIs(tok scan.Token, text string) bool {
 	return true
 }
 
+func sourceInfoBytesAt(source []byte, pos int, text string) bool {
+	if pos+len(text) > len(source) {
+		return false
+	}
+	for i := 0; i < len(text); i++ {
+		if source[pos+i] != text[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *sourceInfoScanner) advanceByte() {
 	if s.src[s.pos] == '\n' {
 		s.pos++
@@ -329,6 +341,9 @@ func appendPackageImports(path string, src []byte, pkg *Package, importSet *[]st
 }
 
 func appendPackageImport(path string, pkg *Package, importSet *[]string, value string, alias string, line int, column int) {
+	if value == "embed" {
+		return
+	}
 	impPath := copyLoadString(value)
 	values := *importSet
 	if !containsString(values, impPath) {

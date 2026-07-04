@@ -437,7 +437,7 @@ func appMain() int {
 	}
 }
 
-func TestRunCheckRejectsFallthroughBeforeBackend(t *testing.T) {
+func TestRunCheckRejectsFinalFallthroughBeforeBackend(t *testing.T) {
 	root := t.TempDir()
 	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
 	writeCLIFile(t, root, "cmd/app/main.go", `package main
@@ -445,23 +445,23 @@ func TestRunCheckRejectsFallthroughBeforeBackend(t *testing.T) {
 func main() {
 	switch 1 {
 	case 1:
-		fallthrough
-	case 2:
 		print("PASS\n")
+	case 2:
+		fallthrough
 	}
 }
 `)
 	cfg := config{check: true, inputs: []string{filepath.Join(root, "cmd", "app")}}
 	err := run(cfg)
 	if err == nil {
-		t.Fatalf("run check succeeded for fallthrough")
+		t.Fatalf("run check succeeded for final fallthrough")
 	}
-	if !strings.Contains(err.Error(), filepath.Join(root, "cmd", "app", "main.go")+":6:3: fallthrough is not supported") {
+	if !strings.Contains(err.Error(), filepath.Join(root, "cmd", "app", "main.go")+":8:3: fallthrough is not inside a non-final switch case") {
 		t.Fatalf("error = %q", err)
 	}
 }
 
-func TestRunCheckRejectsInitFunctionsBeforeBackend(t *testing.T) {
+func TestRunCheckAllowsInitFunctions(t *testing.T) {
 	root := t.TempDir()
 	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
 	writeCLIFile(t, root, "cmd/app/main.go", `package main
@@ -476,10 +476,7 @@ func main() {
 `)
 	cfg := config{check: true, inputs: []string{filepath.Join(root, "cmd", "app")}}
 	err := run(cfg)
-	if err == nil {
-		t.Fatalf("run check succeeded for init function")
-	}
-	if !strings.Contains(err.Error(), filepath.Join(root, "cmd", "app", "main.go")+":3:6: init functions are not supported") {
+	if err != nil {
 		t.Fatalf("error = %q", err)
 	}
 }

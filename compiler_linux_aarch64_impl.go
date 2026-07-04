@@ -22,7 +22,7 @@ func rtgAarch64AsmMoveOffsetArg(a *rtgAsm) {
 
 func compileLinuxAarch64(input []int, output int) int {
 	rtgSetTarget(rtgTargetLinuxAarch64)
-	src := make([]byte, 0, 655360)
+	src := make([]byte, 0, 589824)
 	for i := 0; i < len(input); i++ {
 		src = rtgReadAll(input[i], src)
 		src = append(src, '\n')
@@ -35,7 +35,6 @@ func compileLinuxAarch64(input []int, output int) int {
 	var meta rtgMeta
 	rtgBuildMetaInto(&prog, &meta)
 	if !meta.ok {
-		rtgPrintErr("rtg: aarch64 meta failed\n")
 		return 1
 	}
 	var result rtgCompileResult
@@ -66,7 +65,7 @@ func rtgTryCompileScalarProgramAarch64(p *rtgProgram, meta *rtgMeta) rtgCompileR
 	rtgAsmInit(a)
 	a.codeOffset = rtgLinuxAarch64CodeOffset
 	if rtgCompilerFixedTarget != 0 {
-		g.funcLabels = make([]int, 0, 1536)
+		g.funcLabels = make([]int, 0, len(meta.funcs))
 	}
 	for i := 0; i < len(meta.funcs); i++ {
 		label := rtgAsmNewLabel(a)

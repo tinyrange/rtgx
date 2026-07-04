@@ -1,5 +1,7 @@
 package fmt
 
+import "strconv"
+
 type fmtError string
 
 func (err fmtError) Error() string {
@@ -29,7 +31,7 @@ func PrintString(s string) int {
 }
 
 func PrintInt(v int) int {
-	print(v)
+	print(strconv.Itoa(v))
 	return 0
 }
 

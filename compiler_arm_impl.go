@@ -30,7 +30,7 @@ func rtgArmEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	oldLastRangeReturns := g.lastRangeReturns
 	var locals []rtgLocalInfo
 	var gotoLabels []rtgGlobalInfo
-	locals = make([]rtgLocalInfo, 0, 32768)
+	locals = make([]rtgLocalInfo, 0, rtgFunctionLocalCap(fn))
 	gotoLabels = make([]rtgGlobalInfo, 0, 0)
 	g.locals = locals
 	g.gotoLabels = gotoLabels
@@ -255,13 +255,9 @@ func rtgArmEmitFloatBinaryExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool 
 func rtgArmEmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSliceLocation, elemSize int) bool {
 	a := &g.asm
 	if loc.mem {
-		if loc.expr < 0 || loc.expr >= len(locEp.exprs) {
+		if !rtgEmitSliceLocationHeaderAddressRdx(g, locEp, loc) {
 			return false
 		}
-		if !rtgEmitSelectorAddressRdx(g, locEp, loc.expr) {
-			return false
-		}
-		rtgEmitEnsureMemSlice(g, elemSize)
 		rtgArmAsmMovRegReg(a, rtgArmRegRdi, rtgArmRegRdx)
 		rtgArmAsmAddRegImm(a, rtgArmRegRsi, rtgArmRegRdx, 8)
 		return true
@@ -271,7 +267,6 @@ func rtgArmEmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSlic
 		rtgArmAsmMovRegAbs(a, rtgArmRegRsi, loc.offset+8, rtgAbsBssReloc)
 		return true
 	}
-	rtgEmitEnsureLocalSlice(g, loc.offset, elemSize)
 	rtgArmAsmLeaRegStack(a, rtgArmRegRdi, loc.offset)
 	rtgArmAsmLeaRegStack(a, rtgArmRegRsi, loc.offset-8)
 	return true
@@ -287,12 +282,63 @@ func rtgArmEnsureAppendAddrHelper(g *rtgLinearGen) int {
 	afterLabel := rtgAsmNewLabel(a)
 	rtgAsmJmpLabel(a, afterLabel)
 	rtgAsmMarkLabel(a, g.appendAddrLabel)
-	rtgArmAsmLoadRegMem(a, rtgArmRegRcx, rtgArmRegRsi, 0, 4)
-	rtgArmAsmLoadRegMem(a, rtgArmRegRax, rtgArmRegRdi, 0, 4)
-	rtgArmAsmMulRegReg(a, rtgArmRegTmp, rtgArmRegRcx, rtgArmRegRdx)
+	noGrowLabel := rtgAsmNewLabel(a)
+	capNonZeroLabel := rtgAsmNewLabel(a)
+	capReadyLabel := rtgAsmNewLabel(a)
+	heapReadyLabel := rtgAsmNewLabel(a)
+	copyLoopLabel := rtgAsmNewLabel(a)
+	copyDoneLabel := rtgAsmNewLabel(a)
+	rtgStringHeapOffsets(g)
+	rtgArmAsmLoadRegMem(a, rtgArmRegR8, rtgArmRegRsi, 0, 4)
+	rtgArmAsmLoadRegMem(a, rtgArmRegRcx, rtgArmRegRsi, 8, 4)
+	rtgArmAsmCmpRegReg(a, rtgArmRegR8, rtgArmRegRcx)
+	rtgArmAsmBCondLabel(a, noGrowLabel, 11)
+	rtgArmAsmMovRegReg(a, rtgArmRegR9, rtgArmRegRdx)
+	rtgArmAsmMovRegReg(a, rtgArmRegR10, rtgArmRegRdi)
+	rtgArmAsmCmpRegImm(a, rtgArmRegRcx, 0)
+	rtgArmAsmBCondLabel(a, capNonZeroLabel, 1)
+	rtgArmAsmMovRegImm(a, rtgArmRegRcx, 16)
+	rtgAsmJmpLabel(a, capReadyLabel)
+	rtgAsmMarkLabel(a, capNonZeroLabel)
+	rtgArmAsmAddRegReg(a, rtgArmRegRcx, rtgArmRegRcx, rtgArmRegR8)
+	rtgAsmMarkLabel(a, capReadyLabel)
+	rtgArmAsmMulRegReg(a, rtgArmRegTmp, rtgArmRegRcx, rtgArmRegR9)
+	rtgAsmLoadRaxBss(a, g.stringHeapOff)
+	rtgAsmCmpRaxImm8(a, 0)
+	rtgAsmJnzLabel(a, heapReadyLabel)
+	rtgAsmMovRaxBssAddr(a, g.stringHeapDataOff)
+	rtgAsmStoreRaxBss(a, g.stringHeapOff)
+	rtgAsmMarkLabel(a, heapReadyLabel)
+	rtgAsmLoadRaxBss(a, g.stringHeapOff)
+	rtgArmAsmMovRegReg(a, rtgArmRegRdx, rtgArmRegRax)
+	rtgArmAsmMovRegReg(a, rtgArmRegRdi, rtgArmRegRdx)
 	rtgArmAsmAddRegReg(a, rtgArmRegRax, rtgArmRegRax, rtgArmRegTmp)
-	rtgArmAsmAddRegImm(a, rtgArmRegRcx, rtgArmRegRcx, 1)
-	rtgArmAsmStoreRegMem(a, rtgArmRegRcx, rtgArmRegRsi, 0, 4)
+	rtgAsmStoreRaxBss(a, g.stringHeapOff)
+	rtgArmAsmLoadRegMem(a, rtgArmRegTmp2, rtgArmRegR10, 0, 4)
+	rtgArmAsmMulRegReg(a, rtgArmRegTmp, rtgArmRegR8, rtgArmRegR9)
+	rtgAsmMarkLabel(a, copyLoopLabel)
+	rtgArmAsmCmpRegImm(a, rtgArmRegTmp, 0)
+	rtgArmAsmBCondLabel(a, copyDoneLabel, 0)
+	rtgArmAsmLoadRegMem(a, rtgArmRegRax, rtgArmRegTmp2, 0, 1)
+	rtgArmAsmStoreRegMem(a, rtgArmRegRax, rtgArmRegRdi, 0, 1)
+	rtgArmAsmAddRegSmallImm(a, rtgArmRegTmp2, rtgArmRegTmp2, 1)
+	rtgArmAsmAddRegSmallImm(a, rtgArmRegRdi, rtgArmRegRdi, 1)
+	rtgArmAsmAddRegSmallImm(a, rtgArmRegTmp, rtgArmRegTmp, -1)
+	rtgAsmJmpLabel(a, copyLoopLabel)
+	rtgAsmMarkLabel(a, copyDoneLabel)
+	rtgArmAsmStoreRegMem(a, rtgArmRegRdx, rtgArmRegR10, 0, 4)
+	rtgArmAsmStoreRegMem(a, rtgArmRegRcx, rtgArmRegRsi, 8, 4)
+	rtgArmAsmMulRegReg(a, rtgArmRegTmp, rtgArmRegR8, rtgArmRegR9)
+	rtgArmAsmAddRegReg(a, rtgArmRegRax, rtgArmRegRdx, rtgArmRegTmp)
+	rtgArmAsmAddRegImm(a, rtgArmRegR8, rtgArmRegR8, 1)
+	rtgArmAsmStoreRegMem(a, rtgArmRegR8, rtgArmRegRsi, 0, 4)
+	rtgAsmRet(a)
+	rtgAsmMarkLabel(a, noGrowLabel)
+	rtgArmAsmLoadRegMem(a, rtgArmRegRax, rtgArmRegRdi, 0, 4)
+	rtgArmAsmMulRegReg(a, rtgArmRegTmp, rtgArmRegR8, rtgArmRegRdx)
+	rtgArmAsmAddRegReg(a, rtgArmRegRax, rtgArmRegRax, rtgArmRegTmp)
+	rtgArmAsmAddRegImm(a, rtgArmRegR8, rtgArmRegR8, 1)
+	rtgArmAsmStoreRegMem(a, rtgArmRegR8, rtgArmRegRsi, 0, 4)
 	rtgAsmRet(a)
 	rtgAsmMarkLabel(a, afterLabel)
 	return g.appendAddrLabel
@@ -494,6 +540,14 @@ func rtgArmAsmAddRegImm(a *rtgAsm, dst int, src int, imm int) {
 	}
 	rtgArmAsmMovRegImm(a, tmp, imm)
 	rtgArmAsmAddRegReg(a, dst, src, tmp)
+}
+
+func rtgArmAsmAddRegSmallImm(a *rtgAsm, dst int, src int, imm int) {
+	if imm < 0 {
+		rtgArmAsmEmit(a, 0xe2400000|(src<<16)|(dst<<12)|(-imm))
+		return
+	}
+	rtgArmAsmEmit(a, 0xe2800000|(src<<16)|(dst<<12)|imm)
 }
 
 func rtgArmAsmAddRegReg(a *rtgAsm, dst int, left int, right int) {

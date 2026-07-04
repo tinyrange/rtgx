@@ -25,7 +25,7 @@ func rtg386AsmMoveOffsetArg(a *rtgAsm) {
 
 func compileLinux386(input []int, output int) int {
 	rtgSetTarget(rtgTargetLinux386)
-	src := make([]byte, 0, 655360)
+	src := make([]byte, 0, 589824)
 	for i := 0; i < len(input); i++ {
 		src = rtgReadAll(input[i], src)
 		src = append(src, '\n')
@@ -98,7 +98,7 @@ func rtgTryCompileScalarProgram386(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 		a.codeOffset = rtgWinSectionRVA
 	}
 	if rtgCompilerFixedTarget != 0 {
-		g.funcLabels = make([]int, 0, 1536)
+		g.funcLabels = make([]int, 0, len(meta.funcs))
 	}
 	for i := 0; i < len(meta.funcs); i++ {
 		label := rtgAsmNewLabel(a)
@@ -480,7 +480,7 @@ func rtgAsmImageWindows386(a *rtgAsm) []byte {
 	dataVirtualSize := len(a.data) + a.bssSize
 	iatSize := 0
 	if imports.kernelIATRVA != 0 {
-		iatSize = (rtgWinImportCount() + 1) * imports.thunkSize
+		iatSize = (rtgWinImportFixedCount + 1) * imports.thunkSize
 	}
 	var out []byte
 	out = rtgAppendPEHeader32(out, a.codeOffset, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, imports.importRVA, imports.importSize, imports.kernelIATRVA, iatSize)

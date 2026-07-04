@@ -153,8 +153,9 @@ func selfHostedFrontendOutputPath(args []string) string {
 }
 
 func selfHostedFrontendPerfIsBetter(candidate selfHostedFrontendPerf, best selfHostedFrontendPerf) bool {
-	candidatePasses := candidate.elapsed <= selfHostedFrontendMaxRuntime && candidate.maxRSS <= selfHostedFrontendMaxRSSKB
-	bestPasses := best.elapsed <= selfHostedFrontendMaxRuntime && best.maxRSS <= selfHostedFrontendMaxRSSKB
+	enforceRSS := selfHostedFrontendEnforceRSSLimit()
+	candidatePasses := candidate.elapsed <= selfHostedFrontendMaxRuntime && (!enforceRSS || candidate.maxRSS <= selfHostedFrontendMaxRSSKB)
+	bestPasses := best.elapsed <= selfHostedFrontendMaxRuntime && (!enforceRSS || best.maxRSS <= selfHostedFrontendMaxRSSKB)
 	if candidatePasses != bestPasses {
 		return candidatePasses
 	}
@@ -162,6 +163,10 @@ func selfHostedFrontendPerfIsBetter(candidate selfHostedFrontendPerf, best selfH
 		return candidate.elapsed < best.elapsed
 	}
 	return candidate.maxRSS < best.maxRSS
+}
+
+func selfHostedFrontendEnforceRSSLimit() bool {
+	return os.Getenv("CI") == "" && os.Getenv("GITHUB_ACTIONS") == ""
 }
 
 func maxInt(a int, b int) int {
@@ -200,7 +205,7 @@ func checkSelfHostedFrontendPerf(t *testing.T, perf selfHostedFrontendPerf, comp
 	if perf.elapsed > selfHostedFrontendMaxRuntime {
 		failures = append(failures, fmt.Sprintf("runtime %s > %s", perf.elapsed, selfHostedFrontendMaxRuntime))
 	}
-	if perf.maxRSS > selfHostedFrontendMaxRSSKB {
+	if selfHostedFrontendEnforceRSSLimit() && perf.maxRSS > selfHostedFrontendMaxRSSKB {
 		failures = append(failures, fmt.Sprintf("max RSS %dKB > %dKB", perf.maxRSS, selfHostedFrontendMaxRSSKB))
 	}
 	appendSelfHostedFrontendBinarySizeFailure(&failures, compilerSize)

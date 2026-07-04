@@ -14,17 +14,7 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	oldLastRangeReturns := g.lastRangeReturns
 	var locals []rtgLocalInfo
 	var gotoLabels []rtgGlobalInfo
-	localCap := 32768
-	if rtgCompilerFixedTarget != 0 {
-		localCap = (fn.bodyEnd-fn.bodyStart)/2 + 64
-		if localCap < 64 {
-			localCap = 64
-		}
-		if localCap > 1024 {
-			localCap = 1024
-		}
-	}
-	locals = make([]rtgLocalInfo, 0, localCap)
+	locals = make([]rtgLocalInfo, 0, rtgFunctionLocalCap(fn))
 	gotoLabels = make([]rtgGlobalInfo, 0, 0)
 	g.locals = locals
 	g.gotoLabels = gotoLabels
@@ -41,11 +31,9 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		rtgAsmStackMem(a, g.returnStruct, 0x8948, 0x7d, 0xbd)
 	}
 	if !rtgBindFunctionParams(g, fnInfoIndex) {
-		rtgPrintErr("rtg: amd64 bind params failed\n")
 		return false
 	}
 	if !rtgEmitLinearRange(g, fn.bodyStart+1, fn.bodyEnd) {
-		rtgPrintErr("rtg: amd64 emit range failed\n")
 		return false
 	}
 	if !g.lastRangeReturns {
@@ -70,8 +58,8 @@ func rtgAmd64PatchFunctionFrame(a *rtgAsm, patch int, stackUsed int) {
 	if frame < 2048 {
 		frame = 2048
 	}
-	if frame > 32768 {
-		frame = 32768
+	if frame > 65528 {
+		frame = 65528
 	}
 	a.code[patch+1] = byte(frame & 255)
 	a.code[patch+2] = byte((frame / 256) & 255)
@@ -767,9 +755,6 @@ func rtgAmd64EmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bo
 			return false
 		}
 		rtgEmitCopyStackToMemRdx(g, g.locals[localIndex].offset, 0, size)
-		if !rtgEmitCopyReturnedStructSliceFields(g, resultType, g.locals[localIndex].offset, 0) {
-			return false
-		}
 		return true
 	}
 	if e.kind == rtgExprIndex {
@@ -837,10 +822,11 @@ func rtgAmd64EmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bo
 		if rtgTypeSize(meta, meta.funcs[fnIndex].resultType) != size {
 			return false
 		}
+		fn := &meta.funcs[fnIndex]
 		wordCount := 1
 		for i := e.argCount - 1; i >= 0; i-- {
 			argIndex := ep.args[e.firstArg+i]
-			words := rtgEmitCallArgReverse(g, ep, argIndex)
+			words := rtgEmitCallParamArgReverse(g, ep, argIndex, fn.firstParam+i)
 			if words < 0 {
 				return false
 			}
@@ -973,6 +959,18 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				rtgAsmNormalizeRaxForKind(a, rtgTypeInt16)
 			} else {
 				rtgAsmNormalizeRaxForKind(a, rtgTypeInt32)
+			}
+			return true
+		}
+		if e.argCount == 1 && callee == rtgIdentCap {
+			if !rtgEmitSlicePtrCap(g, ep, ep.args[e.firstArg]) {
+				return false
+			}
+			if rtgTargetArch == rtgArchAarch64 || rtgTargetArch == rtgArchArm || rtgTargetArch == rtgArchWasm32 {
+				rtgAsmPushRcx(a)
+				rtgAsmPopRax(a)
+			} else {
+				rtgAsmEmit16(a, 0x5851)
 			}
 			return true
 		}
@@ -1317,13 +1315,9 @@ func rtgAmd64EmitFloatBinaryExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) boo
 func rtgAmd64EmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSliceLocation, elemSize int) bool {
 	a := &g.asm
 	if loc.mem {
-		if loc.expr < 0 || loc.expr >= len(locEp.exprs) {
+		if !rtgEmitSliceLocationHeaderAddressRdx(g, locEp, loc) {
 			return false
 		}
-		if !rtgEmitSelectorAddressRdx(g, locEp, loc.expr) {
-			return false
-		}
-		rtgEmitEnsureMemSlice(g, elemSize)
 		if rtgTargetArch == rtgArchAarch64 {
 			rtgAsmPushRdx(a)
 			rtgAsmPopRdi(a)
@@ -1333,6 +1327,8 @@ func rtgAmd64EmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSl
 			rtgAsmPopRdi(a)
 			rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegRsi, rtgWasm32RegRdx)
 			rtgWasm32EmitRegImm(a, rtgWasm32OpAddRegImm, rtgWasm32RegRsi, 8)
+			rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegR9, rtgWasm32RegRdx)
+			rtgWasm32EmitRegImm(a, rtgWasm32OpAddRegImm, rtgWasm32RegR9, 16)
 		} else {
 			rtgAsmEmit16(a, 0x5f52)
 			rtgAsmEmit24(a, 0x728d48)
@@ -1350,6 +1346,8 @@ func rtgAmd64EmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSl
 			rtgAsmAddAbsReloc(a, len(a.code)-4, loc.offset, rtgAbsBssReloc)
 			rtgWasm32EmitRegImm(a, rtgWasm32OpMovRegImm, rtgWasm32RegRsi, 0)
 			rtgAsmAddAbsReloc(a, len(a.code)-4, loc.offset+8, rtgAbsBssReloc)
+			rtgWasm32EmitRegImm(a, rtgWasm32OpMovRegImm, rtgWasm32RegR9, 0)
+			rtgAsmAddAbsReloc(a, len(a.code)-4, loc.offset+16, rtgAbsBssReloc)
 		} else {
 			rtgAsmEmit24(a, 0x3d8d48)
 			at := len(a.code)
@@ -1366,10 +1364,17 @@ func rtgAmd64EmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSl
 		}
 		return true
 	}
-	if loc.param {
-		rtgEmitEnsureLocalSliceArena(g, loc.offset, elemSize)
-	} else {
-		rtgEmitEnsureLocalSlice(g, loc.offset, elemSize)
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmLeaRegStack(a, rtgAarch64RegRdi, loc.offset)
+		rtgAarch64AsmLeaRegStack(a, rtgAarch64RegRsi, loc.offset-8)
+		rtgAarch64AsmLeaRegStack(a, rtgAarch64RegR9, loc.offset-16)
+		return true
+	}
+	if rtgTargetArch == rtgArchWasm32 {
+		rtgWasm32EmitStack(a, rtgWasm32OpLeaStack, rtgWasm32RegRdi, loc.offset)
+		rtgWasm32EmitStack(a, rtgWasm32OpLeaStack, rtgWasm32RegRsi, loc.offset-8)
+		rtgWasm32EmitStack(a, rtgWasm32OpLeaStack, rtgWasm32RegR9, loc.offset-16)
+		return true
 	}
 	rtgAsmLeaRdiStack(a, loc.offset)
 	rtgAsmLeaRsiStack(a, loc.offset-8)

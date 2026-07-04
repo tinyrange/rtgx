@@ -14,10 +14,15 @@ The compiler will eventually target many operating systems and architectures. Th
 - Performance requirements are strictly defined in `./main_test.go` and cannot be violated.
 - Do not hardcode test cases, emit prebuilt/self-copying binaries, copy the compiler executable or source as the compiled output, or patch the test harness/runtime instead of implementing the compiler from parsed source semantics.
 - You are allowed to write one-off custom tests in `./sandbox`, but this folder is not part of the repo and should only be used for local compiler experiments. Do not use it to modify or replace the test harness.
+- Do not expand `./rtg/std` just to mirror the Go standard library. Add APIs only when code we are writing benefits directly, a frontend feature needs a small compatibility shim, or a self-hosting milestone requires it; document the caller or milestone that justifies the addition.
 
 ## Workflow
 
 Every time you find a miscompilation bug you should write a test in `./tests` to confirm it. All tests should only output `PASS\n` if they pass and anything else is considered a failure.
+
+## Frontend Scope
+
+The frontend exclusion list is closed: goroutines, channels, `select`, cgo, and generics are out of scope for now. Every other ordinary Go feature is frontend work unless the project explicitly changes this policy. In particular, `defer`, `panic`, `recover`, maps, interfaces, arrays, function values, dynamic dispatch, complex numbers, ordinary builtins, and unsafe intrinsics are required frontend features, even when they currently have diagnostics or partial lowerings.
 
 There are no restrictions on the specific `go test` command you run.
 Do not run `go test` in module mode inside `./tests`; those files intentionally contain conflicting package-level symbols and are meant to be compiled individually by the compiler test harness.

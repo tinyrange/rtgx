@@ -1,8 +1,17 @@
 # RTG Go Subset
 
-This document describes the intended source language for RTG tests and the
-self-hosting compiler. It is deliberately much smaller than Go. Anything not
-listed here should be treated as unsupported until this file is updated.
+This document describes the direct source language for the backend compiler,
+backend tests, and the backend self-hosting compiler. It is deliberately much
+smaller than Go.
+
+This is not the full frontend roadmap. The frontend may accept ordinary Go
+features outside this direct backend subset by checking and lowering them into
+platform-independent units before they reach the backend. The closed frontend
+exclusion list is: goroutines, channels, `select`, cgo, and generics. Everything
+else, including `defer`, `panic`, `recover`, maps, interfaces, arrays, function
+values, dynamic dispatch, complex numbers, ordinary builtins, and unsafe
+intrinsics, is frontend work unless this file is updated to make it a backend
+requirement too.
 
 ## Program Shape
 
@@ -52,15 +61,21 @@ Required:
 - pointers to supported types
 - named aliases or definitions of supported types
 
-Unsupported:
+Frontend-in-scope but not directly in the backend subset:
 
 - complex numbers
 - interfaces
 - maps
 - arrays as distinct fixed-length values
-- channels
 - function values and closures
 - method values and interface-style dynamic dispatch
+
+Excluded from the frontend and not directly in the backend subset:
+
+- goroutines
+- channels
+- `select`
+- cgo
 - generics
 
 ## Literals
@@ -82,7 +97,7 @@ Required:
   and `[]int{1, 2, 3}`
 - global composite literals and literals using named supported types
 
-Unsupported:
+Frontend-in-scope but not directly in the backend subset:
 
 - raw string literals
 - octal or imaginary literals
@@ -106,7 +121,9 @@ Required:
 - string indexing, for example `s[i]`
 - slice indexing and assignment, for example `buf[i] = 65`
 - two-bound slicing expressions `x[a:b]`
+- full slice expressions `x[a:b:c]`
 - slice length with `len(x)`
+- slice capacity with `cap(x)`
 - function calls
 - method calls on concrete receiver values or pointers
 - slice append with `append(slice, value)`
@@ -121,10 +138,8 @@ Required:
 String concatenation with `+` is optional; tests should avoid requiring it
 unless the compiler source needs it.
 
-Unsupported:
+Frontend-in-scope but not directly in the backend subset:
 
-- `cap`
-- full slice expressions `x[a:b:c]`
 - type assertions and type switches
 
 ## Statements
@@ -152,12 +167,19 @@ Required:
 - labels and `goto`
 - increment and decrement statements `i++` and `i--`
 
-Unsupported:
+Frontend-in-scope but not directly in the backend subset:
 
 - `defer`
-- `go`
-- `select`
+- `panic` and `recover`
 - `range`
+
+Excluded from the frontend and not directly in the backend subset:
+
+- goroutines
+- channels
+- `select`
+- cgo
+- generics
 
 ## Functions
 
@@ -172,7 +194,7 @@ Required:
 - recursion
 - calls before declarations
 
-Unsupported:
+Frontend-in-scope but not directly in the backend subset:
 
 - named return values
 - anonymous functions
@@ -207,5 +229,6 @@ Compiled programs may use these runtime constants:
 - Tests should vary source spelling, ordering, whitespace, constants, control
   flow, helper functions, and data values so a compiler cannot pass by matching
   known test text.
-- Tests should avoid relying on unsupported language features unless this file
-  is first updated to include them.
+- Backend tests should avoid relying on language features outside the direct
+  backend subset unless this file is first updated to include them. Frontend
+  tests may cover ordinary Go features that lower into backend-compatible units.

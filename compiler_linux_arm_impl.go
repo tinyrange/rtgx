@@ -22,7 +22,7 @@ func rtgArmAsmMoveOffsetArg(a *rtgAsm) {
 
 func compileLinuxArm(input []int, output int) int {
 	rtgSetTarget(rtgTargetLinuxArm)
-	src := make([]byte, 0, 655360)
+	src := make([]byte, 0, 589824)
 	for i := 0; i < len(input); i++ {
 		src = rtgReadAll(input[i], src)
 		src = append(src, '\n')
@@ -65,7 +65,7 @@ func rtgTryCompileScalarProgramArm(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 	rtgAsmInit(a)
 	a.codeOffset = rtgLinuxArmCodeOffset
 	if rtgCompilerFixedTarget != 0 {
-		g.funcLabels = make([]int, 0, 1536)
+		g.funcLabels = make([]int, 0, len(meta.funcs))
 	}
 	for i := 0; i < len(meta.funcs); i++ {
 		label := rtgAsmNewLabel(a)

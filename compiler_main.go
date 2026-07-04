@@ -32,25 +32,25 @@ func rtgOpenArg(path string, env []string) int {
 }
 
 func rtgParseTargetArg(target string) int {
-	if target == "linux/amd64" {
+	if len(target) == 11 && target[0] == 'l' && target[1] == 'i' && target[2] == 'n' && target[3] == 'u' && target[4] == 'x' && target[5] == '/' && target[6] == 'a' && target[7] == 'm' && target[8] == 'd' && target[9] == '6' && target[10] == '4' {
 		return rtgTargetLinuxAmd64
 	}
-	if target == "linux/386" {
+	if len(target) == 9 && target[0] == 'l' && target[1] == 'i' && target[2] == 'n' && target[3] == 'u' && target[4] == 'x' && target[5] == '/' && target[6] == '3' && target[7] == '8' && target[8] == '6' {
 		return rtgTargetLinux386
 	}
-	if target == "linux/aarch64" {
+	if len(target) == 13 && target[0] == 'l' && target[1] == 'i' && target[2] == 'n' && target[3] == 'u' && target[4] == 'x' && target[5] == '/' && target[6] == 'a' && target[7] == 'a' && target[8] == 'r' && target[9] == 'c' && target[10] == 'h' && target[11] == '6' && target[12] == '4' {
 		return rtgTargetLinuxAarch64
 	}
-	if target == "linux/arm" {
+	if len(target) == 9 && target[0] == 'l' && target[1] == 'i' && target[2] == 'n' && target[3] == 'u' && target[4] == 'x' && target[5] == '/' && target[6] == 'a' && target[7] == 'r' && target[8] == 'm' {
 		return rtgTargetLinuxArm
 	}
-	if target == "windows/amd64" {
+	if len(target) == 13 && target[0] == 'w' && target[1] == 'i' && target[2] == 'n' && target[3] == 'd' && target[4] == 'o' && target[5] == 'w' && target[6] == 's' && target[7] == '/' && target[8] == 'a' && target[9] == 'm' && target[10] == 'd' && target[11] == '6' && target[12] == '4' {
 		return rtgTargetWindowsAmd64
 	}
-	if target == "windows/386" {
+	if len(target) == 11 && target[0] == 'w' && target[1] == 'i' && target[2] == 'n' && target[3] == 'd' && target[4] == 'o' && target[5] == 'w' && target[6] == 's' && target[7] == '/' && target[8] == '3' && target[9] == '8' && target[10] == '6' {
 		return rtgTargetWindows386
 	}
-	if target == "wasi/wasm32" {
+	if len(target) == 11 && target[0] == 'w' && target[1] == 'a' && target[2] == 's' && target[3] == 'i' && target[4] == '/' && target[5] == 'w' && target[6] == 'a' && target[7] == 's' && target[8] == 'm' && target[9] == '3' && target[10] == '2' {
 		return rtgTargetWasiWasm32
 	}
 	return 0
@@ -91,20 +91,26 @@ func rtgPrintUnsupportedTarget(target string) {
 }
 
 func appMain(args []string, env []string) int {
-	var input []int
+	input := make([]int, 256)
+	inputCount := 0
 	var outputPath string
 	target := rtgCompilerDefaultTarget
+	if len(args) == 0 {
+		rtgPrintErr("rtg: missing output path (-o)\n")
+		rtgPrintUsage()
+		return 1
+	}
 	i := 1
-	for i < len(args) {
+	for i != len(args) {
 		arg := args[i]
-		if arg == "-s" {
+		if len(arg) == 2 && arg[0] == '-' && arg[1] == 's' {
 			rtgCompilerStripSymbols = true
 			i++
 			continue
 		}
-		if arg == "-o" {
+		if len(arg) == 2 && arg[0] == '-' && arg[1] == 'o' {
 			i++
-			if i >= len(args) {
+			if i == len(args) {
 				rtgPrintErr("rtg: missing argument for -o\n")
 				rtgPrintUsage()
 				return 1
@@ -114,9 +120,9 @@ func appMain(args []string, env []string) int {
 			i++
 			continue
 		}
-		if arg == "-t" {
+		if len(arg) == 2 && arg[0] == '-' && arg[1] == 't' {
 			i++
-			if i >= len(args) {
+			if i == len(args) {
 				rtgPrintErr("rtg: missing argument for -t\n")
 				rtgPrintUsage()
 				return 1
@@ -130,8 +136,13 @@ func appMain(args []string, env []string) int {
 			i++
 			continue
 		}
-		if arg == "-" {
-			input = append(input, 0)
+		if len(arg) == 1 && arg[0] == '-' {
+			if inputCount == len(input) {
+				rtgPrintErr("rtg: too many input files\n")
+				return 1
+			}
+			input[inputCount] = 0
+			inputCount++
 			i++
 			continue
 		}
@@ -151,7 +162,12 @@ func appMain(args []string, env []string) int {
 			rtgPrintErr("\n")
 			return 1
 		}
-		input = append(input, fd)
+		if inputCount == len(input) {
+			rtgPrintErr("rtg: too many input files\n")
+			return 1
+		}
+		input[inputCount] = fd
+		inputCount++
 		i++
 	}
 	if outputPath == "" {
@@ -159,7 +175,7 @@ func appMain(args []string, env []string) int {
 		rtgPrintUsage()
 		return 1
 	}
-	if len(input) == 0 {
+	if inputCount == 0 {
 		rtgPrintErr("rtg: no input files\n")
 		rtgPrintUsage()
 		return 1
@@ -174,5 +190,5 @@ func appMain(args []string, env []string) int {
 			return 1
 		}
 	}
-	return compileTarget(input, output, target)
+	return compileTarget(input[:inputCount], output, target)
 }

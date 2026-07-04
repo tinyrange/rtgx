@@ -113,15 +113,6 @@ func RtgCompileSourceToOutputStrip(source []byte, targetName string, outputPath 
 			return false
 		}
 	}
-	if target == rtgTargetLinuxAmd64 {
-		if rtgCompileScalarProgramAmd64ToOutput(&prog, &meta, output) {
-			if outputPath != "-" {
-				chmod(output, 493)
-			}
-			return true
-		}
-		return false
-	}
 	var result rtgCompileResult
 	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
 		result = rtgTryCompileScalarProgram386(&prog, &meta)

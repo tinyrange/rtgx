@@ -22,3 +22,23 @@ func TestDefaultTargetIsSupported(t *testing.T) {
 		t.Fatalf("Default = %q, not supported", got)
 	}
 }
+
+func TestWordSize(t *testing.T) {
+	cases := []struct {
+		target string
+		size   int
+	}{
+		{target: "linux/amd64", size: 8},
+		{target: "linux/386", size: 4},
+		{target: "linux/aarch64", size: 8},
+		{target: "linux/arm", size: 4},
+		{target: "windows/amd64", size: 8},
+		{target: "windows/386", size: 4},
+		{target: "wasi/wasm32", size: 4},
+	}
+	for _, tc := range cases {
+		if got := WordSize(tc.target); got != tc.size {
+			t.Fatalf("WordSize(%q) = %d, want %d", tc.target, got, tc.size)
+		}
+	}
+}

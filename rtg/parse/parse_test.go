@@ -144,6 +144,30 @@ type Box struct { value int }
 	}
 }
 
+func TestFileSourceKeepsFunctionTypesInsideTypeDecls(t *testing.T) {
+	file, err := FileSource("function_types.go", []byte(`package pkg
+
+type F func(int) int
+type G = func() (int, int)
+func next() int { return 0 }
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	if len(file.Decls) != 3 {
+		t.Fatalf("decls = %#v, want F, G, next", file.Decls)
+	}
+	if file.Decls[0].Kind != "type" || file.Decls[0].Name != "F" || DeclText(file, file.Decls[0]) != "type F func(int) int" {
+		t.Fatalf("F decl = %#v text=%q", file.Decls[0], DeclText(file, file.Decls[0]))
+	}
+	if file.Decls[1].Kind != "type" || file.Decls[1].Name != "G" || DeclText(file, file.Decls[1]) != "type G = func() (int, int)" {
+		t.Fatalf("G decl = %#v text=%q", file.Decls[1], DeclText(file, file.Decls[1]))
+	}
+	if file.Decls[2].Kind != "func" || file.Decls[2].Name != "next" || file.Decls[2].Receiver {
+		t.Fatalf("next decl = %#v", file.Decls[2])
+	}
+}
+
 func TestFileSourceMarksTopLevelFuncsAfterCompositeLiteralReturn(t *testing.T) {
 	file, err := FileSource("funcs.go", []byte(`package pkg
 

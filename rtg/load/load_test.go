@@ -264,6 +264,69 @@ const Broken = 1
 	}
 }
 
+func TestLoadEntriesIgnoresDirectoryCgoFiles(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "pkg/visible.go", `package pkg
+
+const Visible = 1
+`)
+	writeFile(t, root, "pkg/cgo.go", `package cgo
+
+import "C"
+
+const Broken = 1
+`)
+
+	graph, err := LoadEntries([]string{filepath.Join(root, "pkg")}, Options{})
+	if err != nil {
+		t.Fatalf("LoadEntries failed: %v", err)
+	}
+	got := packageFileNames(graph.Packages[0])
+	want := []string{"visible.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("loaded files = %v, want %v", got, want)
+	}
+}
+
+func TestLoadEntriesRejectsExplicitCgoFiles(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "pkg/cgo.go", `package pkg
+
+import "C"
+
+const Broken = 1
+`)
+
+	_, err := LoadEntries([]string{filepath.Join(root, "pkg", "cgo.go")}, Options{})
+	if err == nil {
+		t.Fatalf("LoadEntries accepted explicit cgo file")
+	}
+	if !containsAll(err.Error(), []string{filepath.Join(root, "pkg", "cgo.go") + ":3:8", `cgo import "C" is not supported`}) {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestLoadEntriesRejectsCgoOnlyDirectory(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "pkg/cgo.go", `package pkg
+
+import "C"
+
+const Broken = 1
+`)
+
+	_, err := LoadEntries([]string{filepath.Join(root, "pkg")}, Options{})
+	if err == nil {
+		t.Fatalf("LoadEntries accepted cgo-only directory")
+	}
+	if !containsAll(err.Error(), []string{filepath.Join(root, "pkg", "cgo.go") + ":3:8", `cgo import "C" is not supported`}) {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestLoadEntriesFiltersDirectoryFilesByTarget(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n")
@@ -594,6 +657,32 @@ const A = 1
 	}
 }
 
+func TestLoadEntriesRejectsMixedPackageNames(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "pkg/a.go", `package pkg
+
+const A = 1
+`)
+	writeFile(t, root, "pkg/b.go", `package other
+
+const B = 2
+`)
+
+	_, err := LoadEntries([]string{filepath.Join(root, "pkg")}, Options{})
+	if err == nil {
+		t.Fatalf("LoadEntries accepted mixed package names")
+	}
+	if !containsAll(err.Error(), []string{
+		filepath.Join(root, "pkg"),
+		"mixed package names",
+		"pkg",
+		"other",
+	}) {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestLoadEntriesRejectsInvalidExplicitFrontendFiles(t *testing.T) {
 	tests := []struct {
 		name string
@@ -643,6 +732,169 @@ func appMain() int { return 0 }
 	}
 }
 
+func TestLoadEntriesRewritesGoEmbedString(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "data.txt", "embedded text\n")
+	writeFile(t, root, "main.go", `package main
+
+import _ "embed"
+
+var note = "//go:embed not-a-directive"
+
+//go:embed data.txt
+var data string
+
+func appMain() int { return len(data) }
+`)
+
+	graph, err := LoadEntries([]string{root}, Options{StdRoot: filepath.Join(root, "missing-std")})
+	if err != nil {
+		t.Fatalf("LoadEntries failed: %v", err)
+	}
+	if len(graph.Packages) != 1 {
+		t.Fatalf("packages = %#v, want only main package", graph.Packages)
+	}
+	pkg := graph.Packages[0]
+	if containsString(pkg.Imports, "embed") {
+		t.Fatalf("compile-time embed import leaked into package imports: %#v", pkg.Imports)
+	}
+	source := string(pkg.Files[0].Source)
+	if strings.Contains(source, "//go:embed data.txt") {
+		t.Fatalf("go:embed directive leaked into rewritten source:\n%s", source)
+	}
+	if !strings.Contains(source, `var data string = "embedded text\n"`) {
+		t.Fatalf("embedded string initializer missing from source:\n%s", source)
+	}
+	if !strings.Contains(source, `var note = "//go:embed not-a-directive"`) {
+		t.Fatalf("ordinary string literal was rewritten:\n%s", source)
+	}
+}
+
+func TestLoadEntriesRewritesGoEmbedQuotedPatterns(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "data file.txt", "embedded text\n")
+	writeFile(t, root, "byte file.bin", "AB")
+	writeFile(t, root, "main.go", `package main
+
+import _ "embed"
+
+//go:embed "data file.txt"
+var data string
+
+//go:embed "byte file.bin"
+var blob []byte
+
+func appMain() int { return len(data) + len(blob) }
+`)
+
+	graph, err := LoadEntries([]string{root}, Options{StdRoot: filepath.Join(root, "missing-std")})
+	if err != nil {
+		t.Fatalf("LoadEntries failed: %v", err)
+	}
+	source := string(graph.Packages[0].Files[0].Source)
+	if strings.Contains(source, "//go:embed") {
+		t.Fatalf("go:embed directive leaked into rewritten source:\n%s", source)
+	}
+	if !strings.Contains(source, `var data string = "embedded text\n"`) {
+		t.Fatalf("embedded quoted string initializer missing from source:\n%s", source)
+	}
+	if !strings.Contains(source, `var blob []byte = []byte{65, 66}`) {
+		t.Fatalf("embedded quoted byte initializer missing from source:\n%s", source)
+	}
+}
+
+func TestLoadEntriesRewritesGoEmbedMultiplePatternsAndGlob(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "data.txt", "embedded text\n")
+	writeFile(t, root, "glob.txt", "G")
+	writeFile(t, root, "blob.bin", "XY")
+	writeFile(t, root, "main.go", `package main
+
+import _ "embed"
+
+//go:embed data.txt data.txt
+var data string
+
+//go:embed glob*.txt
+var glob string
+
+//go:embed blob.*
+//go:embed blob.bin
+var blob []byte
+
+func appMain() int { return len(data) + len(glob) + len(blob) }
+`)
+
+	graph, err := LoadEntries([]string{root}, Options{StdRoot: filepath.Join(root, "missing-std")})
+	if err != nil {
+		t.Fatalf("LoadEntries failed: %v", err)
+	}
+	source := string(graph.Packages[0].Files[0].Source)
+	if strings.Contains(source, "//go:embed") {
+		t.Fatalf("go:embed directive leaked into rewritten source:\n%s", source)
+	}
+	for _, want := range []string{
+		`var data string = "embedded text\n"`,
+		`var glob string = "G"`,
+		`var blob []byte = []byte{88, 89}`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("embedded initializer %q missing from source:\n%s", want, source)
+		}
+	}
+}
+
+func TestLoadEntriesRejectsGoEmbedMultipleMatchedFilesForBytes(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "a.bin", "A")
+	writeFile(t, root, "b.bin", "B")
+	writeFile(t, root, "main.go", `package main
+
+import _ "embed"
+
+//go:embed *.bin
+var blob []byte
+
+func appMain() int { return len(blob) }
+`)
+
+	_, err := LoadEntries([]string{root}, Options{StdRoot: filepath.Join(root, "missing-std")})
+	if err == nil {
+		t.Fatalf("LoadEntries accepted go:embed pattern matching multiple files for []byte")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, filepath.Join(root, "main.go")+":5:1: invalid go:embed: multiple files for type string or []byte") {
+		t.Fatalf("missing go:embed multiple-file diagnostic in:\n%s", msg)
+	}
+}
+
+func TestLoadEntriesRejectsMissingGoEmbedFile(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "main.go", `package main
+
+import _ "embed"
+
+//go:embed data.txt
+var data string
+
+func appMain() int { return len(data) }
+`)
+
+	_, err := LoadEntries([]string{root}, Options{StdRoot: filepath.Join(root, "missing-std")})
+	if err == nil {
+		t.Fatalf("LoadEntries accepted missing go:embed file")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, filepath.Join(root, "main.go")+":5:1: failed to read go:embed file") {
+		t.Fatalf("missing go:embed read diagnostic in:\n%s", msg)
+	}
+}
+
 func TestLoadEntriesRejectsUnavailableNestedStdPackage(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n")
@@ -659,6 +911,97 @@ func appMain() int { return 0 }
 	}
 	if !containsAll(err.Error(), []string{filepath.Join(root, "main.go") + ":3:8", `standard package "net/http" is not available in rtg/std`}) {
 		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestLoadEntriesRejectsUnavailableStdPackages(t *testing.T) {
+	stdRoot, err := filepath.Abs(filepath.Join("..", "std"))
+	if err != nil {
+		t.Fatalf("Abs std root failed: %v", err)
+	}
+	for _, pkg := range []string{
+		"math",
+		"time",
+		"encoding/json",
+		"sort",
+		"unicode/utf8",
+		"errors",
+		"io",
+		"net/http",
+		"regexp",
+		"reflect",
+	} {
+		pkg := pkg
+		t.Run(strings.ReplaceAll(pkg, "/", "_"), func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, root, "go.mod", "module example.com/app\n")
+			writeFile(t, root, "main.go", `package main
+
+import "`+pkg+`"
+
+func appMain() int { return 0 }
+`)
+
+			_, err := LoadEntries([]string{root}, Options{StdRoot: stdRoot})
+			if err == nil {
+				t.Fatalf("LoadEntries succeeded with unavailable std package %q", pkg)
+			}
+			if !containsAll(err.Error(), []string{filepath.Join(root, "main.go") + ":3:8", `standard package "` + pkg + `" is not available in rtg/std`}) {
+				t.Fatalf("error = %q", err)
+			}
+		})
+	}
+}
+
+func TestLoadEntriesAcceptsUnsafeStdPackage(t *testing.T) {
+	stdRoot, err := filepath.Abs(filepath.Join("..", "std"))
+	if err != nil {
+		t.Fatalf("Abs std root failed: %v", err)
+	}
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "main.go", `package main
+
+import "unsafe"
+
+func appMain() int { return int(unsafe.Sizeof(byte(1))) }
+`)
+
+	graph, err := LoadEntries([]string{root}, Options{StdRoot: stdRoot})
+	if err != nil {
+		t.Fatalf("LoadEntries failed: %v", err)
+	}
+	if graph.Target == "" {
+		t.Fatalf("graph target was not set")
+	}
+	if len(graph.Packages) != 2 {
+		t.Fatalf("loaded %d packages, want app and unsafe", len(graph.Packages))
+	}
+	var found bool
+	for i := 0; i < len(graph.Packages); i++ {
+		if graph.Packages[i].ImportPath == "unsafe" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("loaded packages = %#v, want unsafe dependency", graph.Packages)
+	}
+}
+
+func TestLoadEntriesPreservesExplicitTarget(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "main.go", `package main
+
+func appMain() int { return 0 }
+`)
+
+	graph, err := LoadEntries([]string{root}, Options{Target: "linux/386"})
+	if err != nil {
+		t.Fatalf("LoadEntries failed: %v", err)
+	}
+	if graph.Target != "linux/386" {
+		t.Fatalf("graph target = %q, want linux/386", graph.Target)
 	}
 }
 
@@ -740,6 +1083,35 @@ func Value() int { return 7 }
 	dep := graph.Packages[1]
 	if dep.Dir != filepath.Join(libRoot, "pkg", "answer") {
 		t.Fatalf("dep dir = %q, want replaced dir with space", dep.Dir)
+	}
+}
+
+func TestLoadEntriesRejectsMissingLocalReplaceImportWithContext(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n\nreplace example.com/lib => ./missing\n")
+	writeFile(t, root, "main.go", `package main
+
+import "example.com/lib/pkg"
+
+func appMain() int { return pkg.Value() }
+`)
+
+	_, err := LoadEntries([]string{root}, Options{})
+	if err == nil {
+		t.Fatalf("LoadEntries succeeded with missing local replace")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		filepath.Join(root, "main.go") + ":3:8",
+		`import "example.com/lib/pkg" uses local replace target "./missing"`,
+		"does not exist",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing diagnostic %q in:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "open ") {
+		t.Fatalf("missing local replace exposed raw open error:\n%s", msg)
 	}
 }
 
@@ -926,6 +1298,41 @@ func PrintInt(v int) int { return v }
 	}
 	if graph.Packages[1].Files[0].UnitPath != "fmt/fmt.go" {
 		t.Fatalf("std unit path = %q, want fmt/fmt.go", graph.Packages[1].Files[0].UnitPath)
+	}
+}
+
+func TestLoadEntriesRejectsImportCycles(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "main.go", `package main
+
+import "example.com/app/pkg/a"
+
+func appMain() int { return a.Value() }
+`)
+	writeFile(t, root, "pkg/a/a.go", `package a
+
+import "example.com/app/pkg/b"
+
+func Value() int { return b.Value() }
+`)
+	writeFile(t, root, "pkg/b/b.go", `package b
+
+import "example.com/app/pkg/a"
+
+func Value() int { return a.Value() }
+`)
+
+	_, err := LoadEntries([]string{root}, Options{})
+	if err == nil {
+		t.Fatalf("LoadEntries accepted import cycle")
+	}
+	if !containsAll(err.Error(), []string{
+		filepath.Join(root, "pkg", "b", "b.go") + ":3:8",
+		"import cycle",
+		"example.com/app/pkg/a -> example.com/app/pkg/b -> example.com/app/pkg/a",
+	}) {
+		t.Fatalf("error = %q", err)
 	}
 }
 

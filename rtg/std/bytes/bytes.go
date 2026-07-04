@@ -4,6 +4,16 @@ type Buffer struct {
 	buf []byte
 }
 
+func NewBuffer(buf []byte) *Buffer {
+	b := new(Buffer)
+	b.buf = buf
+	return b
+}
+
+func NewBufferString(s string) *Buffer {
+	return NewBuffer([]byte(s))
+}
+
 func Equal(a []byte, b []byte) bool {
 	if len(a) != len(b) {
 		return false

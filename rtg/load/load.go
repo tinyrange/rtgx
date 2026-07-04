@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"j5.nz/rtg/rtg/arena"
 	"j5.nz/rtg/rtg/mod"
 	"j5.nz/rtg/rtg/parse"
+	"j5.nz/rtg/rtg/scan"
 	targetpkg "j5.nz/rtg/rtg/target"
 )
 
@@ -38,6 +40,7 @@ type ImportPosition struct {
 
 type Graph struct {
 	Module   mod.Module
+	Target   string
 	Packages []Package
 }
 
@@ -49,6 +52,11 @@ type Options struct {
 type fileEntryGroup struct {
 	dir   string
 	files []string
+}
+
+type loadStackEntry struct {
+	dir        string
+	importPath string
 }
 
 func LoadEntries(entries []string, opts Options) (*Graph, error) {
@@ -74,8 +82,10 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 	}
 	var graph Graph
 	graph.Module = module
+	graph.Target = opts.Target
 	g := &graph
 	var seen []string
+	var stack []loadStackEntry
 	var fileEntries []fileEntryGroup
 	var fileDirs []string
 	for i := 0; i < len(entries); i++ {
@@ -103,7 +113,7 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 			fileEntries[index].files = appendStrings(fileEntries[index].files, files)
 			continue
 		}
-		if err := loadPackageRecursive(g, opts, &seen, dir); err != nil {
+		if err := loadPackageRecursive(g, opts, &seen, &stack, dir); err != nil {
 			return nil, err
 		}
 	}
@@ -115,7 +125,7 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 			continue
 		}
 		files := fileEntries[index].files
-		if err := loadPackageFilesRecursive(g, opts, &seen, dir, files); err != nil {
+		if err := loadPackageFilesRecursive(g, opts, &seen, &stack, dir, files); err != nil {
 			return nil, err
 		}
 	}
@@ -192,18 +202,22 @@ func validateFrontendFileInput(path string) error {
 	return nil
 }
 
-func loadPackageRecursive(g *Graph, opts Options, seen *[]string, dir string) error {
+func loadPackageRecursive(g *Graph, opts Options, seen *[]string, stack *[]loadStackEntry, dir string) error {
 	importPath := importPathForDir(g.Module, dir)
-	return loadPackageRecursiveAs(g, opts, seen, dir, importPath, true)
+	return loadPackageRecursiveAs(g, opts, seen, stack, dir, importPath, true)
 }
 
-func loadPackageFilesRecursive(g *Graph, opts Options, seen *[]string, dir string, files []string) error {
+func loadPackageFilesRecursive(g *Graph, opts Options, seen *[]string, stack *[]loadStackEntry, dir string, files []string) error {
 	importPath := importPathForDir(g.Module, dir)
-	return loadPackageFilesRecursiveAs(g, opts, seen, dir, importPath, files, true)
+	return loadPackageFilesRecursiveAs(g, opts, seen, stack, dir, importPath, files, true)
 }
 
-func loadPackageRecursiveAs(g *Graph, opts Options, seen *[]string, dir string, importPath string, entry bool) error {
+func loadPackageRecursiveAs(g *Graph, opts Options, seen *[]string, stack *[]loadStackEntry, dir string, importPath string, entry bool) error {
 	dir = filepath.Clean(dir)
+	stackValues := *stack
+	if cycle := loadStackCycle(stackValues, dir, importPath); cycle != "" {
+		return fmt.Errorf("import cycle: %s", cycle)
+	}
 	seenValues := *seen
 	if containsString(seenValues, dir) {
 		if entry {
@@ -211,10 +225,13 @@ func loadPackageRecursiveAs(g *Graph, opts Options, seen *[]string, dir string, 
 		}
 		return nil
 	}
+	stackValues = append(stackValues, loadStackEntry{dir: dir, importPath: importPath})
+	*stack = stackValues
 	seenValues = append(seenValues, dir)
 	*seen = seenValues
 	pkg, err := readPackage(g.Module, dir, importPath, opts)
 	if err != nil {
+		popLoadStack(stack)
 		return err
 	}
 	pkg.Entry = entry
@@ -224,19 +241,26 @@ func loadPackageRecursiveAs(g *Graph, opts Options, seen *[]string, dir string, 
 		imp := pkgImports[i]
 		next, ok, err := resolveImport(g.Module, opts, imp)
 		if err != nil {
+			popLoadStack(stack)
 			return importResolutionError(pkg, imp, err)
 		}
 		if ok {
-			if err := loadPackageRecursiveAs(g, opts, seen, next.Dir, next.ImportPath, false); err != nil {
-				return err
+			if err := loadPackageRecursiveAs(g, opts, seen, stack, next.Dir, next.ImportPath, false); err != nil {
+				popLoadStack(stack)
+				return importResolutionError(pkg, imp, err)
 			}
 		}
 	}
+	popLoadStack(stack)
 	return nil
 }
 
-func loadPackageFilesRecursiveAs(g *Graph, opts Options, seen *[]string, dir string, importPath string, files []string, entry bool) error {
+func loadPackageFilesRecursiveAs(g *Graph, opts Options, seen *[]string, stack *[]loadStackEntry, dir string, importPath string, files []string, entry bool) error {
 	dir = filepath.Clean(dir)
+	stackValues := *stack
+	if cycle := loadStackCycle(stackValues, dir, importPath); cycle != "" {
+		return fmt.Errorf("import cycle: %s", cycle)
+	}
 	seenValues := *seen
 	if containsString(seenValues, dir) {
 		if entry {
@@ -244,10 +268,13 @@ func loadPackageFilesRecursiveAs(g *Graph, opts Options, seen *[]string, dir str
 		}
 		return nil
 	}
+	stackValues = append(stackValues, loadStackEntry{dir: dir, importPath: importPath})
+	*stack = stackValues
 	seenValues = append(seenValues, dir)
 	*seen = seenValues
 	pkg, err := readPackageFiles(g.Module, dir, importPath, files)
 	if err != nil {
+		popLoadStack(stack)
 		return err
 	}
 	pkg.Entry = entry
@@ -257,14 +284,17 @@ func loadPackageFilesRecursiveAs(g *Graph, opts Options, seen *[]string, dir str
 		imp := pkgImports[i]
 		next, ok, err := resolveImport(g.Module, opts, imp)
 		if err != nil {
+			popLoadStack(stack)
 			return importResolutionError(pkg, imp, err)
 		}
 		if ok {
-			if err := loadPackageRecursiveAs(g, opts, seen, next.Dir, next.ImportPath, false); err != nil {
-				return err
+			if err := loadPackageRecursiveAs(g, opts, seen, stack, next.Dir, next.ImportPath, false); err != nil {
+				popLoadStack(stack)
+				return importResolutionError(pkg, imp, err)
 			}
 		}
 	}
+	popLoadStack(stack)
 	return nil
 }
 
@@ -277,12 +307,48 @@ func markPackageEntry(g *Graph, importPath string) {
 	}
 }
 
+func loadStackCycle(stack []loadStackEntry, dir string, importPath string) string {
+	for i := 0; i < len(stack); i++ {
+		if stack[i].dir != dir {
+			continue
+		}
+		out := ""
+		for j := i; j < len(stack); j++ {
+			if out != "" {
+				out = out + " -> "
+			}
+			out = out + stack[j].importPath
+		}
+		if out != "" {
+			out = out + " -> "
+		}
+		out = out + importPath
+		return out
+	}
+	return ""
+}
+
+func popLoadStack(stack *[]loadStackEntry) {
+	values := *stack
+	if len(values) == 0 {
+		return
+	}
+	*stack = values[:len(values)-1]
+}
+
 func readPackage(module mod.Module, dir string, importPath string, opts Options) (Package, error) {
 	files, err := goFiles(dir, opts.Target)
 	if err != nil {
 		return Package{}, err
 	}
 	if len(files) == 0 {
+		path, imp, ok, err := firstDirectoryCgoImport(dir, opts.Target)
+		if err != nil {
+			return Package{}, err
+		}
+		if ok {
+			return Package{}, fmt.Errorf("%s:%d:%d: cgo import \"C\" is not supported", path, imp.Line, imp.Column)
+		}
 		return Package{}, fmt.Errorf("%s: no Go source files", dir)
 	}
 	return readPackageFiles(module, dir, importPath, files)
@@ -303,10 +369,16 @@ func readPackageFiles(module mod.Module, dir string, importPath string, files []
 		if err != nil {
 			return Package{}, err
 		}
-		source := data
+		source, err := rewriteGoEmbedSource(path, data)
+		if err != nil {
+			return Package{}, err
+		}
 		info, err := ParseSourceInfo(path, source)
 		if err != nil {
 			return Package{}, err
+		}
+		if imp, ok := cgoImport(info); ok {
+			return Package{}, fmt.Errorf("%s:%d:%d: cgo import \"C\" is not supported", path, imp.Line, imp.Column)
 		}
 		if pkg.Name == "" {
 			pkg.Name = info.PackageName
@@ -325,6 +397,507 @@ func readPackageFiles(module mod.Module, dir string, importPath string, files []
 	}
 	sortStrings(pkg.Imports)
 	return pkg, nil
+}
+
+type goEmbedDirective struct {
+	start  int
+	end    int
+	line   int
+	column int
+	args   string
+}
+
+type goEmbedDirectiveGroup struct {
+	declIndex  int
+	directives []goEmbedDirective
+}
+
+type sourceReplacement struct {
+	start int
+	end   int
+	text  string
+}
+
+func rewriteGoEmbedSource(path string, source []byte) ([]byte, error) {
+	directives := goEmbedDirectives(path, source)
+	if len(directives) == 0 {
+		return source, nil
+	}
+	parsed, err := parse.FileSource(path, source)
+	if err != nil {
+		return nil, err
+	}
+	groups, err := goEmbedDirectiveGroups(path, parsed, directives)
+	if err != nil {
+		return nil, err
+	}
+	var replacements []sourceReplacement
+	for i := 0; i < len(groups); i++ {
+		replacement, err := goEmbedReplacement(path, source, parsed, groups[i])
+		if err != nil {
+			return nil, err
+		}
+		replacements = append(replacements, replacement)
+	}
+	return applySourceReplacements(source, replacements), nil
+}
+
+func goEmbedDirectiveGroups(path string, parsed parse.File, directives []goEmbedDirective) ([]goEmbedDirectiveGroup, error) {
+	var groups []goEmbedDirectiveGroup
+	for i := 0; i < len(directives); i++ {
+		directive := directives[i]
+		declIndex := goEmbedDirectiveDeclIndex(parsed, directive)
+		if declIndex < 0 {
+			return nil, newSourceError(path, directive.line, directive.column, "go:embed requires a following package-level variable")
+		}
+		groupIndex := -1
+		for j := 0; j < len(groups); j++ {
+			if groups[j].declIndex == declIndex {
+				groupIndex = j
+				break
+			}
+		}
+		if groupIndex < 0 {
+			groups = append(groups, goEmbedDirectiveGroup{declIndex: declIndex})
+			groupIndex = len(groups) - 1
+		}
+		groups[groupIndex].directives = append(groups[groupIndex].directives, directive)
+	}
+	return groups, nil
+}
+
+func goEmbedReplacement(path string, source []byte, parsed parse.File, group goEmbedDirectiveGroup) (sourceReplacement, error) {
+	directive := group.directives[0]
+	patterns, err := goEmbedGroupPatterns(path, group)
+	if err != nil {
+		return sourceReplacement{}, err
+	}
+	decl := parsed.Decls[group.declIndex]
+	name, typ, declEnd, ok := goEmbedDeclNameAndType(parsed.Tokens, decl)
+	if !ok {
+		return sourceReplacement{}, newSourceError(path, directive.line, directive.column, "go:embed supports only package-level string and []byte variables")
+	}
+	matches, err := goEmbedMatchedFiles(path, directive, patterns)
+	if err != nil {
+		return sourceReplacement{}, err
+	}
+	if len(matches) == 0 {
+		return sourceReplacement{}, newSourceError(path, directive.line, directive.column, "go:embed pattern matched no files")
+	}
+	if len(matches) > 1 {
+		return sourceReplacement{}, newSourceError(path, directive.line, directive.column, "invalid go:embed: multiple files for type string or []byte")
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		return sourceReplacement{}, newSourceError(path, directive.line, directive.column, "failed to read go:embed file: "+err.Error())
+	}
+	text := goEmbedVarDeclText(name, typ, data)
+	start := goEmbedLineStart(source, directive.start)
+	return sourceReplacement{start: start, end: declEnd, text: text}, nil
+}
+
+func goEmbedGroupPatterns(path string, group goEmbedDirectiveGroup) ([]string, error) {
+	var patterns []string
+	for i := 0; i < len(group.directives); i++ {
+		directive := group.directives[i]
+		values, err := goEmbedPatterns(directive.args)
+		if err != nil {
+			return nil, newSourceError(path, directive.line, directive.column, err.Error())
+		}
+		if len(values) == 0 {
+			return nil, newSourceError(path, directive.line, directive.column, "go:embed requires a file name")
+		}
+		patterns = appendStrings(patterns, values)
+	}
+	return patterns, nil
+}
+
+func goEmbedMatchedFiles(path string, directive goEmbedDirective, patterns []string) ([]string, error) {
+	dir := filepath.Dir(path)
+	var matches []string
+	for i := 0; i < len(patterns); i++ {
+		pattern := patterns[i]
+		if err := validateGoEmbedPattern(pattern); err != nil {
+			return nil, newSourceError(path, directive.line, directive.column, err.Error())
+		}
+		patternMatches, err := goEmbedPatternMatches(dir, pattern)
+		if err != nil {
+			return nil, newSourceError(path, directive.line, directive.column, err.Error())
+		}
+		if len(patternMatches) == 0 {
+			return nil, newSourceError(path, directive.line, directive.column, "go:embed pattern matched no files: "+pattern)
+		}
+		matches = appendStrings(matches, patternMatches)
+	}
+	sortStrings(matches)
+	return uniqueStrings(matches), nil
+}
+
+func validateGoEmbedPattern(pattern string) error {
+	if pattern == "" {
+		return fmt.Errorf("go:embed requires a file name")
+	}
+	if strings.HasPrefix(pattern, "/") || strings.HasPrefix(pattern, "../") || strings.Contains(pattern, "/../") || pattern == ".." {
+		return fmt.Errorf("go:embed file name must stay within the package directory")
+	}
+	return nil
+}
+
+func goEmbedPatternMatches(dir string, pattern string) ([]string, error) {
+	fsPattern := filepath.Join(dir, filepath.FromSlash(pattern))
+	if !strings.ContainsAny(pattern, "*?[") {
+		return []string{fsPattern}, nil
+	}
+	matches, err := filepath.Glob(fsPattern)
+	if err != nil {
+		return nil, fmt.Errorf("go:embed invalid glob pattern")
+	}
+	var files []string
+	for i := 0; i < len(matches); i++ {
+		info, err := os.Stat(matches[i])
+		if err != nil {
+			return nil, fmt.Errorf("failed to read go:embed file: %s", err.Error())
+		}
+		if info.IsDir() {
+			return nil, fmt.Errorf("go:embed supports only files for string and []byte variables")
+		}
+		files = append(files, matches[i])
+	}
+	return files, nil
+}
+
+func goEmbedPatterns(args string) ([]string, error) {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return nil, nil
+	}
+	var patterns []string
+	for i := 0; i < len(args); {
+		for i < len(args) && (args[i] == ' ' || args[i] == '\t') {
+			i++
+		}
+		if i >= len(args) {
+			break
+		}
+		if args[i] == '"' || args[i] == '`' {
+			next, pattern, ok := goEmbedQuotedPattern(args, i)
+			if !ok {
+				return nil, fmt.Errorf("go:embed invalid quoted pattern")
+			}
+			patterns = append(patterns, pattern)
+			i = next
+			continue
+		}
+		start := i
+		for i < len(args) && args[i] != ' ' && args[i] != '\t' {
+			if args[i] == '"' || args[i] == '`' {
+				return nil, fmt.Errorf("go:embed invalid quoted pattern")
+			}
+			i++
+		}
+		patterns = append(patterns, args[start:i])
+	}
+	return patterns, nil
+}
+
+func goEmbedQuotedPattern(args string, start int) (int, string, bool) {
+	quote := args[start]
+	i := start + 1
+	if quote == '"' {
+		escaped := false
+		for i < len(args) {
+			ch := args[i]
+			i++
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				value, err := strconv.Unquote(args[start:i])
+				if err != nil {
+					return 0, "", false
+				}
+				return i, value, true
+			}
+		}
+		return 0, "", false
+	}
+	for i < len(args) {
+		ch := args[i]
+		i++
+		if ch == '`' {
+			value, err := strconv.Unquote(args[start:i])
+			if err != nil {
+				return 0, "", false
+			}
+			return i, value, true
+		}
+	}
+	return 0, "", false
+}
+
+func goEmbedDirectiveDeclIndex(parsed parse.File, directive goEmbedDirective) int {
+	for i := 0; i < len(parsed.Decls); i++ {
+		decl := parsed.Decls[i]
+		if decl.Start > directive.end {
+			return i
+		}
+	}
+	return -1
+}
+
+func goEmbedDeclNameAndType(tokens []scan.Token, decl parse.Decl) (string, string, int, bool) {
+	if decl.Kind != "var" || len(decl.Names) != 1 {
+		return "", "", 0, false
+	}
+	start := tokenIndexAt(tokens, decl.Start)
+	if start < 0 || start+2 >= len(tokens) {
+		return "", "", 0, false
+	}
+	if tokens[start+1].Text == "(" || tokens[start+1].Kind != scan.Ident || tokens[start+1].Text == "_" {
+		return "", "", 0, false
+	}
+	end := goEmbedSimpleVarSpecEnd(tokens, start, decl.End)
+	if end <= start+2 {
+		return "", "", 0, false
+	}
+	if containsTokenText(tokens, start+2, end, "=") {
+		return "", "", 0, false
+	}
+	typeStart := start + 2
+	if typeTokenText(tokens, typeStart, end) == "string" {
+		return tokens[start+1].Text, "string", int(tokens[end-1].End), true
+	}
+	if typeTokenText(tokens, typeStart, end) == "[]byte" {
+		return tokens[start+1].Text, "[]byte", int(tokens[end-1].End), true
+	}
+	return "", "", 0, false
+}
+
+func goEmbedSimpleVarSpecEnd(tokens []scan.Token, start int, fallback int) int {
+	line := tokens[start].Line
+	end := start + 1
+	for end < len(tokens) && tokens[end].Kind != scan.EOF {
+		if int(tokens[end].Start) >= fallback {
+			break
+		}
+		if tokens[end].Line != line {
+			break
+		}
+		if tokens[end].Text == ";" {
+			break
+		}
+		end++
+	}
+	return end
+}
+
+func goEmbedVarDeclText(name string, typ string, data []byte) string {
+	if typ == "string" {
+		return "var " + name + " string = " + strconv.Quote(string(data)) + "\n"
+	}
+	return "var " + name + " []byte = " + byteSliceLiteral(data) + "\n"
+}
+
+func byteSliceLiteral(data []byte) string {
+	out := make([]byte, 0, len(data)*4+8)
+	out = appendString(out, "[]byte{")
+	for i := 0; i < len(data); i++ {
+		if i > 0 {
+			out = appendString(out, ", ")
+		}
+		out = appendString(out, strconv.Itoa(int(data[i])))
+	}
+	out = append(out, '}')
+	return string(out)
+}
+
+func goEmbedLineStart(source []byte, pos int) int {
+	for pos > 0 && source[pos-1] != '\n' {
+		pos--
+	}
+	return pos
+}
+
+func applySourceReplacements(source []byte, replacements []sourceReplacement) []byte {
+	if len(replacements) == 0 {
+		return source
+	}
+	sortSourceReplacements(replacements)
+	out := make([]byte, 0, len(source))
+	cursor := 0
+	for i := 0; i < len(replacements); i++ {
+		repl := replacements[i]
+		if repl.start < cursor {
+			continue
+		}
+		out = append(out, source[cursor:repl.start]...)
+		out = appendString(out, repl.text)
+		cursor = repl.end
+	}
+	out = append(out, source[cursor:]...)
+	return out
+}
+
+func sortSourceReplacements(values []sourceReplacement) {
+	for i := 1; i < len(values); i++ {
+		value := values[i]
+		j := i - 1
+		for j >= 0 && values[j].start > value.start {
+			values[j+1] = values[j]
+			j--
+		}
+		values[j+1] = value
+	}
+}
+
+func goEmbedDirectives(path string, source []byte) []goEmbedDirective {
+	var directives []goEmbedDirective
+	line := 1
+	column := 1
+	for i := 0; i < len(source); {
+		c := source[i]
+		if c == '\n' {
+			i++
+			line++
+			column = 1
+			continue
+		}
+		if c == '/' && i+1 < len(source) && source[i+1] == '/' {
+			start := i
+			startLine := line
+			startColumn := column
+			i += 2
+			column += 2
+			for i < len(source) && source[i] != '\n' {
+				i++
+				column++
+			}
+			if sourceInfoBytesAt(source, start, "//go:embed") {
+				args := strings.TrimSpace(string(source[start+len("//go:embed") : i]))
+				directives = append(directives, goEmbedDirective{start: start, end: i, line: startLine, column: startColumn, args: args})
+			}
+			continue
+		}
+		if c == '/' && i+1 < len(source) && source[i+1] == '*' {
+			i += 2
+			column += 2
+			for i < len(source) {
+				if source[i] == '\n' {
+					i++
+					line++
+					column = 1
+					continue
+				}
+				if source[i] == '*' && i+1 < len(source) && source[i+1] == '/' {
+					i += 2
+					column += 2
+					break
+				}
+				i++
+				column++
+			}
+			continue
+		}
+		if c == '"' || c == '\'' {
+			quote := c
+			i++
+			column++
+			escaped := false
+			for i < len(source) {
+				ch := source[i]
+				if ch == '\n' {
+					i++
+					line++
+					column = 1
+					escaped = false
+					continue
+				}
+				i++
+				column++
+				if escaped {
+					escaped = false
+					continue
+				}
+				if ch == '\\' {
+					escaped = true
+					continue
+				}
+				if ch == quote {
+					break
+				}
+			}
+			continue
+		}
+		if c == '`' {
+			i++
+			column++
+			for i < len(source) {
+				ch := source[i]
+				i++
+				if ch == '\n' {
+					line++
+					column = 1
+					continue
+				}
+				column++
+				if ch == '`' {
+					break
+				}
+			}
+			continue
+		}
+		i++
+		column++
+	}
+	_ = path
+	return directives
+}
+
+func typeTokenText(tokens []scan.Token, start int, end int) string {
+	out := ""
+	for i := start; i < end; i++ {
+		out += tokens[i].Text
+	}
+	return out
+}
+
+func tokenIndexAt(toks []scan.Token, start int) int {
+	for i := 0; i < len(toks); i++ {
+		if int(toks[i].Start) == start {
+			return i
+		}
+	}
+	return -1
+}
+
+func tokenIndexBefore(toks []scan.Token, end int) int {
+	for i := len(toks) - 1; i >= 0; i-- {
+		if int(toks[i].End) <= end {
+			return i
+		}
+	}
+	return -1
+}
+
+func containsTokenText(toks []scan.Token, start int, end int, text string) bool {
+	for i := start; i < end && i < len(toks); i++ {
+		if toks[i].Text == text {
+			return true
+		}
+	}
+	return false
+}
+
+func appendString(out []byte, text string) []byte {
+	for i := 0; i < len(text); i++ {
+		out = append(out, text[i])
+	}
+	return out
 }
 
 func importResolutionError(pkg Package, imp string, err error) error {
@@ -476,10 +1049,90 @@ func goFiles(dir string, target string) ([]string, error) {
 		if !ok {
 			continue
 		}
+		cgo, err := fileImportsC(path)
+		if err != nil {
+			return nil, err
+		}
+		if cgo {
+			continue
+		}
 		files = append(files, path)
 	}
 	sortStrings(files)
 	return files, nil
+}
+
+func fileImportsC(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	info, err := ParseSourceInfo(path, data)
+	if err != nil {
+		return false, err
+	}
+	_, ok := cgoImport(info)
+	return ok, nil
+}
+
+func firstDirectoryCgoImport(dir string, target string) (string, ImportInfo, bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", ImportInfo{}, false, err
+	}
+	targetOS, targetArch := targetFileParts(target)
+	for i := 0; i < len(entries); i++ {
+		entry := entries[i]
+		if dirEntryIsDir(entry) {
+			continue
+		}
+		name := dirEntryName(entry)
+		if !strings.HasSuffix(name, ".go") {
+			continue
+		}
+		if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+			continue
+		}
+		if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, ".rtg.go") {
+			continue
+		}
+		if !fileNameMatchesTarget(name, targetOS, targetArch) {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		mark := arena.Mark()
+		ok, err := fileBuildTagsMatchTarget(path, targetOS, targetArch)
+		if err != nil {
+			return "", ImportInfo{}, false, err
+		}
+		arena.Reset(mark)
+		if !ok {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", ImportInfo{}, false, err
+		}
+		info, err := ParseSourceInfo(path, data)
+		if err != nil {
+			return "", ImportInfo{}, false, err
+		}
+		imp, ok := cgoImport(info)
+		if ok {
+			return path, imp, true, nil
+		}
+	}
+	return "", ImportInfo{}, false, nil
+}
+
+func cgoImport(info SourceInfo) (ImportInfo, bool) {
+	for i := 0; i < len(info.Imports); i++ {
+		imp := info.Imports[i]
+		if imp.Path == "C" {
+			return imp, true
+		}
+	}
+	return ImportInfo{}, false
 }
 
 func sortStrings(values []string) {
@@ -915,7 +1568,18 @@ func resolveReplacedImport(module mod.Module, imp string) (resolvedImport, bool,
 		}
 		suffix := strings.TrimPrefix(imp, repl.Old)
 		suffix = strings.TrimPrefix(suffix, "/")
-		return resolvedImport{Dir: filepath.Join(root, filepath.FromSlash(suffix)), ImportPath: imp}, true, nil
+		dir := filepath.Join(root, filepath.FromSlash(suffix))
+		info, err := os.Stat(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return resolvedImport{}, false, fmt.Errorf("import %q uses local replace target %q, but %s does not exist", imp, repl.New, dir)
+			}
+			return resolvedImport{}, false, fmt.Errorf("import %q uses local replace target %q, but %s cannot be read: %v", imp, repl.New, dir, err)
+		}
+		if !fileInfoIsDir(info) {
+			return resolvedImport{}, false, fmt.Errorf("import %q uses local replace target %q, but %s is not a directory", imp, repl.New, dir)
+		}
+		return resolvedImport{Dir: dir, ImportPath: imp}, true, nil
 	}
 	return resolvedImport{}, false, nil
 }
