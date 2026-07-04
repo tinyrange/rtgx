@@ -12,6 +12,7 @@ const (
 	CheckErrImport
 	CheckErrMethod
 	CheckErrBody
+	CheckErrScope
 )
 
 const (
@@ -58,11 +59,12 @@ type Import struct {
 }
 
 type FuncBody struct {
-	Name string
-	Kind int
-	File int
-	Func int
-	Body syntax.Body
+	Name  string
+	Kind  int
+	File  int
+	Func  int
+	Body  syntax.Body
+	Scope FuncScope
 }
 
 func CheckGraph(graph load.Graph) Program {
@@ -149,7 +151,11 @@ func checkPackage(graph load.Graph, pkgIndex int) (PackageInfo, bool, int, int, 
 			if !body.Ok {
 				return info, false, CheckErrBody, fileIndex, body.ErrorTok
 			}
-			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Body: body})
+			scope, ok, scopeTok := buildFuncScope(file, fn, body)
+			if !ok {
+				return info, false, CheckErrScope, fileIndex, scopeTok
+			}
+			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Body: body, Scope: scope})
 		}
 		for i := 0; i < len(file.Imports); i++ {
 			imp, ok := buildImport(graph, pkgIndex, fileIndex, file, i)

@@ -110,6 +110,76 @@ func helper() {
 	}
 }
 
+func TestCheckGraphFunctionScopes(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type item struct{}
+
+func (it item) run(left, right int) (total int) {
+	var local int
+	const named = 1
+	type alias int
+	short, other := left, right
+start:
+	total = local + named + int(short) + other
+	return total
+}
+`)},
+	})
+	prog := CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	root := prog.Packages[0]
+	bodyIndex := LookupFuncBody(root, "item.run")
+	if bodyIndex < 0 {
+		t.Fatalf("item.run body not found: %#v", root.Bodies)
+	}
+	scope := root.Bodies[bodyIndex].Scope
+	assertScopeName(t, scope, "it", NameReceiver)
+	assertScopeName(t, scope, "left", NameParam)
+	assertScopeName(t, scope, "right", NameParam)
+	assertScopeName(t, scope, "total", NameResult)
+	assertScopeName(t, scope, "local", NameLocal)
+	assertScopeName(t, scope, "named", NameLocal)
+	assertScopeName(t, scope, "alias", NameLocal)
+	assertScopeName(t, scope, "short", NameLocal)
+	assertScopeName(t, scope, "other", NameLocal)
+	assertScopeName(t, scope, "start", NameLabel)
+}
+
+func TestCheckGraphDuplicateParamScope(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func appMain(value int, value string) {}
+`)},
+	})
+	prog := CheckGraph(graph)
+	if prog.Ok || prog.Error != CheckErrScope || prog.ErrorPackage != 0 || prog.ErrorFile != 0 {
+		t.Fatalf("duplicate param scope check = %#v", prog)
+	}
+}
+
+func TestCheckGraphDuplicateLabelScope(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func appMain() {
+again:
+	goto again
+again:
+	return
+}
+`)},
+	})
+	prog := CheckGraph(graph)
+	if prog.Ok || prog.Error != CheckErrScope || prog.ErrorPackage != 0 || prog.ErrorFile != 0 {
+		t.Fatalf("duplicate label scope check = %#v", prog)
+	}
+}
+
 func TestCheckGraphDuplicateSymbols(t *testing.T) {
 	graph := testGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/a.go", Src: []byte(`package main
@@ -276,6 +346,17 @@ func assertBody(t *testing.T, info PackageInfo, name string, kind int, minStmts 
 	}
 	if len(info.Bodies[index].Body.Stmts) < minStmts {
 		t.Fatalf("body %q stmt count = %d, want at least %d", name, len(info.Bodies[index].Body.Stmts), minStmts)
+	}
+}
+
+func assertScopeName(t *testing.T, scope FuncScope, name string, kind int) {
+	t.Helper()
+	index := LookupScopeName(scope, name)
+	if index < 0 {
+		t.Fatalf("scope name %q not found in %#v", name, scope.Names)
+	}
+	if scope.Names[index].Kind != kind {
+		t.Fatalf("scope name %q kind = %d, want %d", name, scope.Names[index].Kind, kind)
 	}
 }
 
