@@ -74,6 +74,9 @@ type DeclInfo struct {
 	ValueStart int
 	ValueEnd   int
 	Values     []ExprSpan
+	Refs       []NameRef
+	Selectors  []SelectorRef
+	Calls      []CallRef
 	Alias      bool
 }
 
@@ -208,7 +211,7 @@ func checkPackage(graph load.Graph, pkgIndex int, checked []PackageInfo) (Packag
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Decls); i++ {
-			info.Decls = append(info.Decls, buildDeclInfo(file, fileIndex, info, file.Decls[i]))
+			info.Decls = append(info.Decls, buildDeclInfo(file, fileIndex, info, checked, file.Decls[i]))
 		}
 	}
 	sortDecls(info.Decls)

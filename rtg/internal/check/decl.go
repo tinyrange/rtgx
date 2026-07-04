@@ -11,6 +11,35 @@ func LookupDecl(info PackageInfo, name string) int {
 	return -1
 }
 
+func LookupDeclRef(decl DeclInfo, name string, kind int) int {
+	for i := 0; i < len(decl.Refs); i++ {
+		if decl.Refs[i].Name == name && decl.Refs[i].Kind == kind {
+			return i
+		}
+	}
+	return -1
+}
+
+func LookupDeclSelector(decl DeclInfo, base string, name string, kind int) int {
+	for i := 0; i < len(decl.Selectors); i++ {
+		selector := decl.Selectors[i]
+		if selector.BaseName == base && selector.Name == name && selector.Kind == kind {
+			return i
+		}
+	}
+	return -1
+}
+
+func LookupDeclCall(decl DeclInfo, base string, name string, kind int) int {
+	for i := 0; i < len(decl.Calls); i++ {
+		call := decl.Calls[i]
+		if call.BaseName == base && call.Name == name && call.Kind == kind {
+			return i
+		}
+	}
+	return -1
+}
+
 func LookupLocalDecl(body FuncBody, name string) int {
 	for i := 0; i < len(body.Locals); i++ {
 		if body.Locals[i].Name == name {
@@ -20,7 +49,7 @@ func LookupLocalDecl(body FuncBody, name string) int {
 	return -1
 }
 
-func buildDeclInfo(file syntax.File, fileIndex int, info PackageInfo, decl syntax.TopDecl) DeclInfo {
+func buildDeclInfo(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, decl syntax.TopDecl) DeclInfo {
 	name := tokenString(file, decl.NameTok)
 	out := DeclInfo{
 		Name:       name,
@@ -48,6 +77,9 @@ func buildDeclInfo(file syntax.File, fileIndex int, info PackageInfo, decl synta
 		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, valueStart)
 		out.ValueStart, out.ValueEnd = trimDeclSpan(file, valueStart+1, decl.EndTok)
 		out.Values = splitExprList(file, out.ValueStart, out.ValueEnd)
+		out.Refs = appendExprRefs(out.Refs, file, fileIndex, info, FuncScope{}, out.ValueStart, out.ValueEnd)
+		out.Selectors = appendExprSelectors(out.Selectors, file, fileIndex, info, checked, FuncScope{}, out.ValueStart, out.ValueEnd)
+		out.Calls = appendExprCalls(out.Calls, file, fileIndex, info, checked, FuncScope{}, out.ValueStart, out.ValueEnd)
 	} else {
 		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, decl.EndTok)
 	}

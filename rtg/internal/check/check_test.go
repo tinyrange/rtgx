@@ -203,39 +203,55 @@ func TestCheckGraphDeclarations(t *testing.T) {
 	graph := testGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
 
+import lib "example.com/case/pkg/lib"
+
 const packageValue = 3
 
 const (
 	left, right int = 1, 2
 )
 
-var current, next = packageValue, later()
+var current, next = packageValue, lib.Value()
+var computed = later()
 
 type item struct { value int }
 
 func later() int { return 4 }
+`)},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
+
+func Value() int { return 5 }
 `)},
 	})
 	prog := CheckGraph(graph)
 	if !prog.Ok {
 		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
 	}
-	root := prog.Packages[0]
-	file := prog.Graph.Packages[0].Files[0].File
+	rootPackage := len(prog.Packages) - 1
+	root := prog.Packages[rootPackage]
+	file := prog.Graph.Packages[rootPackage].Files[0].File
 	assertDeclSpan(t, file, root, "packageValue", SymbolConst, "", "3")
 	assertDeclSpan(t, file, root, "left", SymbolConst, "int", "1, 2")
 	assertDeclSpan(t, file, root, "right", SymbolConst, "int", "1, 2")
-	assertDeclSpan(t, file, root, "current", SymbolVar, "", "packageValue, later()")
-	assertDeclSpan(t, file, root, "next", SymbolVar, "", "packageValue, later()")
+	assertDeclSpan(t, file, root, "current", SymbolVar, "", "packageValue, lib.Value()")
+	assertDeclSpan(t, file, root, "next", SymbolVar, "", "packageValue, lib.Value()")
+	assertDeclSpan(t, file, root, "computed", SymbolVar, "", "later()")
 	assertDeclSpan(t, file, root, "item", SymbolType, "struct { value int }", "")
 	assertDeclValues(t, file, root, "packageValue", []string{"3"})
 	assertDeclValues(t, file, root, "left", []string{"1", "2"})
 	assertDeclValues(t, file, root, "right", []string{"1", "2"})
-	assertDeclValues(t, file, root, "current", []string{"packageValue", "later()"})
-	assertDeclValues(t, file, root, "next", []string{"packageValue", "later()"})
+	assertDeclValues(t, file, root, "current", []string{"packageValue", "lib.Value()"})
+	assertDeclValues(t, file, root, "next", []string{"packageValue", "lib.Value()"})
+	assertDeclValues(t, file, root, "computed", []string{"later()"})
 	assertDeclValues(t, file, root, "item", nil)
-	assertDeclLookupOrder(t, root, []string{"current", "item", "left", "next", "packageValue", "right"})
-	assertDeclSourceOrder(t, root, []string{"packageValue", "left", "right", "current", "next", "item"})
+	assertDeclLookupOrder(t, root, []string{"computed", "current", "item", "left", "next", "packageValue", "right"})
+	assertDeclSourceOrder(t, root, []string{"packageValue", "left", "right", "current", "next", "computed", "item"})
+	assertDeclRef(t, root, "current", "packageValue", RefPackage)
+	assertDeclRef(t, root, "current", "lib", RefImport)
+	assertDeclSelector(t, prog, root, "current", "lib", "Value")
+	assertDeclCall(t, prog, root, "current", "lib", "Value", CallImportSelector)
+	assertDeclRef(t, root, "computed", "later", RefPackage)
+	assertDeclCall(t, prog, root, "computed", "", "later", CallPackage)
 }
 
 func TestCheckGraphLocalDeclarations(t *testing.T) {
@@ -786,6 +802,57 @@ func assertDeclValues(t *testing.T, file syntax.File, info PackageInfo, name str
 		t.Fatalf("decl %q not found in %#v", name, info.Decls)
 	}
 	assertExprSpans(t, file, info.Decls[index].Values, values)
+}
+
+func assertDeclRef(t *testing.T, info PackageInfo, declName string, refName string, kind int) {
+	t.Helper()
+	index := LookupDecl(info, declName)
+	if index < 0 {
+		t.Fatalf("decl %q not found in %#v", declName, info.Decls)
+	}
+	if LookupDeclRef(info.Decls[index], refName, kind) < 0 {
+		t.Fatalf("decl %q ref %q kind %d not found in %#v", declName, refName, kind, info.Decls[index].Refs)
+	}
+}
+
+func assertDeclSelector(t *testing.T, prog Program, info PackageInfo, declName string, base string, name string) {
+	t.Helper()
+	index := LookupDecl(info, declName)
+	if index < 0 {
+		t.Fatalf("decl %q not found in %#v", declName, info.Decls)
+	}
+	selectorIndex := LookupDeclSelector(info.Decls[index], base, name, SelectorImport)
+	if selectorIndex < 0 {
+		t.Fatalf("decl %q selector %s.%s not found in %#v", declName, base, name, info.Decls[index].Selectors)
+	}
+	selector := info.Decls[index].Selectors[selectorIndex]
+	if selector.Package < 0 || selector.Package >= len(prog.Packages) {
+		t.Fatalf("decl %q selector package = %d in %#v", declName, selector.Package, prog.Packages)
+	}
+	if selector.Symbol < 0 || selector.Symbol >= len(prog.Packages[selector.Package].Symbols) || prog.Packages[selector.Package].Symbols[selector.Symbol].Name != name {
+		t.Fatalf("decl %q selector symbol = %d in %#v", declName, selector.Symbol, prog.Packages[selector.Package].Symbols)
+	}
+}
+
+func assertDeclCall(t *testing.T, prog Program, info PackageInfo, declName string, base string, name string, kind int) {
+	t.Helper()
+	index := LookupDecl(info, declName)
+	if index < 0 {
+		t.Fatalf("decl %q not found in %#v", declName, info.Decls)
+	}
+	callIndex := LookupDeclCall(info.Decls[index], base, name, kind)
+	if callIndex < 0 {
+		t.Fatalf("decl %q call %s.%s kind %d not found in %#v", declName, base, name, kind, info.Decls[index].Calls)
+	}
+	call := info.Decls[index].Calls[callIndex]
+	if kind == CallPackage || kind == CallImportSelector {
+		if call.Package < 0 || call.Package >= len(prog.Packages) {
+			t.Fatalf("decl %q call package = %d in %#v", declName, call.Package, prog.Packages)
+		}
+		if call.Symbol < 0 || call.Symbol >= len(prog.Packages[call.Package].Symbols) || prog.Packages[call.Package].Symbols[call.Symbol].Name != name {
+			t.Fatalf("decl %q call symbol = %d in %#v", declName, call.Symbol, prog.Packages[call.Package].Symbols)
+		}
+	}
 }
 
 func assertDeclLookupOrder(t *testing.T, info PackageInfo, names []string) {
