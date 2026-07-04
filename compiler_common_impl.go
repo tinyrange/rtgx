@@ -3572,32 +3572,30 @@ func rtgBuildMetaInto(pp *rtgProgram, m *rtgMeta) {
 	m.ok = true
 	rtgInitBuiltinTypes(m)
 
+	parsedGroupStart := -1
+	parsedGroupEnd := -1
 	for i := 0; i < len(p.decls); i++ {
 		decl := p.decls[i]
 		if decl.kind != rtgTokType && decl.kind != rtgTokVar && decl.kind != rtgTokConst {
 			continue
 		}
-		entryStart := decl.startTok + 1
-		if rtgTokCharIs(p, entryStart, '(') {
-			groupEnd := decl.endTok
-			if decl.kind == rtgTokConst {
-				rtgParseConstDecls(m, p, entryStart+1, groupEnd-1)
+		if !rtgTokIsKind(p, decl.startTok, decl.kind) {
+			groupStart, groupEnd, isGroup := rtgFindContainingTopDeclGroup(p, decl.kind, decl.startTok, decl.endTok)
+			if isGroup {
+				if parsedGroupStart == groupStart && parsedGroupEnd == groupEnd {
+					continue
+				}
+				rtgParseTopDeclGroup(m, p, decl.kind, groupStart+1, groupEnd)
+				parsedGroupStart = groupStart
+				parsedGroupEnd = groupEnd
 				continue
 			}
-			j := entryStart + 1
-			for j < groupEnd-1 {
-				if rtgTokIsKind(p, j, rtgTokIdent) {
-					entryEnd := rtgStatementLineEnd(p, j, groupEnd-1)
-					rtgParseTopDeclEntry(m, p, decl.kind, j, entryEnd)
-					if entryEnd <= j {
-						j++
-					} else {
-						j = entryEnd
-					}
-				} else {
-					j++
-				}
-			}
+			rtgParseTopDeclEntry(m, p, decl.kind, decl.startTok, decl.endTok)
+			continue
+		}
+		entryStart := decl.startTok + 1
+		if rtgTokCharIs(p, entryStart, '(') {
+			rtgParseTopDeclGroup(m, p, decl.kind, entryStart, decl.endTok)
 			continue
 		}
 		if decl.kind == rtgTokConst {
@@ -3611,6 +3609,49 @@ func rtgBuildMetaInto(pp *rtgProgram, m *rtgMeta) {
 		rtgParseFuncInfo(m, i)
 	}
 	rtgBuildFuncLookup(m)
+}
+
+func rtgFindContainingTopDeclGroup(p *rtgProgram, kind int, start int, end int) (int, int, bool) {
+	i := start - 1
+	for i >= 0 {
+		if rtgTokIsKind(p, i, kind) && rtgTokCharIs(p, i+1, '(') {
+			groupClose := rtgSkipBalanced(p, i+1, '(', ')')
+			if groupClose >= end {
+				return i, groupClose + 1, true
+			}
+		}
+		i--
+	}
+	return 0, 0, false
+}
+
+func rtgParseTopDeclGroup(m *rtgMeta, p *rtgProgram, kind int, openTok int, endTok int) {
+	if !rtgTokCharIs(p, openTok, '(') || endTok <= openTok+1 {
+		rtgMetaError(m, rtgDiagMetaTopDecl)
+		return
+	}
+	groupEnd := endTok
+	if rtgTokCharIs(p, endTok-1, ')') {
+		groupEnd = endTok - 1
+	}
+	if kind == rtgTokConst {
+		rtgParseConstDecls(m, p, openTok+1, groupEnd)
+		return
+	}
+	j := openTok + 1
+	for j < groupEnd {
+		if rtgTokIsKind(p, j, rtgTokIdent) {
+			entryEnd := rtgStatementLineEnd(p, j, groupEnd)
+			rtgParseTopDeclEntry(m, p, kind, j, entryEnd)
+			if entryEnd <= j {
+				j++
+			} else {
+				j = entryEnd
+			}
+		} else {
+			j++
+		}
+	}
 }
 
 func rtgHashRange(src []byte, start int, end int) int {
