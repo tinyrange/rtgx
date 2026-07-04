@@ -49,7 +49,7 @@ func BuildUnits(graph load.Graph) Result {
 	}
 	for i := 0; i < len(graph.Packages); i++ {
 		pkg := graph.Packages[i]
-		emit := lower.EmitPackage(pkg)
+		emit := lower.EmitCheckedPackage(pkg, prog.Packages[i])
 		if !emit.Ok {
 			return buildFail(result, BuildErrLower, i, emit.ErrorFile, emit.ErrorToken)
 		}

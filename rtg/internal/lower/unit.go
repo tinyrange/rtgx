@@ -1,6 +1,7 @@
 package lower
 
 import (
+	"j5.nz/rtg/rtg/internal/check"
 	"j5.nz/rtg/rtg/internal/load"
 	"j5.nz/rtg/rtg/internal/syntax"
 	"j5.nz/rtg/rtg/internal/unit"
@@ -12,6 +13,7 @@ const (
 	EmitErrPackage
 	EmitErrToken
 	EmitErrUnit
+	EmitErrCheck
 )
 
 type Result struct {
@@ -64,6 +66,53 @@ func EmitPackage(pkg load.Package) Result {
 	return result
 }
 
+func EmitRootChecked(graph load.Graph, prog check.Program) Result {
+	if !graph.Ok || !prog.Ok || len(graph.Packages) != len(prog.Packages) {
+		return emitFail(Result{}, EmitErrGraph, -1, -1)
+	}
+	for i := 0; i < len(graph.Packages); i++ {
+		if graph.Packages[i].Ref.ImportPath == graph.Root {
+			return EmitCheckedPackage(graph.Packages[i], prog.Packages[i])
+		}
+	}
+	return emitFail(Result{}, EmitErrGraph, -1, -1)
+}
+
+func EmitCheckedPackage(pkg load.Package, info check.PackageInfo) Result {
+	result := Result{Ok: true, Error: EmitOK, ErrorFile: -1, ErrorToken: -1}
+	if !pkg.Ok || pkg.Name == "" || len(pkg.Files) == 0 {
+		return emitFail(result, EmitErrPackage, -1, -1)
+	}
+	if info.Name != pkg.Name {
+		return emitFail(result, EmitErrCheck, -1, -1)
+	}
+	var builder unitBuilder
+	builder.program.Package = pkg.Name
+	builder.finalEOF = countPackageTokens(pkg)
+	files := make([]fileTokens, len(pkg.Files))
+	for i := 0; i < len(pkg.Files); i++ {
+		if !pkg.Files[i].File.Ok {
+			return emitFail(result, EmitErrPackage, i, pkg.Files[i].File.ErrorTok)
+		}
+		oldToNew, ok := builder.addFileTokens(pkg.Files[i].File, i, i+1 < len(pkg.Files))
+		if !ok {
+			return emitFail(result, builder.err, builder.errFile, builder.errToken)
+		}
+		files[i] = fileTokens{file: pkg.Files[i].File, oldToNew: oldToNew}
+	}
+	if !builder.addCheckedDecls(info, files) {
+		return emitFail(result, builder.err, builder.errFile, builder.errToken)
+	}
+	if !builder.addCheckedFuncs(info, files) {
+		return emitFail(result, builder.err, builder.errFile, builder.errToken)
+	}
+	if !builder.finishUnit() {
+		return emitFail(result, builder.err, builder.errFile, builder.errToken)
+	}
+	result.Program = builder.program
+	return result
+}
+
 type unitBuilder struct {
 	program    unit.Program
 	lineOffset int
@@ -73,30 +122,16 @@ type unitBuilder struct {
 	errToken   int
 }
 
+type fileTokens struct {
+	file     syntax.File
+	oldToNew []int
+}
+
 func (b *unitBuilder) addFile(file syntax.File, fileIndex int, hasNext bool) bool {
-	base := len(b.program.Text)
-	lineOffset := b.lineOffset
-	oldToNew := make([]int, len(file.Tokens))
-	for i := 0; i < len(file.Tokens); i++ {
-		tok := file.Tokens[i]
-		if tok.Kind == syntax.TokenEOF {
-			oldToNew[i] = b.finalEOF
-			continue
-		}
-		kind, ok := unitTokenKind(file.Src, tok)
-		if !ok {
-			b.setErr(EmitErrToken, fileIndex, i)
-			return false
-		}
-		oldToNew[i] = len(b.program.Tokens)
-		b.program.Tokens = append(b.program.Tokens, unit.Token{
-			Kind:  kind,
-			Start: base + tok.Start,
-			Size:  tok.End - tok.Start,
-			Line:  lineOffset + tok.Line,
-		})
+	oldToNew, ok := b.addFileTokens(file, fileIndex, hasNext)
+	if !ok {
+		return false
 	}
-	b.program.Text = append(b.program.Text, file.Src...)
 	for i := 0; i < len(file.Decls); i++ {
 		decl := file.Decls[i]
 		nameTok := mapToken(oldToNew, decl.NameTok, b.finalEOF)
@@ -109,10 +144,52 @@ func (b *unitBuilder) addFile(file syntax.File, fileIndex int, hasNext bool) boo
 			return false
 		}
 	}
+	return true
+}
+
+func (b *unitBuilder) addFileTokens(file syntax.File, fileIndex int, hasNext bool) ([]int, bool) {
+	base := len(b.program.Text)
+	lineOffset := b.lineOffset
+	oldToNew := make([]int, len(file.Tokens))
+	for i := 0; i < len(file.Tokens); i++ {
+		tok := file.Tokens[i]
+		if tok.Kind == syntax.TokenEOF {
+			oldToNew[i] = b.finalEOF
+			continue
+		}
+		kind, ok := unitTokenKind(file.Src, tok)
+		if !ok {
+			b.setErr(EmitErrToken, fileIndex, i)
+			return nil, false
+		}
+		oldToNew[i] = len(b.program.Tokens)
+		b.program.Tokens = append(b.program.Tokens, unit.Token{
+			Kind:  kind,
+			Start: base + tok.Start,
+			Size:  tok.End - tok.Start,
+			Line:  lineOffset + tok.Line,
+		})
+	}
+	b.program.Text = append(b.program.Text, file.Src...)
 	b.lineOffset += countNewlines(file.Src)
 	if hasNext && (len(file.Src) == 0 || file.Src[len(file.Src)-1] != '\n') {
 		b.program.Text = append(b.program.Text, '\n')
 		b.lineOffset++
+	}
+	return oldToNew, true
+}
+
+func (b *unitBuilder) finishUnit() bool {
+	line := b.lineOffset + 1
+	b.program.Tokens = append(b.program.Tokens, unit.Token{
+		Kind:  unit.TokenEOF,
+		Start: len(b.program.Text),
+		Size:  0,
+		Line:  line,
+	})
+	if _, ok := unit.Marshal(b.program); !ok {
+		b.setErr(EmitErrUnit, -1, -1)
+		return false
 	}
 	return true
 }
@@ -162,6 +239,71 @@ func (b *unitBuilder) addFunc(file syntax.File, fn syntax.FuncDecl, oldToNew []i
 		EndTok:        mapToken(oldToNew, fn.EndTok, b.finalEOF),
 	})
 	return true
+}
+
+func (b *unitBuilder) addCheckedDecls(info check.PackageInfo, files []fileTokens) bool {
+	if len(info.DeclOrder) != len(info.Decls) {
+		b.setErr(EmitErrCheck, -1, -1)
+		return false
+	}
+	seen := make([]bool, len(info.Decls))
+	for i := 0; i < len(info.DeclOrder); i++ {
+		index := info.DeclOrder[i]
+		if index < 0 || index >= len(info.Decls) || seen[index] {
+			b.setErr(EmitErrCheck, -1, -1)
+			return false
+		}
+		seen[index] = true
+		declInfo := info.Decls[index]
+		if declInfo.File < 0 || declInfo.File >= len(files) {
+			b.setErr(EmitErrCheck, -1, declInfo.Token)
+			return false
+		}
+		file := files[declInfo.File].file
+		decl := findFileDecl(file, declInfo.Token)
+		if decl.NameTok < 0 {
+			b.setErr(EmitErrCheck, declInfo.File, declInfo.Token)
+			return false
+		}
+		nameTok := mapToken(files[declInfo.File].oldToNew, decl.NameTok, b.finalEOF)
+		if !b.addDecl(file, decl, nameTok, files[declInfo.File].oldToNew, declInfo.File) {
+			return false
+		}
+	}
+	return true
+}
+
+func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens) bool {
+	for i := 0; i < len(info.Bodies); i++ {
+		body := info.Bodies[i]
+		if body.File < 0 || body.File >= len(files) {
+			b.setErr(EmitErrCheck, -1, -1)
+			return false
+		}
+		file := files[body.File].file
+		if body.Func < 0 || body.Func >= len(file.Funcs) {
+			b.setErr(EmitErrCheck, body.File, -1)
+			return false
+		}
+		fn := file.Funcs[body.Func]
+		if fn.NameTok < 0 || fn.NameTok >= len(file.Tokens) {
+			b.setErr(EmitErrCheck, body.File, fn.NameTok)
+			return false
+		}
+		if !b.addFunc(file, fn, files[body.File].oldToNew, body.File) {
+			return false
+		}
+	}
+	return true
+}
+
+func findFileDecl(file syntax.File, nameTok int) syntax.TopDecl {
+	for i := 0; i < len(file.Decls); i++ {
+		if file.Decls[i].NameTok == nameTok {
+			return file.Decls[i]
+		}
+	}
+	return syntax.TopDecl{NameTok: -1}
 }
 
 func (b *unitBuilder) setErr(err int, file int, tok int) {

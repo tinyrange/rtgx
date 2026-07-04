@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"j5.nz/rtg/rtg/internal/check"
 	"j5.nz/rtg/rtg/internal/load"
 	"j5.nz/rtg/rtg/internal/unit"
 	"j5.nz/rtg/rtgunit"
@@ -77,6 +78,94 @@ func TestEmitPackagePreservesTextAndFileOrder(t *testing.T) {
 	}
 	if string(result.Program.Text[result.Program.Funcs[1].NameStart:result.Program.Funcs[1].NameEnd]) != "z" {
 		t.Fatalf("second func = %q", string(result.Program.Text[result.Program.Funcs[1].NameStart:result.Program.Funcs[1].NameEnd]))
+	}
+}
+
+func TestEmitCheckedPackageUsesCheckedDeclOrder(t *testing.T) {
+	graph := loadTestGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+const first = 1
+const second = 2
+
+func appMain() int {
+	return first + second
+}
+`)},
+	})
+	prog := check.CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	info := prog.Packages[0]
+	if len(info.DeclOrder) != 2 {
+		t.Fatalf("decl order = %#v, want two declarations", info.DeclOrder)
+	}
+	info.DeclOrder[0], info.DeclOrder[1] = info.DeclOrder[1], info.DeclOrder[0]
+
+	result := EmitCheckedPackage(graph.Packages[0], info)
+	if !result.Ok {
+		t.Fatalf("EmitCheckedPackage failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
+	}
+	if len(result.Program.Decls) != 2 {
+		t.Fatalf("decl count = %d, want 2", len(result.Program.Decls))
+	}
+	if declName(result.Program, 0) != "second" || declName(result.Program, 1) != "first" {
+		t.Fatalf("decl order = %q, %q; want second, first", declName(result.Program, 0), declName(result.Program, 1))
+	}
+}
+
+func TestEmitCheckedPackageUsesCheckedFunctionOrder(t *testing.T) {
+	graph := loadTestGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func first() int { return 1 }
+func second() int { return 2 }
+func appMain() int { return first() + second() }
+`)},
+	})
+	prog := check.CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	info := prog.Packages[0]
+	first := check.LookupFuncBody(info, "first")
+	second := check.LookupFuncBody(info, "second")
+	if first < 0 || second < 0 {
+		t.Fatalf("missing function bodies in %#v", info.Bodies)
+	}
+	info.Bodies[0], info.Bodies[1] = info.Bodies[second], info.Bodies[first]
+
+	result := EmitCheckedPackage(graph.Packages[0], info)
+	if !result.Ok {
+		t.Fatalf("EmitCheckedPackage failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
+	}
+	if len(result.Program.Funcs) != 3 {
+		t.Fatalf("func count = %d, want 3", len(result.Program.Funcs))
+	}
+	if funcName(result.Program, 0) != "second" || funcName(result.Program, 1) != "first" {
+		t.Fatalf("func order = %q, %q; want second, first", funcName(result.Program, 0), funcName(result.Program, 1))
+	}
+}
+
+func TestEmitCheckedPackageRejectsInvalidCheckedMetadata(t *testing.T) {
+	graph := loadTestGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+const first = 1
+const second = 2
+`)},
+	})
+	prog := check.CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	info := prog.Packages[0]
+	info.DeclOrder[1] = info.DeclOrder[0]
+
+	result := EmitCheckedPackage(graph.Packages[0], info)
+	if result.Ok || result.Error != EmitErrCheck {
+		t.Fatalf("invalid metadata result = %#v", result)
 	}
 }
 
@@ -188,4 +277,26 @@ func tokenText(program rtgunit.Program, index int) string {
 		return ""
 	}
 	return string(program.Text[start : start+size])
+}
+
+func declName(program unit.Program, index int) string {
+	if index < 0 || index >= len(program.Decls) {
+		return ""
+	}
+	decl := program.Decls[index]
+	if decl.NameStart < 0 || decl.NameEnd > len(program.Text) || decl.NameEnd < decl.NameStart {
+		return ""
+	}
+	return string(program.Text[decl.NameStart:decl.NameEnd])
+}
+
+func funcName(program unit.Program, index int) string {
+	if index < 0 || index >= len(program.Funcs) {
+		return ""
+	}
+	fn := program.Funcs[index]
+	if fn.NameStart < 0 || fn.NameEnd > len(program.Text) || fn.NameEnd < fn.NameStart {
+		return ""
+	}
+	return string(program.Text[fn.NameStart:fn.NameEnd])
 }
