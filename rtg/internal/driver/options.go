@@ -1,0 +1,110 @@
+package driver
+
+const (
+	ParseOK = iota
+	ParseErrMissingOutput
+	ParseErrMissingTarget
+	ParseErrUnsupportedTarget
+	ParseErrUnknownOption
+	ParseErrMissingPackage
+	ParseErrExtraPackage
+)
+
+const DefaultTarget = "linux/amd64"
+
+type Options struct {
+	Target   string
+	Output   string
+	Package  string
+	Strip    bool
+	Ok       bool
+	Error    int
+	ErrorArg string
+	ErrorAt  int
+}
+
+func ParseOptions(args []string) Options {
+	options := Options{
+		Target:  DefaultTarget,
+		Ok:      true,
+		Error:   ParseOK,
+		ErrorAt: -1,
+	}
+	i := 0
+	for i < len(args) {
+		arg := args[i]
+		if arg == "-s" {
+			options.Strip = true
+			i++
+			continue
+		}
+		if arg == "-o" {
+			if i+1 >= len(args) {
+				return parseFail(options, ParseErrMissingOutput, arg, i)
+			}
+			options.Output = args[i+1]
+			i += 2
+			continue
+		}
+		if arg == "-t" {
+			if i+1 >= len(args) {
+				return parseFail(options, ParseErrMissingTarget, arg, i)
+			}
+			target := args[i+1]
+			if !IsSupportedTarget(target) {
+				return parseFail(options, ParseErrUnsupportedTarget, target, i+1)
+			}
+			options.Target = target
+			i += 2
+			continue
+		}
+		if len(arg) > 0 && arg[0] == '-' {
+			return parseFail(options, ParseErrUnknownOption, arg, i)
+		}
+		if options.Package != "" {
+			return parseFail(options, ParseErrExtraPackage, arg, i)
+		}
+		options.Package = arg
+		i++
+	}
+	if options.Output == "" {
+		return parseFail(options, ParseErrMissingOutput, "-o", len(args))
+	}
+	if options.Package == "" {
+		return parseFail(options, ParseErrMissingPackage, "", len(args))
+	}
+	return options
+}
+
+func IsSupportedTarget(target string) bool {
+	if target == "linux/amd64" {
+		return true
+	}
+	if target == "linux/386" {
+		return true
+	}
+	if target == "linux/aarch64" {
+		return true
+	}
+	if target == "linux/arm" {
+		return true
+	}
+	if target == "windows/amd64" {
+		return true
+	}
+	if target == "windows/386" {
+		return true
+	}
+	if target == "wasi/wasm32" {
+		return true
+	}
+	return false
+}
+
+func parseFail(options Options, err int, arg string, at int) Options {
+	options.Ok = false
+	options.Error = err
+	options.ErrorArg = arg
+	options.ErrorAt = at
+	return options
+}
