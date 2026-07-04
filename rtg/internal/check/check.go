@@ -37,6 +37,7 @@ type PackageInfo struct {
 	Name    string
 	Symbols []Symbol
 	Imports []Import
+	Decls   []DeclInfo
 	Bodies  []FuncBody
 }
 
@@ -56,6 +57,18 @@ type Import struct {
 	Token      int
 	Dot        bool
 	Blank      bool
+}
+
+type DeclInfo struct {
+	Name       string
+	Kind       int
+	File       int
+	Token      int
+	Symbol     int
+	TypeStart  int
+	TypeEnd    int
+	ValueStart int
+	ValueEnd   int
 }
 
 type FuncBody struct {
@@ -166,6 +179,13 @@ func checkPackage(graph load.Graph, pkgIndex int) (PackageInfo, bool, int, int, 
 	}
 	sortSymbols(info.Symbols)
 	sortImports(info.Imports)
+	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
+		file := pkg.Files[fileIndex].File
+		for i := 0; i < len(file.Decls); i++ {
+			info.Decls = append(info.Decls, buildDeclInfo(file, fileIndex, info, file.Decls[i]))
+		}
+	}
+	sortDecls(info.Decls)
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Funcs); i++ {

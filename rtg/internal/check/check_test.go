@@ -199,6 +199,37 @@ func unnamed(int, string) []byte {
 	assertUnnamedField(t, file, unnamed.Signature.Results[0], "[]byte")
 }
 
+func TestCheckGraphDeclarations(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+const packageValue = 3
+
+const (
+	left, right int = 1, 2
+)
+
+var current, next = packageValue, later()
+
+type item struct { value int }
+
+func later() int { return 4 }
+`)},
+	})
+	prog := CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	root := prog.Packages[0]
+	file := prog.Graph.Packages[0].Files[0].File
+	assertDeclSpan(t, file, root, "packageValue", SymbolConst, "", "3")
+	assertDeclSpan(t, file, root, "left", SymbolConst, "int", "1, 2")
+	assertDeclSpan(t, file, root, "right", SymbolConst, "int", "1, 2")
+	assertDeclSpan(t, file, root, "current", SymbolVar, "", "packageValue, later()")
+	assertDeclSpan(t, file, root, "next", SymbolVar, "", "packageValue, later()")
+	assertDeclSpan(t, file, root, "item", SymbolType, "struct { value int }", "")
+}
+
 func TestCheckGraphFunctionReferences(t *testing.T) {
 	graph := testGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -475,11 +506,36 @@ func assertUnnamedField(t *testing.T, file syntax.File, field Field, typ string)
 }
 
 func fieldTypeText(file syntax.File, field Field) string {
-	if field.TypeStart < 0 || field.TypeEnd <= field.TypeStart || field.TypeEnd > len(file.Tokens) {
+	return spanText(file, field.TypeStart, field.TypeEnd)
+}
+
+func assertDeclSpan(t *testing.T, file syntax.File, info PackageInfo, name string, kind int, typ string, value string) {
+	t.Helper()
+	index := LookupDecl(info, name)
+	if index < 0 {
+		t.Fatalf("decl %q not found in %#v", name, info.Decls)
+	}
+	decl := info.Decls[index]
+	if decl.Kind != kind {
+		t.Fatalf("decl %q kind = %d, want %d", name, decl.Kind, kind)
+	}
+	if decl.Symbol < 0 || decl.Symbol >= len(info.Symbols) || info.Symbols[decl.Symbol].Name != name {
+		t.Fatalf("decl %q symbol = %d in %#v", name, decl.Symbol, info.Symbols)
+	}
+	if got := spanText(file, decl.TypeStart, decl.TypeEnd); got != typ {
+		t.Fatalf("decl %q type = %q, want %q", name, got, typ)
+	}
+	if got := spanText(file, decl.ValueStart, decl.ValueEnd); got != value {
+		t.Fatalf("decl %q value = %q, want %q", name, got, value)
+	}
+}
+
+func spanText(file syntax.File, startTok int, endTok int) string {
+	if startTok < 0 || endTok <= startTok || endTok > len(file.Tokens) {
 		return ""
 	}
-	start := file.Tokens[field.TypeStart].Start
-	end := file.Tokens[field.TypeEnd-1].End
+	start := file.Tokens[startTok].Start
+	end := file.Tokens[endTok-1].End
 	if start < 0 || end < start || end > len(file.Src) {
 		return ""
 	}
