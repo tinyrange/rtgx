@@ -169,8 +169,12 @@ func Value(i int) int {
 	if numbers < 0 || values < 0 || valueFn < 0 || appMain < 0 {
 		t.Fatalf("linked rows missing: decls=%#v funcs=%#v", program.Decls, program.Funcs)
 	}
-	assertLinkedDeclMeta(t, program, numbers, "[]int", "", nil)
-	assertLinkedDeclMeta(t, program, values, "", "[]int{1, 2}", []string{"[]int{1, 2}"})
+	numbersSym := assertLinkedSymbol(t, program, "Numbers", unit.SymbolType, unit.OwnerDecl, numbers)
+	valuesSym := assertLinkedSymbol(t, program, "Values", unit.SymbolVar, unit.OwnerDecl, values)
+	valueSym := assertLinkedSymbol(t, program, "Value", unit.SymbolFunc, unit.OwnerFunc, valueFn)
+	assertLinkedSymbol(t, program, "appMain", unit.SymbolFunc, unit.OwnerFunc, appMain)
+	assertLinkedDeclMeta(t, program, numbers, numbersSym, "[]int", "", nil)
+	assertLinkedDeclMeta(t, program, values, valuesSym, "", "[]int{1, 2}", []string{"[]int{1, 2}"})
 	assertLinkedSignature(t, program, valueFn, nil, []string{"i:int"}, []string{":int"})
 	assertLinkedSignature(t, program, appMain, nil, nil, []string{":int"})
 	if len(program.Types) != 1 {
@@ -264,8 +268,9 @@ func Value(i int) int {
 	if selector.OwnerKind != unit.OwnerFunc || selector.OwnerIndex != appMain || selector.Kind != unit.SelectorImport ||
 		linkedTokenText(program, selector.BaseTok) != "lib" ||
 		linkedTokenText(program, selector.NameTok) != "Value" ||
-		selector.BaseKind != unit.RefImport {
-		t.Fatalf("linked selector = %#v, owner func %d", selector, appMain)
+		selector.BaseKind != unit.RefImport ||
+		selector.Symbol != valueSym {
+		t.Fatalf("linked selector = %#v, owner func %d value symbol %d", selector, appMain, valueSym)
 	}
 	foundLibRef := false
 	for i := 0; i < len(program.Refs); i++ {
@@ -385,11 +390,26 @@ func assertLinkedSignature(t *testing.T, program unit.Program, funcIndex int, re
 	t.Fatalf("linked signature func=%d not found in %#v", funcIndex, program.Signatures)
 }
 
-func assertLinkedDeclMeta(t *testing.T, program unit.Program, declIndex int, typ string, value string, values []string) {
+func assertLinkedSymbol(t *testing.T, program unit.Program, name string, kind int, ownerKind int, ownerIndex int) int {
+	t.Helper()
+	for i := 0; i < len(program.Symbols); i++ {
+		symbol := program.Symbols[i]
+		if symbol.Name == name && symbol.Kind == kind && symbol.OwnerKind == ownerKind && symbol.OwnerIndex == ownerIndex {
+			if linkedTokenText(program, symbol.Token) == "" {
+				t.Fatalf("linked symbol %s token text is empty: %#v", name, symbol)
+			}
+			return i
+		}
+	}
+	t.Fatalf("linked symbol %s kind=%d owner=%d/%d not found in %#v", name, kind, ownerKind, ownerIndex, program.Symbols)
+	return -1
+}
+
+func assertLinkedDeclMeta(t *testing.T, program unit.Program, declIndex int, symbol int, typ string, value string, values []string) {
 	t.Helper()
 	for i := 0; i < len(program.DeclMeta); i++ {
 		meta := program.DeclMeta[i]
-		if meta.DeclIndex != declIndex {
+		if meta.DeclIndex != declIndex || meta.Symbol != symbol {
 			continue
 		}
 		if linkedSpanText(program, meta.TypeStart, meta.TypeEnd) != typ {
@@ -408,7 +428,7 @@ func assertLinkedDeclMeta(t *testing.T, program unit.Program, declIndex int, typ
 		}
 		return
 	}
-	t.Fatalf("linked decl metadata index=%d not found in %#v", declIndex, program.DeclMeta)
+	t.Fatalf("linked decl metadata index=%d symbol=%d not found in %#v", declIndex, symbol, program.DeclMeta)
 }
 
 func assertLinkedImport(t *testing.T, program unit.Program, name string, importPath string, dot bool, blank bool) {

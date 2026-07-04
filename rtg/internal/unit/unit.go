@@ -26,6 +26,7 @@ const (
 	TagSigs       = 21
 	TagDeclMeta   = 22
 	TagImports    = 23
+	TagSymbols    = 24
 )
 
 const (
@@ -77,6 +78,23 @@ type Import struct {
 	PathTok    int
 	Dot        bool
 	Blank      bool
+}
+
+const (
+	SymbolConst = iota + 1
+	SymbolVar
+	SymbolType
+	SymbolFunc
+	SymbolMethod
+)
+
+type Symbol struct {
+	Name       string
+	Kind       int
+	Package    int
+	Token      int
+	OwnerKind  int
+	OwnerIndex int
 }
 
 type DeclMeta struct {
@@ -314,6 +332,7 @@ type Program struct {
 	Text       []byte
 	Tokens     []Token
 	Imports    []Import
+	Symbols    []Symbol
 	Decls      []Decl
 	DeclMeta   []DeclMeta
 	Funcs      []Func
@@ -339,6 +358,10 @@ func Marshal(program Program) ([]byte, bool) {
 		return nil, false
 	}
 	importData, ok := encodeImports(program.Imports, len(program.Tokens))
+	if !ok {
+		return nil, false
+	}
+	symbolData, ok := encodeSymbols(program.Symbols, len(program.Tokens), len(program.Decls), len(program.Funcs))
 	if !ok {
 		return nil, false
 	}
@@ -404,6 +427,7 @@ func Marshal(program Program) ([]byte, bool) {
 	root = appendNode(root, TagText, program.Text)
 	root = appendNode(root, TagTokens, tokenData)
 	root = appendNode(root, TagImports, importData)
+	root = appendNode(root, TagSymbols, symbolData)
 	root = appendNode(root, TagDecls, declData)
 	root = appendNode(root, TagDeclMeta, declMetaData)
 	root = appendNode(root, TagFuncs, funcData)
@@ -450,6 +474,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	}
 	tokenData := []byte{}
 	importData := []byte{}
+	symbolData := []byte{}
 	declMetaData := []byte{}
 	sigData := []byte{}
 	typeData := []byte{}
@@ -467,6 +492,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	seenText := false
 	seenTokens := false
 	seenImports := false
+	seenSymbols := false
 	seenDecls := false
 	seenDeclMeta := false
 	seenFuncs := false
@@ -524,6 +550,12 @@ func Unmarshal(data []byte) (Program, bool) {
 			}
 			seenImports = true
 			importData = payload
+		} else if tag == TagSymbols {
+			if seenSymbols {
+				return program, false
+			}
+			seenSymbols = true
+			symbolData = payload
 		} else if tag == TagDecls {
 			if seenDecls {
 				return program, false
@@ -638,6 +670,13 @@ func Unmarshal(data []byte) (Program, bool) {
 			return program, false
 		}
 		program.Imports = imports
+	}
+	if seenSymbols {
+		symbols, ok := decodeSymbols(symbolData, len(program.Tokens), len(program.Decls), len(program.Funcs))
+		if !ok {
+			return program, false
+		}
+		program.Symbols = symbols
 	}
 	if seenDeclMeta {
 		declMeta, ok := decodeDeclMeta(declMetaData, len(program.Tokens), len(program.Decls))
@@ -902,6 +941,83 @@ func decodeImports(data []byte, tokenLimit int) ([]Import, bool) {
 		return nil, false
 	}
 	return imports, true
+}
+
+func encodeSymbols(symbols []Symbol, tokenLimit int, declLimit int, funcLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(symbols)*12+1)
+	out = appendVarint(out, len(symbols))
+	for i := 0; i < len(symbols); i++ {
+		symbol := symbols[i]
+		if len(symbol.Name) == 0 ||
+			symbol.Kind < SymbolConst || symbol.Kind > SymbolMethod ||
+			!validNullable(symbol.Package) ||
+			!validToken(tokenLimit, symbol.Token) ||
+			!validOwner(symbol.OwnerKind, symbol.OwnerIndex, declLimit, funcLimit) {
+			return nil, false
+		}
+		out = appendString(out, symbol.Name)
+		out = appendVarint(out, symbol.Kind)
+		out = appendNullable(out, symbol.Package)
+		out = appendVarint(out, symbol.Token)
+		out = appendVarint(out, symbol.OwnerKind)
+		out = appendVarint(out, symbol.OwnerIndex)
+	}
+	return out, true
+}
+
+func decodeSymbols(data []byte, tokenLimit int, declLimit int, funcLimit int) ([]Symbol, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	symbols := make([]Symbol, 0, count)
+	for i := 0; i < count; i++ {
+		name, ok := readString(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		kind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		pkg, ok := readNullable(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		token, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		ownerKind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		ownerIndex, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		symbol := Symbol{
+			Name:       name,
+			Kind:       kind,
+			Package:    pkg,
+			Token:      token,
+			OwnerKind:  ownerKind,
+			OwnerIndex: ownerIndex,
+		}
+		if len(symbol.Name) == 0 ||
+			symbol.Kind < SymbolConst || symbol.Kind > SymbolMethod ||
+			!validNullable(symbol.Package) ||
+			!validToken(tokenLimit, symbol.Token) ||
+			!validOwner(symbol.OwnerKind, symbol.OwnerIndex, declLimit, funcLimit) {
+			return nil, false
+		}
+		symbols = append(symbols, symbol)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return symbols, true
 }
 
 func encodeDecls(decls []Decl) ([]byte, bool) {

@@ -117,6 +117,9 @@ func EmitCheckedPackage(pkg load.Package, info check.PackageInfo) Result {
 	if !builder.addCheckedFuncs(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
+	if !builder.addCheckedSymbols(info, files) {
+		return emitFail(result, builder.err, builder.errFile, builder.errToken)
+	}
 	if !builder.finishUnit() {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
@@ -132,6 +135,7 @@ type unitBuilder struct {
 	errFile    int
 	errToken   int
 	declRows   []int
+	funcRows   []int
 }
 
 type fileTokens struct {
@@ -287,6 +291,67 @@ func (b *unitBuilder) addCheckedImports(info check.PackageInfo, files []fileToke
 	return true
 }
 
+func (b *unitBuilder) addCheckedSymbols(info check.PackageInfo, files []fileTokens) bool {
+	for i := 0; i < len(info.Symbols); i++ {
+		symbol := info.Symbols[i]
+		if symbol.File < 0 || symbol.File >= len(files) {
+			b.setErr(EmitErrCheck, -1, symbol.Token)
+			return false
+		}
+		kind, ok := unitSymbolKind(symbol.Kind)
+		if !ok {
+			b.setErr(EmitErrCheck, symbol.File, symbol.Token)
+			return false
+		}
+		token := mapToken(files[symbol.File].oldToNew, symbol.Token, b.finalEOF)
+		if token < 0 {
+			b.setErr(EmitErrCheck, symbol.File, symbol.Token)
+			return false
+		}
+		ownerKind, ownerIndex := b.symbolOwner(info, files, i)
+		if ownerIndex < 0 {
+			b.setErr(EmitErrCheck, symbol.File, symbol.Token)
+			return false
+		}
+		b.program.Symbols = append(b.program.Symbols, unit.Symbol{
+			Name:       symbol.Name,
+			Kind:       kind,
+			Package:    symbol.Package,
+			Token:      token,
+			OwnerKind:  ownerKind,
+			OwnerIndex: ownerIndex,
+		})
+	}
+	return true
+}
+
+func (b *unitBuilder) symbolOwner(info check.PackageInfo, files []fileTokens, symbolIndex int) (int, int) {
+	symbol := info.Symbols[symbolIndex]
+	if symbol.Kind == check.SymbolConst || symbol.Kind == check.SymbolVar || symbol.Kind == check.SymbolType {
+		for i := 0; i < len(info.Decls); i++ {
+			if info.Decls[i].Symbol == symbolIndex && i < len(b.declRows) {
+				return unit.OwnerDecl, b.declRows[i]
+			}
+		}
+		return 0, -1
+	}
+	if symbol.Kind == check.SymbolFunc || symbol.Kind == check.SymbolMethod {
+		for i := 0; i < len(info.Bodies); i++ {
+			body := info.Bodies[i]
+			if body.File < 0 || body.File >= len(files) || body.File != symbol.File || i >= len(b.funcRows) {
+				continue
+			}
+			if body.Func < 0 || body.Func >= len(files[body.File].file.Funcs) {
+				continue
+			}
+			if files[body.File].file.Funcs[body.Func].NameTok == symbol.Token {
+				return unit.OwnerFunc, b.funcRows[i]
+			}
+		}
+	}
+	return 0, -1
+}
+
 func (b *unitBuilder) addCheckedDecls(info check.PackageInfo, files []fileTokens) bool {
 	if len(info.DeclOrder) != len(info.Decls) {
 		b.setErr(EmitErrCheck, -1, -1)
@@ -412,6 +477,10 @@ func (b *unitBuilder) addCheckedTypeRefs(info check.PackageInfo, files []fileTok
 }
 
 func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens) bool {
+	b.funcRows = make([]int, len(info.Bodies))
+	for i := 0; i < len(b.funcRows); i++ {
+		b.funcRows[i] = -1
+	}
 	for i := 0; i < len(info.Bodies); i++ {
 		body := info.Bodies[i]
 		if body.File < 0 || body.File >= len(files) {
@@ -432,6 +501,7 @@ func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens
 			return false
 		}
 		ownerIndex := len(b.program.Funcs) - 1
+		b.funcRows[i] = ownerIndex
 		if !b.addBodySignature(body, files[body.File].oldToNew, ownerIndex) {
 			return false
 		}
@@ -1153,6 +1223,25 @@ func unitDeclKindFromSymbol(kind int) (int, bool) {
 	}
 	if kind == check.SymbolType {
 		return unit.TokenType, true
+	}
+	return 0, false
+}
+
+func unitSymbolKind(kind int) (int, bool) {
+	if kind == check.SymbolConst {
+		return unit.SymbolConst, true
+	}
+	if kind == check.SymbolVar {
+		return unit.SymbolVar, true
+	}
+	if kind == check.SymbolType {
+		return unit.SymbolType, true
+	}
+	if kind == check.SymbolFunc {
+		return unit.SymbolFunc, true
+	}
+	if kind == check.SymbolMethod {
+		return unit.SymbolMethod, true
 	}
 	return 0, false
 }

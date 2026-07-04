@@ -253,6 +253,9 @@ func appMain() int {
 	if len(result.Program.Types) != 1 {
 		t.Fatalf("types = %#v, want 1", result.Program.Types)
 	}
+	if len(result.Program.Symbols) == 0 {
+		t.Fatalf("symbols = %#v, want symbols", result.Program.Symbols)
+	}
 	if len(result.Program.DeclMeta) != len(result.Program.Decls) {
 		t.Fatalf("decl metadata = %#v, want %d", result.Program.DeclMeta, len(result.Program.Decls))
 	}
@@ -276,10 +279,15 @@ func appMain() int {
 	if item < 0 || global < 0 || picked < 0 || appMain < 0 || choose < 0 {
 		t.Fatalf("unit rows missing: decls=%#v funcs=%#v", result.Program.Decls, result.Program.Funcs)
 	}
+	itemSym := assertUnitSymbol(t, result.Program, "item", unit.SymbolType, unit.OwnerDecl, item)
+	globalSym := assertUnitSymbol(t, result.Program, "global", unit.SymbolVar, unit.OwnerDecl, global)
+	pickedSym := assertUnitSymbol(t, result.Program, "picked", unit.SymbolVar, unit.OwnerDecl, picked)
+	assertUnitSymbol(t, result.Program, "choose", unit.SymbolFunc, unit.OwnerFunc, choose)
+	assertUnitSymbol(t, result.Program, "appMain", unit.SymbolFunc, unit.OwnerFunc, appMain)
 	assertUnitType(t, result.Program, "item", unit.TypeStruct, item, "struct { value int }", "", "", "")
-	assertUnitDeclMeta(t, result.Program, item, "struct { value int }", "", nil, false)
-	assertUnitDeclMeta(t, result.Program, global, "", "[]int{1, 2, 3}", []string{"[]int{1, 2, 3}"}, false)
-	assertUnitDeclMeta(t, result.Program, picked, "", "choose(global[1])", []string{"choose(global[1])"}, false)
+	assertUnitDeclMeta(t, result.Program, item, itemSym, "struct { value int }", "", nil, false)
+	assertUnitDeclMeta(t, result.Program, global, globalSym, "", "[]int{1, 2, 3}", []string{"[]int{1, 2, 3}"}, false)
+	assertUnitDeclMeta(t, result.Program, picked, pickedSym, "", "choose(global[1])", []string{"choose(global[1])"}, false)
 	assertUnitSignature(t, result.Program, choose, nil, []string{"v:int"}, []string{":int"})
 	assertUnitSignature(t, result.Program, appMain, nil, nil, []string{":int"})
 	assertUnitComposite(t, result.Program, unit.OwnerDecl, global, "[]int", []string{"1", "2", "3"})
@@ -322,6 +330,9 @@ func appMain() int {
 	}
 	if len(decoded.Types) != len(result.Program.Types) {
 		t.Fatalf("decoded types = %d, want %d", len(decoded.Types), len(result.Program.Types))
+	}
+	if len(decoded.Symbols) != len(result.Program.Symbols) {
+		t.Fatalf("decoded symbols = %d, want %d", len(decoded.Symbols), len(result.Program.Symbols))
 	}
 	if len(decoded.DeclMeta) != len(result.Program.DeclMeta) {
 		t.Fatalf("decoded decl metadata = %d, want %d", len(decoded.DeclMeta), len(result.Program.DeclMeta))
@@ -580,11 +591,26 @@ func assertUnitType(t *testing.T, program unit.Program, name string, kind int, d
 	t.Fatalf("type name=%s kind=%d decl=%d not found in %#v", name, kind, decl, program.Types)
 }
 
-func assertUnitDeclMeta(t *testing.T, program unit.Program, declIndex int, typ string, value string, values []string, alias bool) {
+func assertUnitSymbol(t *testing.T, program unit.Program, name string, kind int, ownerKind int, ownerIndex int) int {
+	t.Helper()
+	for i := 0; i < len(program.Symbols); i++ {
+		symbol := program.Symbols[i]
+		if symbol.Name == name && symbol.Kind == kind && symbol.OwnerKind == ownerKind && symbol.OwnerIndex == ownerIndex {
+			if tokenTextUnit(program, symbol.Token) == "" {
+				t.Fatalf("symbol %s token text is empty: %#v", name, symbol)
+			}
+			return i
+		}
+	}
+	t.Fatalf("symbol %s kind=%d owner=%d/%d not found in %#v", name, kind, ownerKind, ownerIndex, program.Symbols)
+	return -1
+}
+
+func assertUnitDeclMeta(t *testing.T, program unit.Program, declIndex int, symbol int, typ string, value string, values []string, alias bool) {
 	t.Helper()
 	for i := 0; i < len(program.DeclMeta); i++ {
 		meta := program.DeclMeta[i]
-		if meta.DeclIndex != declIndex || meta.Alias != alias {
+		if meta.DeclIndex != declIndex || meta.Symbol != symbol || meta.Alias != alias {
 			continue
 		}
 		if unitSpanText(program, meta.TypeStart, meta.TypeEnd) != typ {
@@ -603,7 +629,7 @@ func assertUnitDeclMeta(t *testing.T, program unit.Program, declIndex int, typ s
 		}
 		return
 	}
-	t.Fatalf("decl metadata index=%d alias=%v not found in %#v", declIndex, alias, program.DeclMeta)
+	t.Fatalf("decl metadata index=%d symbol=%d alias=%v not found in %#v", declIndex, symbol, alias, program.DeclMeta)
 }
 
 func assertUnitImport(t *testing.T, program unit.Program, name string, importPath string, dot bool, blank bool) {

@@ -97,9 +97,24 @@ func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 		NameTok:    13,
 		PathTok:    13,
 	}}
+	program.Symbols = []Symbol{{
+		Name:       "answer",
+		Kind:       SymbolConst,
+		Package:    0,
+		Token:      3,
+		OwnerKind:  OwnerDecl,
+		OwnerIndex: 0,
+	}, {
+		Name:       "appMain",
+		Kind:       SymbolFunc,
+		Package:    0,
+		Token:      7,
+		OwnerKind:  OwnerFunc,
+		OwnerIndex: 0,
+	}}
 	program.DeclMeta = []DeclMeta{{
 		DeclIndex:  0,
-		Symbol:     -1,
+		Symbol:     0,
 		ValueIndex: 0,
 		TypeStart:  -1,
 		TypeEnd:    -1,
@@ -116,7 +131,7 @@ func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 		NameEnd:   program.Decls[0].NameEnd,
 		Kind:      TypeOther,
 		Decl:      0,
-		Symbol:    -1,
+		Symbol:    0,
 		TypeStart: 5,
 		TypeEnd:   6,
 		LenStart:  -1,
@@ -425,6 +440,7 @@ func equalPrograms(left Program, right Program) bool {
 		return false
 	}
 	if len(left.Tokens) != len(right.Tokens) || len(left.Imports) != len(right.Imports) ||
+		len(left.Symbols) != len(right.Symbols) ||
 		len(left.Decls) != len(right.Decls) || len(left.Funcs) != len(right.Funcs) ||
 		len(left.DeclMeta) != len(right.DeclMeta) ||
 		len(left.Signatures) != len(right.Signatures) ||
@@ -443,6 +459,11 @@ func equalPrograms(left Program, right Program) bool {
 	}
 	for i := 0; i < len(left.Imports); i++ {
 		if left.Imports[i] != right.Imports[i] {
+			return false
+		}
+	}
+	for i := 0; i < len(left.Symbols); i++ {
+		if left.Symbols[i] != right.Symbols[i] {
 			return false
 		}
 	}

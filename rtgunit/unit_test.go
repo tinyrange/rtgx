@@ -94,9 +94,17 @@ func appMain() int { return values[0] }
 		NameTok:    17,
 		PathTok:    17,
 	}}
+	program.Symbols = []Symbol{{
+		Name:       "values",
+		Kind:       SymbolVar,
+		Package:    0,
+		Token:      3,
+		OwnerKind:  OwnerDecl,
+		OwnerIndex: 0,
+	}}
 	program.DeclMeta = []DeclMeta{{
 		DeclIndex:  0,
-		Symbol:     -1,
+		Symbol:     0,
 		ValueIndex: 0,
 		TypeStart:  -1,
 		TypeEnd:    -1,
@@ -113,7 +121,7 @@ func appMain() int { return values[0] }
 		NameEnd:   program.Decls[0].NameEnd,
 		Kind:      TypeSlice,
 		Decl:      0,
-		Symbol:    -1,
+		Symbol:    0,
 		Alias:     true,
 		TypeStart: 4,
 		TypeEnd:   7,
@@ -241,6 +249,9 @@ func appMain() int { return values[0] }
 	}
 	if decoded.ImportPath != program.ImportPath || len(decoded.Imports) != 1 || decoded.Imports[0] != program.Imports[0] {
 		t.Fatalf("decoded imports = %q %#v, want %q %#v", decoded.ImportPath, decoded.Imports, program.ImportPath, program.Imports)
+	}
+	if len(decoded.Symbols) != 1 || decoded.Symbols[0] != program.Symbols[0] {
+		t.Fatalf("decoded symbols = %#v, want %#v", decoded.Symbols, program.Symbols)
 	}
 	if len(decoded.Signatures) != 1 || len(decoded.Signatures[0].Results) != 1 || decoded.Signatures[0].Results[0] != program.Signatures[0].Results[0] {
 		t.Fatalf("decoded signatures = %#v, want %#v", decoded.Signatures, program.Signatures)

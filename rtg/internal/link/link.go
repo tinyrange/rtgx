@@ -80,9 +80,10 @@ func LinkPrograms(programs []unit.Program, root int, rootName string) (unit.Prog
 	}
 	program := unit.Program{Package: rootName, ImportPath: programs[root].ImportPath}
 	finalEOF := countLinkedTokens(programs)
+	symbolOffsets := packageSymbolOffsets(programs)
 	lineOffset := 0
 	for i := 0; i < len(programs); i++ {
-		ok := appendProgram(&program, programs[i], finalEOF, lineOffset, i+1 < len(programs))
+		ok := appendProgram(&program, programs[i], finalEOF, lineOffset, symbolOffsets, i+1 < len(programs))
 		if !ok {
 			return unit.Program{}, false
 		}
@@ -97,11 +98,13 @@ func LinkPrograms(programs []unit.Program, root int, rootName string) (unit.Prog
 	return program, true
 }
 
-func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset int, hasNext bool) bool {
+func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset int, symbolOffsets []int, hasNext bool) bool {
 	if src.Package == "" || len(src.Text) == 0 || len(src.Tokens) == 0 {
 		return false
 	}
 	textOffset := len(dst.Text)
+	importOffset := len(dst.Imports)
+	symbolOffset := len(dst.Symbols)
 	declOffset := len(dst.Decls)
 	funcOffset := len(dst.Funcs)
 	oldToNew := make([]int, len(src.Tokens))
@@ -133,7 +136,7 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		dst.Decls = append(dst.Decls, decl)
 	}
 	for i := 0; i < len(src.DeclMeta); i++ {
-		meta, ok := mapDeclMeta(src.DeclMeta[i], oldToNew, finalEOF, declOffset)
+		meta, ok := mapDeclMeta(src.DeclMeta[i], oldToNew, finalEOF, declOffset, symbolOffset)
 		if !ok {
 			return false
 		}
@@ -152,6 +155,13 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		fn.EndTok = mapToken(oldToNew, fn.EndTok, finalEOF)
 		dst.Funcs = append(dst.Funcs, fn)
 	}
+	for i := 0; i < len(src.Symbols); i++ {
+		symbol, ok := mapSymbol(src.Symbols[i], oldToNew, finalEOF, declOffset, funcOffset)
+		if !ok {
+			return false
+		}
+		dst.Symbols = append(dst.Symbols, symbol)
+	}
 	for i := 0; i < len(src.Signatures); i++ {
 		sig, ok := mapSignature(src.Signatures[i], oldToNew, finalEOF, funcOffset)
 		if !ok {
@@ -160,14 +170,14 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		dst.Signatures = append(dst.Signatures, sig)
 	}
 	for i := 0; i < len(src.Types); i++ {
-		typ, ok := mapType(src.Types[i], oldToNew, finalEOF, textOffset, declOffset)
+		typ, ok := mapType(src.Types[i], oldToNew, finalEOF, textOffset, declOffset, symbolOffset)
 		if !ok {
 			return false
 		}
 		dst.Types = append(dst.Types, typ)
 	}
 	for i := 0; i < len(src.TypeRefs); i++ {
-		ref, ok := mapTypeRef(src.TypeRefs[i], oldToNew, finalEOF, declOffset, funcOffset)
+		ref, ok := mapTypeRef(src.TypeRefs[i], oldToNew, finalEOF, declOffset, funcOffset, symbolOffsets)
 		if !ok {
 			return false
 		}
@@ -216,14 +226,14 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		dst.Calls = append(dst.Calls, call)
 	}
 	for i := 0; i < len(src.Refs); i++ {
-		ref, ok := mapRef(src.Refs[i], oldToNew, finalEOF, declOffset, funcOffset)
+		ref, ok := mapRef(src.Refs[i], oldToNew, finalEOF, declOffset, funcOffset, importOffset, symbolOffsets)
 		if !ok {
 			return false
 		}
 		dst.Refs = append(dst.Refs, ref)
 	}
 	for i := 0; i < len(src.Selectors); i++ {
-		selector, ok := mapSelector(src.Selectors[i], oldToNew, finalEOF, declOffset, funcOffset)
+		selector, ok := mapSelector(src.Selectors[i], oldToNew, finalEOF, declOffset, funcOffset, importOffset, symbolOffsets)
 		if !ok {
 			return false
 		}
@@ -248,11 +258,32 @@ func mapImport(imp unit.Import, oldToNew []int, eof int) (unit.Import, bool) {
 	return imp, true
 }
 
-func mapDeclMeta(meta unit.DeclMeta, oldToNew []int, eof int, declOffset int) (unit.DeclMeta, bool) {
+func mapSymbol(symbol unit.Symbol, oldToNew []int, eof int, declOffset int, funcOffset int) (unit.Symbol, bool) {
+	if len(symbol.Name) == 0 ||
+		symbol.Kind < unit.SymbolConst || symbol.Kind > unit.SymbolMethod ||
+		symbol.Package < -1 {
+		return symbol, false
+	}
+	symbol.Token = mapToken(oldToNew, symbol.Token, eof)
+	ownerIndex, ok := mapOwner(symbol.OwnerKind, symbol.OwnerIndex, declOffset, funcOffset)
+	if !ok {
+		return symbol, false
+	}
+	symbol.OwnerIndex = ownerIndex
+	if symbol.Token < 0 {
+		return symbol, false
+	}
+	return symbol, true
+}
+
+func mapDeclMeta(meta unit.DeclMeta, oldToNew []int, eof int, declOffset int, symbolOffset int) (unit.DeclMeta, bool) {
 	if meta.DeclIndex < 0 {
 		return meta, false
 	}
 	meta.DeclIndex += declOffset
+	if meta.Symbol >= 0 {
+		meta.Symbol += symbolOffset
+	}
 	var ok bool
 	meta.TypeStart, meta.TypeEnd, ok = mapNullableSpan(meta.TypeStart, meta.TypeEnd, oldToNew, eof)
 	if !ok {
@@ -301,13 +332,16 @@ func mapFields(fields []unit.Field, oldToNew []int, eof int) ([]unit.Field, bool
 	return fields, true
 }
 
-func mapType(typ unit.TypeInfo, oldToNew []int, eof int, textOffset int, declOffset int) (unit.TypeInfo, bool) {
+func mapType(typ unit.TypeInfo, oldToNew []int, eof int, textOffset int, declOffset int, symbolOffset int) (unit.TypeInfo, bool) {
 	if typ.NameStart < 0 || typ.NameEnd < typ.NameStart || typ.Decl < 0 {
 		return typ, false
 	}
 	typ.NameStart += textOffset
 	typ.NameEnd += textOffset
 	typ.Decl += declOffset
+	if typ.Symbol >= 0 {
+		typ.Symbol += symbolOffset
+	}
 	var ok bool
 	typ.TypeStart, typ.TypeEnd, ok = mapNullableSpan(typ.TypeStart, typ.TypeEnd, oldToNew, eof)
 	if !ok {
@@ -328,7 +362,7 @@ func mapType(typ unit.TypeInfo, oldToNew []int, eof int, textOffset int, declOff
 	return typ, true
 }
 
-func mapTypeRef(ref unit.TypeRef, oldToNew []int, eof int, declOffset int, funcOffset int) (unit.TypeRef, bool) {
+func mapTypeRef(ref unit.TypeRef, oldToNew []int, eof int, declOffset int, funcOffset int, symbolOffsets []int) (unit.TypeRef, bool) {
 	ownerIndex, ok := mapOwner(ref.OwnerKind, ref.OwnerIndex, declOffset, funcOffset)
 	if !ok {
 		return ref, false
@@ -337,6 +371,11 @@ func mapTypeRef(ref unit.TypeRef, oldToNew []int, eof int, declOffset int, funcO
 	ref.Token = mapToken(oldToNew, ref.Token, eof)
 	ref.BaseTok = mapToken(oldToNew, ref.BaseTok, eof)
 	ref.DotTok = mapToken(oldToNew, ref.DotTok, eof)
+	symbol, ok := mapPackageSymbol(ref.Package, ref.Symbol, symbolOffsets)
+	if !ok {
+		return ref, false
+	}
+	ref.Symbol = symbol
 	return ref, true
 }
 
@@ -450,17 +489,26 @@ func mapCall(call unit.Call, oldToNew []int, eof int, declOffset int, funcOffset
 	return call, true
 }
 
-func mapRef(ref unit.NameRef, oldToNew []int, eof int, declOffset int, funcOffset int) (unit.NameRef, bool) {
+func mapRef(ref unit.NameRef, oldToNew []int, eof int, declOffset int, funcOffset int, importOffset int, symbolOffsets []int) (unit.NameRef, bool) {
 	ownerIndex, ok := mapOwner(ref.OwnerKind, ref.OwnerIndex, declOffset, funcOffset)
 	if !ok {
 		return ref, false
 	}
 	ref.OwnerIndex = ownerIndex
 	ref.Token = mapToken(oldToNew, ref.Token, eof)
+	if ref.Kind == unit.RefImport && ref.Index >= 0 {
+		ref.Index += importOffset
+	} else if ref.Kind == unit.RefPackage && ref.Index >= 0 {
+		index, ok := mapPackageSymbol(ref.Package, ref.Index, symbolOffsets)
+		if !ok {
+			return ref, false
+		}
+		ref.Index = index
+	}
 	return ref, true
 }
 
-func mapSelector(selector unit.Selector, oldToNew []int, eof int, declOffset int, funcOffset int) (unit.Selector, bool) {
+func mapSelector(selector unit.Selector, oldToNew []int, eof int, declOffset int, funcOffset int, importOffset int, symbolOffsets []int) (unit.Selector, bool) {
 	ownerIndex, ok := mapOwner(selector.OwnerKind, selector.OwnerIndex, declOffset, funcOffset)
 	if !ok {
 		return selector, false
@@ -469,6 +517,20 @@ func mapSelector(selector unit.Selector, oldToNew []int, eof int, declOffset int
 	selector.BaseTok = mapToken(oldToNew, selector.BaseTok, eof)
 	selector.DotTok = mapToken(oldToNew, selector.DotTok, eof)
 	selector.NameTok = mapToken(oldToNew, selector.NameTok, eof)
+	if selector.BaseKind == unit.RefImport && selector.BaseIndex >= 0 {
+		selector.BaseIndex += importOffset
+	} else if selector.BaseKind == unit.RefPackage && selector.BaseIndex >= 0 {
+		index, ok := mapPackageSymbol(selector.BasePackage, selector.BaseIndex, symbolOffsets)
+		if !ok {
+			return selector, false
+		}
+		selector.BaseIndex = index
+	}
+	symbol, ok := mapPackageSymbol(selector.Package, selector.Symbol, symbolOffsets)
+	if !ok {
+		return selector, false
+	}
+	selector.Symbol = symbol
 	return selector, true
 }
 
@@ -507,6 +569,26 @@ func mapOwner(kind int, index int, declOffset int, funcOffset int) (int, bool) {
 		return funcOffset + index, true
 	}
 	return 0, false
+}
+
+func mapPackageSymbol(pkg int, symbol int, symbolOffsets []int) (int, bool) {
+	if symbol < 0 {
+		return symbol, true
+	}
+	if pkg < 0 || pkg >= len(symbolOffsets) {
+		return symbol, false
+	}
+	return symbolOffsets[pkg] + symbol, true
+}
+
+func packageSymbolOffsets(programs []unit.Program) []int {
+	out := make([]int, len(programs))
+	offset := 0
+	for i := 0; i < len(programs); i++ {
+		out[i] = offset
+		offset += len(programs[i].Symbols)
+	}
+	return out
 }
 
 func countLinkedTokens(programs []unit.Program) int {

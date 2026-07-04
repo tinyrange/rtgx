@@ -33,6 +33,7 @@ const (
 	TagSigs       = uint16(21)
 	TagDeclMeta   = uint16(22)
 	TagImports    = uint16(23)
+	TagSymbols    = uint16(24)
 )
 
 const (
@@ -85,6 +86,23 @@ type Import struct {
 	PathTok    int
 	Dot        bool
 	Blank      bool
+}
+
+const (
+	SymbolConst = iota + 1
+	SymbolVar
+	SymbolType
+	SymbolFunc
+	SymbolMethod
+)
+
+type Symbol struct {
+	Name       string
+	Kind       int
+	Package    int
+	Token      int
+	OwnerKind  int
+	OwnerIndex int
 }
 
 type DeclMeta struct {
@@ -322,6 +340,7 @@ type Program struct {
 	Text       []byte
 	Tokens     []byte
 	Imports    []Import
+	Symbols    []Symbol
 	Decls      []Decl
 	DeclMeta   []DeclMeta
 	Funcs      []Func
@@ -392,6 +411,7 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagText, program.Text),
 		NewNode(TagTokens, tokens),
 		NewNode(TagImports, encodeImports(program.Imports)),
+		NewNode(TagSymbols, encodeSymbols(program.Symbols)),
 		NewNode(TagDecls, encodeDecls(program.Decls)),
 		NewNode(TagDeclMeta, encodeDeclMeta(program.DeclMeta)),
 		NewNode(TagFuncs, encodeFuncs(program.Funcs)),
@@ -444,6 +464,7 @@ func Unmarshal(data []byte) (Program, error) {
 	}
 	var tokenData []byte
 	var importData []byte
+	var symbolData []byte
 	var declMetaData []byte
 	var sigData []byte
 	var typeData []byte
@@ -458,6 +479,7 @@ func Unmarshal(data []byte) (Program, error) {
 	var selectorData []byte
 	seenImportPath := false
 	seenImports := false
+	seenSymbols := false
 	seenDeclMeta := false
 	seenSigs := false
 	seenTypes := false
@@ -502,6 +524,12 @@ func Unmarshal(data []byte) (Program, error) {
 			}
 			seenImports = true
 			importData = payload
+		case TagSymbols:
+			if seenSymbols {
+				return program, fmt.Errorf("duplicate symbol table")
+			}
+			seenSymbols = true
+			symbolData = payload
 		case TagDecls:
 			decls, err := decodeDecls(payload)
 			if err != nil {
@@ -608,6 +636,13 @@ func Unmarshal(data []byte) (Program, error) {
 			return program, err
 		}
 		program.Imports = imports
+	}
+	if seenSymbols {
+		symbols, err := decodeSymbols(symbolData)
+		if err != nil {
+			return program, err
+		}
+		program.Symbols = symbols
 	}
 	if seenDeclMeta {
 		declMeta, err := decodeDeclMeta(declMetaData)
@@ -1516,6 +1551,20 @@ func encodeImports(imports []Import) []byte {
 	return out
 }
 
+func encodeSymbols(symbols []Symbol) []byte {
+	var out []byte
+	out = appendVarint(out, len(symbols))
+	for _, symbol := range symbols {
+		out = appendString(out, symbol.Name)
+		out = appendVarint(out, symbol.Kind)
+		out = appendNullable(out, symbol.Package)
+		out = appendVarint(out, symbol.Token)
+		out = appendVarint(out, symbol.OwnerKind)
+		out = appendVarint(out, symbol.OwnerIndex)
+	}
+	return out
+}
+
 func encodeDeclMeta(metas []DeclMeta) []byte {
 	var out []byte
 	out = appendVarint(out, len(metas))
@@ -1877,6 +1926,60 @@ func decodeImports(data []byte) ([]Import, error) {
 		return nil, fmt.Errorf("trailing import data")
 	}
 	return imports, nil
+}
+
+func decodeSymbols(data []byte) ([]Symbol, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid symbol count")
+	}
+	pos = next
+	symbols := make([]Symbol, 0, count)
+	for i := 0; i < count; i++ {
+		name, n, ok := readString(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid symbol %d name", i)
+		}
+		pos = n
+		kind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid symbol %d kind", i)
+		}
+		pos = n
+		pkg, n, ok := readNullable(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid symbol %d package", i)
+		}
+		pos = n
+		token, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid symbol %d token", i)
+		}
+		pos = n
+		ownerKind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid symbol %d owner kind", i)
+		}
+		pos = n
+		ownerIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid symbol %d owner index", i)
+		}
+		pos = n
+		symbols = append(symbols, Symbol{
+			Name:       name,
+			Kind:       kind,
+			Package:    pkg,
+			Token:      token,
+			OwnerKind:  ownerKind,
+			OwnerIndex: ownerIndex,
+		})
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing symbol data")
+	}
+	return symbols, nil
 }
 
 func decodeDeclMeta(data []byte) ([]DeclMeta, error) {
