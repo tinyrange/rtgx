@@ -147,6 +147,11 @@ func appMain() int { return values[0] }
 			Results: []Field{{NameTok: -1, TypeStart: 17, TypeEnd: 18}},
 		}},
 	}}
+	program.TypeFuncs = []TypeFuncSig{{
+		TypeIndex: 0,
+		Params:    []Field{{NameTok: -1, TypeStart: 17, TypeEnd: 18}},
+		Results:   []Field{{NameTok: -1, TypeStart: 17, TypeEnd: 18}},
+	}}
 	program.Methods = []MethodInfo{{
 		NameTok:   17,
 		TypeIndex: 0,
@@ -279,6 +284,13 @@ func appMain() int { return values[0] }
 	}
 	if len(decoded.TypeRefs) != 1 || decoded.TypeRefs[0] != program.TypeRefs[0] {
 		t.Fatalf("decoded type refs = %#v, want %#v", decoded.TypeRefs, program.TypeRefs)
+	}
+	if len(decoded.TypeFuncs) != 1 ||
+		len(decoded.TypeFuncs[0].Params) != 1 ||
+		len(decoded.TypeFuncs[0].Results) != 1 ||
+		decoded.TypeFuncs[0].Params[0] != program.TypeFuncs[0].Params[0] ||
+		decoded.TypeFuncs[0].Results[0] != program.TypeFuncs[0].Results[0] {
+		t.Fatalf("decoded type funcs = %#v, want %#v", decoded.TypeFuncs, program.TypeFuncs)
 	}
 	if len(decoded.Methods) != 1 || decoded.Methods[0] != program.Methods[0] {
 		t.Fatalf("decoded methods = %#v, want %#v", decoded.Methods, program.Methods)

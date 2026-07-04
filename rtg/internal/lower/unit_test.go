@@ -253,6 +253,46 @@ func (it *item) Set(value int) int { return value }
 	}
 }
 
+func TestEmitCheckedPackagePreservesFunctionTypes(t *testing.T) {
+	graph := loadTestGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type callback func(value int) string
+
+func appMain() int { return 0 }
+`)},
+	})
+	prog := check.CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	result := EmitCheckedPackage(graph.Packages[0], prog.Packages[0])
+	if !result.Ok {
+		t.Fatalf("EmitCheckedPackage failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
+	}
+	callback := findUnitDecl(result.Program, "callback")
+	if callback < 0 {
+		t.Fatalf("callback decl missing: %#v", result.Program.Decls)
+	}
+	if len(result.Program.TypeFuncs) != 1 {
+		t.Fatalf("type funcs = %#v, want 1", result.Program.TypeFuncs)
+	}
+	assertUnitType(t, result.Program, "callback", unit.TypeFunc, callback, "func(value int) string", "", "", "")
+	assertUnitTypeFunc(t, result.Program, callback, []string{"value:int"}, []string{":string"})
+
+	data, ok := unit.Marshal(result.Program)
+	if !ok {
+		t.Fatal("unit Marshal failed")
+	}
+	decoded, err := rtgunit.Unmarshal(data)
+	if err != nil {
+		t.Fatalf("host unit decode failed: %v", err)
+	}
+	if len(decoded.TypeFuncs) != len(result.Program.TypeFuncs) {
+		t.Fatalf("decoded type funcs = %d, want %d", len(decoded.TypeFuncs), len(result.Program.TypeFuncs))
+	}
+}
+
 func TestEmitCheckedPackageExpressionShapes(t *testing.T) {
 	graph := loadTestGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -743,6 +783,29 @@ func assertUnitTypeInterface(t *testing.T, program unit.Program, decl int, embed
 		t.Fatalf("interface method %s not found in %#v", method, iface.Methods)
 	}
 	t.Fatalf("interface row for type=%d not found in %#v", typeIndex, program.TypeIfaces)
+}
+
+func assertUnitTypeFunc(t *testing.T, program unit.Program, decl int, params []string, results []string) {
+	t.Helper()
+	typeIndex := -1
+	for i := 0; i < len(program.Types); i++ {
+		if program.Types[i].Decl == decl {
+			typeIndex = i
+			break
+		}
+	}
+	if typeIndex < 0 {
+		t.Fatalf("type decl=%d not found in %#v", decl, program.Types)
+	}
+	for i := 0; i < len(program.TypeFuncs); i++ {
+		fn := program.TypeFuncs[i]
+		if fn.TypeIndex == typeIndex {
+			assertUnitFields(t, program, fn.Params, params)
+			assertUnitFields(t, program, fn.Results, results)
+			return
+		}
+	}
+	t.Fatalf("function type row for type=%d not found in %#v", typeIndex, program.TypeFuncs)
 }
 
 func assertUnitMethod(t *testing.T, program unit.Program, decl int, name string, pointer bool, funcIndex int) {

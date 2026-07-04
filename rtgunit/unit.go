@@ -39,6 +39,7 @@ const (
 	TagTypeFields = uint16(27)
 	TagTypeIfaces = uint16(28)
 	TagMethods    = uint16(29)
+	TagTypeFuncs  = uint16(30)
 )
 
 const (
@@ -211,6 +212,12 @@ type TypeIface struct {
 	TypeIndex int
 	Methods   []InterfaceMethod
 	Embeds    []InterfaceEmbed
+}
+
+type TypeFuncSig struct {
+	TypeIndex int
+	Params    []Field
+	Results   []Field
 }
 
 type MethodInfo struct {
@@ -399,6 +406,7 @@ type Program struct {
 	Types      []TypeInfo
 	TypeFields []TypeFields
 	TypeIfaces []TypeIface
+	TypeFuncs  []TypeFuncSig
 	Methods    []MethodInfo
 	TypeRefs   []TypeRef
 	Locals     []LocalDecl
@@ -475,6 +483,7 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagTypes, encodeTypes(program.Types)),
 		NewNode(TagTypeFields, encodeTypeFields(program.TypeFields)),
 		NewNode(TagTypeIfaces, encodeTypeInterfaces(program.TypeIfaces)),
+		NewNode(TagTypeFuncs, encodeTypeFuncs(program.TypeFuncs)),
 		NewNode(TagMethods, encodeMethods(program.Methods)),
 		NewNode(TagTypeRefs, encodeTypeRefs(program.TypeRefs)),
 		NewNode(TagLocals, encodeLocals(program.Locals)),
@@ -531,6 +540,7 @@ func Unmarshal(data []byte) (Program, error) {
 	var typeData []byte
 	var typeFieldData []byte
 	var typeIfaceData []byte
+	var typeFuncData []byte
 	var methodData []byte
 	var typeRefData []byte
 	var localData []byte
@@ -551,6 +561,7 @@ func Unmarshal(data []byte) (Program, error) {
 	seenTypes := false
 	seenTypeFields := false
 	seenTypeIfaces := false
+	seenTypeFuncs := false
 	seenMethods := false
 	seenTypeRefs := false
 	seenLocals := false
@@ -653,6 +664,12 @@ func Unmarshal(data []byte) (Program, error) {
 			}
 			seenTypeIfaces = true
 			typeIfaceData = payload
+		case TagTypeFuncs:
+			if seenTypeFuncs {
+				return program, fmt.Errorf("duplicate type func table")
+			}
+			seenTypeFuncs = true
+			typeFuncData = payload
 		case TagMethods:
 			if seenMethods {
 				return program, fmt.Errorf("duplicate method table")
@@ -791,6 +808,13 @@ func Unmarshal(data []byte) (Program, error) {
 			return program, err
 		}
 		program.TypeIfaces = typeIfaces
+	}
+	if seenTypeFuncs {
+		typeFuncs, err := decodeTypeFuncs(typeFuncData)
+		if err != nil {
+			return program, err
+		}
+		program.TypeFuncs = typeFuncs
 	}
 	if seenMethods {
 		methods, err := decodeMethods(methodData)
@@ -1829,6 +1853,17 @@ func encodeTypeInterfaces(rows []TypeIface) []byte {
 	return out
 }
 
+func encodeTypeFuncs(rows []TypeFuncSig) []byte {
+	var out []byte
+	out = appendVarint(out, len(rows))
+	for _, row := range rows {
+		out = appendVarint(out, row.TypeIndex)
+		out = appendFieldList(out, row.Params)
+		out = appendFieldList(out, row.Results)
+	}
+	return out
+}
+
 func encodeMethods(methods []MethodInfo) []byte {
 	var out []byte
 	out = appendVarint(out, len(methods))
@@ -2611,6 +2646,38 @@ func decodeTypeInterfaces(data []byte) ([]TypeIface, error) {
 	}
 	if pos != len(data) {
 		return nil, fmt.Errorf("trailing type interface data")
+	}
+	return rows, nil
+}
+
+func decodeTypeFuncs(data []byte) ([]TypeFuncSig, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid type func count")
+	}
+	pos = next
+	rows := make([]TypeFuncSig, 0, count)
+	for i := 0; i < count; i++ {
+		typeIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type func %d type", i)
+		}
+		pos = n
+		params, n, ok := readFieldList(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type func %d params", i)
+		}
+		pos = n
+		results, n, ok := readFieldList(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type func %d results", i)
+		}
+		pos = n
+		rows = append(rows, TypeFuncSig{TypeIndex: typeIndex, Params: params, Results: results})
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing type func data")
 	}
 	return rows, nil
 }

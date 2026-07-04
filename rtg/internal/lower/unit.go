@@ -123,6 +123,9 @@ func EmitCheckedPackage(pkg load.Package, info check.PackageInfo) Result {
 	if !builder.addCheckedTypeInterfaces(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
+	if !builder.addCheckedTypeFuncs(info, files) {
+		return emitFail(result, builder.err, builder.errFile, builder.errToken)
+	}
 	if !builder.addCheckedTypeRefs(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
@@ -597,6 +600,26 @@ func (b *unitBuilder) addCheckedTypeInterfaces(info check.PackageInfo, files []f
 	return true
 }
 
+func (b *unitBuilder) addCheckedTypeFuncs(info check.PackageInfo, files []fileTokens) bool {
+	for i := 0; i < len(info.Types); i++ {
+		typ := info.Types[i]
+		if typ.Kind != check.TypeFunc {
+			continue
+		}
+		if typ.File < 0 || typ.File >= len(files) || i >= len(b.program.Types) {
+			b.setErr(EmitErrCheck, -1, typ.Token)
+			return false
+		}
+		row, ok := b.mapTypeFunc(i, typ, files[typ.File].oldToNew)
+		if !ok {
+			b.setErr(EmitErrCheck, typ.File, typ.Token)
+			return false
+		}
+		b.program.TypeFuncs = append(b.program.TypeFuncs, row)
+	}
+	return true
+}
+
 func (b *unitBuilder) addCheckedTypeRefs(info check.PackageInfo, files []fileTokens) bool {
 	for i := 0; i < len(info.TypeRefs); i++ {
 		ref := info.TypeRefs[i]
@@ -990,6 +1013,20 @@ func (b *unitBuilder) mapTypeInterface(typeIndex int, typ check.TypeInfo, oldToN
 			return row, false
 		}
 		row.Methods = append(row.Methods, unit.InterfaceMethod{NameTok: nameTok, Params: params, Results: results})
+	}
+	return row, true
+}
+
+func (b *unitBuilder) mapTypeFunc(typeIndex int, typ check.TypeInfo, oldToNew []int) (unit.TypeFuncSig, bool) {
+	row := unit.TypeFuncSig{TypeIndex: typeIndex}
+	var ok bool
+	row.Params, ok = mapFields(typ.Signature.Params, oldToNew, b.finalEOF)
+	if !ok {
+		return row, false
+	}
+	row.Results, ok = mapFields(typ.Signature.Results, oldToNew, b.finalEOF)
+	if !ok {
+		return row, false
 	}
 	return row, true
 }

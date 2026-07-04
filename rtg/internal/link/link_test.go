@@ -342,6 +342,42 @@ func (it *Item) Set(value int) int { return value }
 	assertLinkedMethod(t, program, item, "Set", true, setFn)
 }
 
+func TestLinkUnitsPreservesFunctionTypes(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/pkg/lib"
+
+func appMain() int { return 0 }
+`)},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
+
+type Callback func(value int) string
+
+func Value() int { return 0 }
+`)},
+	})
+	program, ok := LinkUnits(result.Units, result.Root)
+	if !ok {
+		t.Fatal("LinkUnits failed")
+	}
+	callback := findLinkedDecl(program, "Callback")
+	if callback < 0 {
+		t.Fatalf("linked callback decl missing: %#v", program.Decls)
+	}
+	if len(program.TypeFuncs) != 1 {
+		t.Fatalf("linked type funcs = %#v, want 1", program.TypeFuncs)
+	}
+	typ := findLinkedTypeByDecl(program, callback)
+	if typ.Decl != callback || linkedText(program, typ.NameStart, typ.NameEnd) != "Callback" ||
+		typ.Kind != unit.TypeFunc ||
+		linkedSpanText(program, typ.TypeStart, typ.TypeEnd) != "func(value int) string" {
+		t.Fatalf("linked function type = %#v, decl %d", typ, callback)
+	}
+	assertLinkedTypeFunc(t, program, callback, []string{"value:int"}, []string{":string"})
+}
+
 func TestLinkBuildRejectsInvalidInput(t *testing.T) {
 	badBuild := build.Result{Ok: false, ErrorPackage: 7}
 	linked := LinkBuild(badBuild)
@@ -602,6 +638,29 @@ func assertLinkedTypeInterface(t *testing.T, program unit.Program, decl int, emb
 		t.Fatalf("linked interface method %s not found in %#v", method, iface.Methods)
 	}
 	t.Fatalf("linked interface row for type=%d not found in %#v", typeIndex, program.TypeIfaces)
+}
+
+func assertLinkedTypeFunc(t *testing.T, program unit.Program, decl int, params []string, results []string) {
+	t.Helper()
+	typeIndex := -1
+	for i := 0; i < len(program.Types); i++ {
+		if program.Types[i].Decl == decl {
+			typeIndex = i
+			break
+		}
+	}
+	if typeIndex < 0 {
+		t.Fatalf("linked type decl=%d not found in %#v", decl, program.Types)
+	}
+	for i := 0; i < len(program.TypeFuncs); i++ {
+		fn := program.TypeFuncs[i]
+		if fn.TypeIndex == typeIndex {
+			assertLinkedFields(t, program, fn.Params, params)
+			assertLinkedFields(t, program, fn.Results, results)
+			return
+		}
+	}
+	t.Fatalf("linked function type row for type=%d not found in %#v", typeIndex, program.TypeFuncs)
 }
 
 func assertLinkedMethod(t *testing.T, program unit.Program, decl int, name string, pointer bool, funcIndex int) {

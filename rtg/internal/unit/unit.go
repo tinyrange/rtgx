@@ -32,6 +32,7 @@ const (
 	TagTypeFields = 27
 	TagTypeIfaces = 28
 	TagMethods    = 29
+	TagTypeFuncs  = 30
 )
 
 const (
@@ -203,6 +204,12 @@ type TypeIface struct {
 	TypeIndex int
 	Methods   []InterfaceMethod
 	Embeds    []InterfaceEmbed
+}
+
+type TypeFuncSig struct {
+	TypeIndex int
+	Params    []Field
+	Results   []Field
 }
 
 type MethodInfo struct {
@@ -391,6 +398,7 @@ type Program struct {
 	Types      []TypeInfo
 	TypeFields []TypeFields
 	TypeIfaces []TypeIface
+	TypeFuncs  []TypeFuncSig
 	Methods    []MethodInfo
 	TypeRefs   []TypeRef
 	Locals     []LocalDecl
@@ -455,6 +463,10 @@ func Marshal(program Program) ([]byte, bool) {
 	if !ok {
 		return nil, false
 	}
+	typeFuncData, ok := encodeTypeFuncs(program.TypeFuncs, len(program.Tokens), len(program.Types))
+	if !ok {
+		return nil, false
+	}
 	methodData, ok := encodeMethods(program.Methods, len(program.Tokens), len(program.Types), len(program.Symbols), len(program.Funcs))
 	if !ok {
 		return nil, false
@@ -511,6 +523,7 @@ func Marshal(program Program) ([]byte, bool) {
 	root = appendNode(root, TagTypes, typeData)
 	root = appendNode(root, TagTypeFields, typeFieldData)
 	root = appendNode(root, TagTypeIfaces, typeIfaceData)
+	root = appendNode(root, TagTypeFuncs, typeFuncData)
 	root = appendNode(root, TagMethods, methodData)
 	root = appendNode(root, TagTypeRefs, typeRefData)
 	root = appendNode(root, TagLocals, localData)
@@ -561,6 +574,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	typeData := []byte{}
 	typeFieldData := []byte{}
 	typeIfaceData := []byte{}
+	typeFuncData := []byte{}
 	methodData := []byte{}
 	typeRefData := []byte{}
 	localData := []byte{}
@@ -586,6 +600,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	seenTypes := false
 	seenTypeFields := false
 	seenTypeIfaces := false
+	seenTypeFuncs := false
 	seenMethods := false
 	seenTypeRefs := false
 	seenLocals := false
@@ -707,6 +722,12 @@ func Unmarshal(data []byte) (Program, bool) {
 			}
 			seenTypeIfaces = true
 			typeIfaceData = payload
+		} else if tag == TagTypeFuncs {
+			if seenTypeFuncs {
+				return program, false
+			}
+			seenTypeFuncs = true
+			typeFuncData = payload
 		} else if tag == TagMethods {
 			if seenMethods {
 				return program, false
@@ -845,6 +866,13 @@ func Unmarshal(data []byte) (Program, bool) {
 			return program, false
 		}
 		program.TypeIfaces = typeIfaces
+	}
+	if seenTypeFuncs {
+		typeFuncs, ok := decodeTypeFuncs(typeFuncData, len(program.Tokens), len(program.Types))
+		if !ok {
+			return program, false
+		}
+		program.TypeFuncs = typeFuncs
 	}
 	if seenMethods {
 		methods, ok := decodeMethods(methodData, len(program.Tokens), len(program.Types), len(program.Symbols), len(program.Funcs))
@@ -1848,6 +1876,57 @@ func decodeTypeInterfaces(data []byte, tokenLimit int, typeLimit int) ([]TypeIfa
 			methods = append(methods, InterfaceMethod{NameTok: nameTok, Params: params, Results: results})
 		}
 		rows = append(rows, TypeIface{TypeIndex: typeIndex, Methods: methods, Embeds: embeds})
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return rows, true
+}
+
+func encodeTypeFuncs(rows []TypeFuncSig, tokenLimit int, typeLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(rows)*8+1)
+	out = appendVarint(out, len(rows))
+	seen := make([]bool, typeLimit)
+	ok := true
+	for i := 0; i < len(rows); i++ {
+		row := rows[i]
+		if row.TypeIndex < 0 || row.TypeIndex >= typeLimit || seen[row.TypeIndex] {
+			return nil, false
+		}
+		seen[row.TypeIndex] = true
+		out = appendVarint(out, row.TypeIndex)
+		out = appendFields(out, row.Params, tokenLimit, &ok)
+		out = appendFields(out, row.Results, tokenLimit, &ok)
+		if !ok {
+			return nil, false
+		}
+	}
+	return out, true
+}
+
+func decodeTypeFuncs(data []byte, tokenLimit int, typeLimit int) ([]TypeFuncSig, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 || count > typeLimit {
+		return nil, false
+	}
+	seen := make([]bool, typeLimit)
+	rows := make([]TypeFuncSig, 0, count)
+	for i := 0; i < count; i++ {
+		typeIndex, ok := readVarint(data, &pos)
+		if !ok || typeIndex < 0 || typeIndex >= typeLimit || seen[typeIndex] {
+			return nil, false
+		}
+		seen[typeIndex] = true
+		params, ok := readFields(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		results, ok := readFields(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		rows = append(rows, TypeFuncSig{TypeIndex: typeIndex, Params: params, Results: results})
 	}
 	if pos != len(data) {
 		return nil, false

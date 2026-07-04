@@ -205,6 +205,13 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		}
 		dst.TypeIfaces = append(dst.TypeIfaces, iface)
 	}
+	for i := 0; i < len(src.TypeFuncs); i++ {
+		fn, ok := mapTypeFunc(src.TypeFuncs[i], oldToNew, finalEOF, typeOffset, len(src.Types))
+		if !ok {
+			return false
+		}
+		dst.TypeFuncs = append(dst.TypeFuncs, fn)
+	}
 	for i := 0; i < len(src.Methods); i++ {
 		method, ok := mapMethod(src.Methods[i], oldToNew, finalEOF, typeOffset, symbolOffset, funcOffset, len(src.Types), len(src.Symbols), len(src.Funcs))
 		if !ok {
@@ -447,6 +454,23 @@ func mapTypeInterface(row unit.TypeIface, oldToNew []int, eof int, typeOffset in
 		if !ok {
 			return row, false
 		}
+	}
+	return row, true
+}
+
+func mapTypeFunc(row unit.TypeFuncSig, oldToNew []int, eof int, typeOffset int, typeLimit int) (unit.TypeFuncSig, bool) {
+	if row.TypeIndex < 0 || row.TypeIndex >= typeLimit {
+		return row, false
+	}
+	row.TypeIndex += typeOffset
+	var ok bool
+	row.Params, ok = mapFields(row.Params, oldToNew, eof)
+	if !ok {
+		return row, false
+	}
+	row.Results, ok = mapFields(row.Results, oldToNew, eof)
+	if !ok {
+		return row, false
 	}
 	return row, true
 }

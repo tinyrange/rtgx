@@ -156,6 +156,11 @@ func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 			Results: []Field{{NameTok: -1, TypeStart: 10, TypeEnd: 11}},
 		}},
 	}}
+	program.TypeFuncs = []TypeFuncSig{{
+		TypeIndex: 0,
+		Params:    []Field{{NameTok: -1, TypeStart: 10, TypeEnd: 11}},
+		Results:   []Field{{NameTok: -1, TypeStart: 10, TypeEnd: 11}},
+	}}
 	program.Methods = []MethodInfo{{
 		NameTok:   7,
 		TypeIndex: 0,
@@ -471,6 +476,7 @@ func equalPrograms(left Program, right Program) bool {
 		len(left.Types) != len(right.Types) ||
 		len(left.TypeFields) != len(right.TypeFields) ||
 		len(left.TypeIfaces) != len(right.TypeIfaces) ||
+		len(left.TypeFuncs) != len(right.TypeFuncs) ||
 		len(left.Methods) != len(right.Methods) ||
 		len(left.TypeRefs) != len(right.TypeRefs) ||
 		len(left.Locals) != len(right.Locals) ||
@@ -555,6 +561,11 @@ func equalPrograms(left Program, right Program) bool {
 	}
 	for i := 0; i < len(left.TypeIfaces); i++ {
 		if !equalTypeInterface(left.TypeIfaces[i], right.TypeIfaces[i]) {
+			return false
+		}
+	}
+	for i := 0; i < len(left.TypeFuncs); i++ {
+		if !equalTypeFunc(left.TypeFuncs[i], right.TypeFuncs[i]) {
 			return false
 		}
 	}
@@ -733,6 +744,25 @@ func equalTypeInterface(left TypeIface, right TypeIface) bool {
 			if left.Methods[i].Results[j] != right.Methods[i].Results[j] {
 				return false
 			}
+		}
+	}
+	return true
+}
+
+func equalTypeFunc(left TypeFuncSig, right TypeFuncSig) bool {
+	if left.TypeIndex != right.TypeIndex ||
+		len(left.Params) != len(right.Params) ||
+		len(left.Results) != len(right.Results) {
+		return false
+	}
+	for i := 0; i < len(left.Params); i++ {
+		if left.Params[i] != right.Params[i] {
+			return false
+		}
+	}
+	for i := 0; i < len(left.Results); i++ {
+		if left.Results[i] != right.Results[i] {
+			return false
 		}
 	}
 	return true
