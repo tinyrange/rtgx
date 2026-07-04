@@ -269,6 +269,10 @@ func (b *unitBuilder) addCheckedDecls(info check.PackageInfo, files []fileTokens
 		if !b.addDecl(file, decl, nameTok, files[declInfo.File].oldToNew, declInfo.File) {
 			return false
 		}
+		ownerIndex := len(b.program.Decls) - 1
+		if !b.addDeclShapes(declInfo, files[declInfo.File].oldToNew, ownerIndex) {
+			return false
+		}
 	}
 	return true
 }
@@ -293,8 +297,106 @@ func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens
 		if !b.addFunc(file, fn, files[body.File].oldToNew, body.File) {
 			return false
 		}
+		ownerIndex := len(b.program.Funcs) - 1
+		if !b.addBodyShapes(body, files[body.File].oldToNew, ownerIndex) {
+			return false
+		}
 	}
 	return true
+}
+
+func (b *unitBuilder) addDeclShapes(decl check.DeclInfo, oldToNew []int, ownerIndex int) bool {
+	for i := 0; i < len(decl.Indexes); i++ {
+		index, ok := mapIndexExpr(decl.Indexes[i], oldToNew, b.finalEOF, unit.OwnerDecl, ownerIndex)
+		if !ok {
+			b.setErr(EmitErrCheck, decl.File, decl.Token)
+			return false
+		}
+		b.program.Indexes = append(b.program.Indexes, index)
+	}
+	for i := 0; i < len(decl.Composites); i++ {
+		composite, ok := mapCompositeExpr(decl.Composites[i], oldToNew, b.finalEOF, unit.OwnerDecl, ownerIndex)
+		if !ok {
+			b.setErr(EmitErrCheck, decl.File, decl.Token)
+			return false
+		}
+		b.program.Composites = append(b.program.Composites, composite)
+	}
+	return true
+}
+
+func (b *unitBuilder) addBodyShapes(body check.FuncBody, oldToNew []int, ownerIndex int) bool {
+	for i := 0; i < len(body.Indexes); i++ {
+		index, ok := mapIndexExpr(body.Indexes[i], oldToNew, b.finalEOF, unit.OwnerFunc, ownerIndex)
+		if !ok {
+			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
+			return false
+		}
+		b.program.Indexes = append(b.program.Indexes, index)
+	}
+	for i := 0; i < len(body.Composites); i++ {
+		composite, ok := mapCompositeExpr(body.Composites[i], oldToNew, b.finalEOF, unit.OwnerFunc, ownerIndex)
+		if !ok {
+			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
+			return false
+		}
+		b.program.Composites = append(b.program.Composites, composite)
+	}
+	return true
+}
+
+func mapIndexExpr(index check.IndexExpr, oldToNew []int, eof int, ownerKind int, ownerIndex int) (unit.IndexExpr, bool) {
+	out := unit.IndexExpr{
+		OwnerKind:  ownerKind,
+		OwnerIndex: ownerIndex,
+		StartTok:   mapToken(oldToNew, index.StartTok, eof),
+		EndTok:     mapToken(oldToNew, index.EndTok, eof),
+		BaseStart:  mapToken(oldToNew, index.BaseStart, eof),
+		BaseEnd:    mapToken(oldToNew, index.BaseEnd, eof),
+		OpenTok:    mapToken(oldToNew, index.OpenTok, eof),
+		CloseTok:   mapToken(oldToNew, index.CloseTok, eof),
+		IndexStart: mapToken(oldToNew, index.IndexStart, eof),
+		IndexEnd:   mapToken(oldToNew, index.IndexEnd, eof),
+	}
+	if out.StartTok < 0 || out.EndTok < out.StartTok || out.BaseStart < 0 || out.BaseEnd < out.BaseStart || out.IndexStart < 0 || out.IndexEnd < out.IndexStart {
+		return out, false
+	}
+	if out.OpenTok < 0 || out.CloseTok < 0 || ownerIndex < 0 {
+		return out, false
+	}
+	return out, true
+}
+
+func mapCompositeExpr(composite check.CompositeExpr, oldToNew []int, eof int, ownerKind int, ownerIndex int) (unit.CompositeExpr, bool) {
+	out := unit.CompositeExpr{
+		OwnerKind:  ownerKind,
+		OwnerIndex: ownerIndex,
+		StartTok:   mapToken(oldToNew, composite.StartTok, eof),
+		EndTok:     mapToken(oldToNew, composite.EndTok, eof),
+		TypeStart:  mapToken(oldToNew, composite.TypeStart, eof),
+		TypeEnd:    mapToken(oldToNew, composite.TypeEnd, eof),
+		OpenTok:    mapToken(oldToNew, composite.OpenTok, eof),
+		CloseTok:   mapToken(oldToNew, composite.CloseTok, eof),
+		Elems:      make([]unit.ExprSpan, 0, len(composite.Elems)),
+	}
+	if out.StartTok < 0 || out.EndTok < out.StartTok || out.TypeStart < 0 || out.TypeEnd < out.TypeStart {
+		return out, false
+	}
+	if out.OpenTok < 0 || out.CloseTok < 0 || ownerIndex < 0 {
+		return out, false
+	}
+	for i := 0; i < len(composite.Elems); i++ {
+		elem := composite.Elems[i]
+		mapped := unit.ExprSpan{
+			StartTok: mapToken(oldToNew, elem.StartTok, eof),
+			EndTok:   mapToken(oldToNew, elem.EndTok, eof),
+		}
+		if mapped.StartTok < 0 || mapped.EndTok < mapped.StartTok {
+			return out, false
+		}
+		out.Elems = append(out.Elems, mapped)
+	}
+	return out, true
 }
 
 func findFileDecl(file syntax.File, nameTok int) syntax.TopDecl {

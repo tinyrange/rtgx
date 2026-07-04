@@ -12,6 +12,8 @@ const (
 	TagTokens  = 8
 	TagDecls   = 9
 	TagFuncs   = 10
+	TagIndexes = 11
+	TagComps   = 12
 )
 
 const (
@@ -67,12 +69,49 @@ type Func struct {
 	EndTok        int
 }
 
+const (
+	OwnerDecl = iota + 1
+	OwnerFunc
+)
+
+type ExprSpan struct {
+	StartTok int
+	EndTok   int
+}
+
+type IndexExpr struct {
+	OwnerKind  int
+	OwnerIndex int
+	StartTok   int
+	EndTok     int
+	BaseStart  int
+	BaseEnd    int
+	OpenTok    int
+	CloseTok   int
+	IndexStart int
+	IndexEnd   int
+}
+
+type CompositeExpr struct {
+	OwnerKind  int
+	OwnerIndex int
+	StartTok   int
+	EndTok     int
+	TypeStart  int
+	TypeEnd    int
+	OpenTok    int
+	CloseTok   int
+	Elems      []ExprSpan
+}
+
 type Program struct {
-	Package string
-	Text    []byte
-	Tokens  []Token
-	Decls   []Decl
-	Funcs   []Func
+	Package    string
+	Text       []byte
+	Tokens     []Token
+	Decls      []Decl
+	Funcs      []Func
+	Indexes    []IndexExpr
+	Composites []CompositeExpr
 }
 
 func Marshal(program Program) ([]byte, bool) {
@@ -91,12 +130,22 @@ func Marshal(program Program) ([]byte, bool) {
 	if !ok {
 		return nil, false
 	}
+	indexData, ok := encodeIndexes(program.Indexes, len(program.Tokens), len(program.Decls), len(program.Funcs))
+	if !ok {
+		return nil, false
+	}
+	compData, ok := encodeComposites(program.Composites, len(program.Tokens), len(program.Decls), len(program.Funcs))
+	if !ok {
+		return nil, false
+	}
 	var root []byte
 	root = appendNode(root, TagPackage, []byte(program.Package))
 	root = appendNode(root, TagText, program.Text)
 	root = appendNode(root, TagTokens, tokenData)
 	root = appendNode(root, TagDecls, declData)
 	root = appendNode(root, TagFuncs, funcData)
+	root = appendNode(root, TagIndexes, indexData)
+	root = appendNode(root, TagComps, compData)
 
 	out := make([]byte, 0, 14+len(root))
 	out = append(out, 'R', 'T', 'G', 'U')
@@ -128,11 +177,15 @@ func Unmarshal(data []byte) (Program, bool) {
 		return program, false
 	}
 	tokenData := []byte{}
+	indexData := []byte{}
+	compData := []byte{}
 	seenPackage := false
 	seenText := false
 	seenTokens := false
 	seenDecls := false
 	seenFuncs := false
+	seenIndexes := false
+	seenComps := false
 	pos := rootStart
 	for pos < rootEnd {
 		if pos+6 > rootEnd {
@@ -184,6 +237,18 @@ func Unmarshal(data []byte) (Program, bool) {
 				return program, false
 			}
 			program.Funcs = funcs
+		} else if tag == TagIndexes {
+			if seenIndexes {
+				return program, false
+			}
+			seenIndexes = true
+			indexData = payload
+		} else if tag == TagComps {
+			if seenComps {
+				return program, false
+			}
+			seenComps = true
+			compData = payload
 		} else {
 			return program, false
 		}
@@ -200,6 +265,20 @@ func Unmarshal(data []byte) (Program, bool) {
 		return program, false
 	}
 	program.Tokens = tokens
+	if seenIndexes {
+		indexes, ok := decodeIndexes(indexData, len(program.Tokens), len(program.Decls), len(program.Funcs))
+		if !ok {
+			return program, false
+		}
+		program.Indexes = indexes
+	}
+	if seenComps {
+		composites, ok := decodeComposites(compData, len(program.Tokens), len(program.Decls), len(program.Funcs))
+		if !ok {
+			return program, false
+		}
+		program.Composites = composites
+	}
 	return program, true
 }
 
@@ -448,6 +527,249 @@ func decodeFuncs(data []byte) ([]Func, bool) {
 		return nil, false
 	}
 	return funcs, true
+}
+
+func encodeIndexes(indexes []IndexExpr, tokenLimit int, declLimit int, funcLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(indexes)*10+1)
+	out = appendVarint(out, len(indexes))
+	for i := 0; i < len(indexes); i++ {
+		index := indexes[i]
+		if !validOwner(index.OwnerKind, index.OwnerIndex, declLimit, funcLimit) {
+			return nil, false
+		}
+		if !validSpan(tokenLimit, index.StartTok, index.EndTok) ||
+			!validSpan(tokenLimit, index.BaseStart, index.BaseEnd) ||
+			!validSpan(tokenLimit, index.IndexStart, index.IndexEnd) ||
+			!validToken(tokenLimit, index.OpenTok) ||
+			!validToken(tokenLimit, index.CloseTok) {
+			return nil, false
+		}
+		out = appendVarint(out, index.OwnerKind)
+		out = appendVarint(out, index.OwnerIndex)
+		out = appendVarint(out, index.StartTok)
+		out = appendVarint(out, index.EndTok-index.StartTok)
+		out = appendVarint(out, index.BaseStart)
+		out = appendVarint(out, index.BaseEnd-index.BaseStart)
+		out = appendVarint(out, index.OpenTok)
+		out = appendVarint(out, index.CloseTok)
+		out = appendVarint(out, index.IndexStart)
+		out = appendVarint(out, index.IndexEnd-index.IndexStart)
+	}
+	return out, true
+}
+
+func decodeIndexes(data []byte, tokenLimit int, declLimit int, funcLimit int) ([]IndexExpr, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	indexes := make([]IndexExpr, 0, count)
+	for i := 0; i < count; i++ {
+		ownerKind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		ownerIndex, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		startTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		tokCount, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		baseStart, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		baseCount, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		openTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		closeTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		indexStart, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		indexCount, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		index := IndexExpr{
+			OwnerKind:  ownerKind,
+			OwnerIndex: ownerIndex,
+			StartTok:   startTok,
+			EndTok:     startTok + tokCount,
+			BaseStart:  baseStart,
+			BaseEnd:    baseStart + baseCount,
+			OpenTok:    openTok,
+			CloseTok:   closeTok,
+			IndexStart: indexStart,
+			IndexEnd:   indexStart + indexCount,
+		}
+		if !validOwner(index.OwnerKind, index.OwnerIndex, declLimit, funcLimit) ||
+			!validSpan(tokenLimit, index.StartTok, index.EndTok) ||
+			!validSpan(tokenLimit, index.BaseStart, index.BaseEnd) ||
+			!validSpan(tokenLimit, index.IndexStart, index.IndexEnd) ||
+			!validToken(tokenLimit, index.OpenTok) ||
+			!validToken(tokenLimit, index.CloseTok) {
+			return nil, false
+		}
+		indexes = append(indexes, index)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return indexes, true
+}
+
+func encodeComposites(composites []CompositeExpr, tokenLimit int, declLimit int, funcLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(composites)*10+1)
+	out = appendVarint(out, len(composites))
+	for i := 0; i < len(composites); i++ {
+		composite := composites[i]
+		if !validOwner(composite.OwnerKind, composite.OwnerIndex, declLimit, funcLimit) {
+			return nil, false
+		}
+		if !validSpan(tokenLimit, composite.StartTok, composite.EndTok) ||
+			!validSpan(tokenLimit, composite.TypeStart, composite.TypeEnd) ||
+			!validToken(tokenLimit, composite.OpenTok) ||
+			!validToken(tokenLimit, composite.CloseTok) {
+			return nil, false
+		}
+		out = appendVarint(out, composite.OwnerKind)
+		out = appendVarint(out, composite.OwnerIndex)
+		out = appendVarint(out, composite.StartTok)
+		out = appendVarint(out, composite.EndTok-composite.StartTok)
+		out = appendVarint(out, composite.TypeStart)
+		out = appendVarint(out, composite.TypeEnd-composite.TypeStart)
+		out = appendVarint(out, composite.OpenTok)
+		out = appendVarint(out, composite.CloseTok)
+		out = appendVarint(out, len(composite.Elems))
+		for j := 0; j < len(composite.Elems); j++ {
+			elem := composite.Elems[j]
+			if !validSpan(tokenLimit, elem.StartTok, elem.EndTok) {
+				return nil, false
+			}
+			out = appendVarint(out, elem.StartTok)
+			out = appendVarint(out, elem.EndTok-elem.StartTok)
+		}
+	}
+	return out, true
+}
+
+func decodeComposites(data []byte, tokenLimit int, declLimit int, funcLimit int) ([]CompositeExpr, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	composites := make([]CompositeExpr, 0, count)
+	for i := 0; i < count; i++ {
+		ownerKind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		ownerIndex, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		startTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		tokCount, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		typeStart, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		typeCount, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		openTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		closeTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		elemCount, ok := readVarint(data, &pos)
+		if !ok || elemCount < 0 {
+			return nil, false
+		}
+		composite := CompositeExpr{
+			OwnerKind:  ownerKind,
+			OwnerIndex: ownerIndex,
+			StartTok:   startTok,
+			EndTok:     startTok + tokCount,
+			TypeStart:  typeStart,
+			TypeEnd:    typeStart + typeCount,
+			OpenTok:    openTok,
+			CloseTok:   closeTok,
+			Elems:      make([]ExprSpan, 0, elemCount),
+		}
+		if !validOwner(composite.OwnerKind, composite.OwnerIndex, declLimit, funcLimit) ||
+			!validSpan(tokenLimit, composite.StartTok, composite.EndTok) ||
+			!validSpan(tokenLimit, composite.TypeStart, composite.TypeEnd) ||
+			!validToken(tokenLimit, composite.OpenTok) ||
+			!validToken(tokenLimit, composite.CloseTok) {
+			return nil, false
+		}
+		for j := 0; j < elemCount; j++ {
+			elemStart, ok := readVarint(data, &pos)
+			if !ok {
+				return nil, false
+			}
+			elemCount, ok := readVarint(data, &pos)
+			if !ok {
+				return nil, false
+			}
+			elem := ExprSpan{StartTok: elemStart, EndTok: elemStart + elemCount}
+			if !validSpan(tokenLimit, elem.StartTok, elem.EndTok) {
+				return nil, false
+			}
+			composite.Elems = append(composite.Elems, elem)
+		}
+		composites = append(composites, composite)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return composites, true
+}
+
+func validOwner(kind int, index int, declLimit int, funcLimit int) bool {
+	if kind == OwnerDecl {
+		return index >= 0 && index < declLimit
+	}
+	if kind == OwnerFunc {
+		return index >= 0 && index < funcLimit
+	}
+	return false
+}
+
+func validSpan(tokenLimit int, start int, end int) bool {
+	return start >= 0 && end >= start && end <= tokenLimit
+}
+
+func validToken(tokenLimit int, tok int) bool {
+	return tok >= 0 && tok < tokenLimit
 }
 
 func appendNode(out []byte, tag int, payload []byte) []byte {

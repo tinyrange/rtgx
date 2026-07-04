@@ -19,6 +19,8 @@ const (
 	TagTokens  = uint16(8)
 	TagDecls   = uint16(9)
 	TagFuncs   = uint16(10)
+	TagIndexes = uint16(11)
+	TagComps   = uint16(12)
 )
 
 const (
@@ -75,12 +77,49 @@ type Func struct {
 	EndTok        int
 }
 
+const (
+	OwnerDecl = iota + 1
+	OwnerFunc
+)
+
+type ExprSpan struct {
+	StartTok int
+	EndTok   int
+}
+
+type IndexExpr struct {
+	OwnerKind  int
+	OwnerIndex int
+	StartTok   int
+	EndTok     int
+	BaseStart  int
+	BaseEnd    int
+	OpenTok    int
+	CloseTok   int
+	IndexStart int
+	IndexEnd   int
+}
+
+type CompositeExpr struct {
+	OwnerKind  int
+	OwnerIndex int
+	StartTok   int
+	EndTok     int
+	TypeStart  int
+	TypeEnd    int
+	OpenTok    int
+	CloseTok   int
+	Elems      []ExprSpan
+}
+
 type Program struct {
-	Package string
-	Text    []byte
-	Tokens  []byte
-	Decls   []Decl
-	Funcs   []Func
+	Package    string
+	Text       []byte
+	Tokens     []byte
+	Decls      []Decl
+	Funcs      []Func
+	Indexes    []IndexExpr
+	Composites []CompositeExpr
 }
 
 type sourceToken struct {
@@ -137,6 +176,8 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagTokens, tokens),
 		NewNode(TagDecls, encodeDecls(program.Decls)),
 		NewNode(TagFuncs, encodeFuncs(program.Funcs)),
+		NewNode(TagIndexes, encodeIndexes(program.Indexes)),
+		NewNode(TagComps, encodeComposites(program.Composites)),
 	)
 
 	var out bytes.Buffer
@@ -174,6 +215,10 @@ func Unmarshal(data []byte) (Program, error) {
 		return program, fmt.Errorf("invalid root length")
 	}
 	var tokenData []byte
+	var indexData []byte
+	var compData []byte
+	seenIndexes := false
+	seenComps := false
 	pos := rootStart
 	for pos < rootEnd {
 		if pos+6 > rootEnd {
@@ -206,6 +251,18 @@ func Unmarshal(data []byte) (Program, error) {
 				return program, err
 			}
 			program.Funcs = funcs
+		case TagIndexes:
+			if seenIndexes {
+				return program, fmt.Errorf("duplicate index table")
+			}
+			seenIndexes = true
+			indexData = payload
+		case TagComps:
+			if seenComps {
+				return program, fmt.Errorf("duplicate composite table")
+			}
+			seenComps = true
+			compData = payload
 		default:
 			return program, fmt.Errorf("unknown unit child tag %d", tag)
 		}
@@ -222,6 +279,20 @@ func Unmarshal(data []byte) (Program, error) {
 		return program, err
 	}
 	program.Tokens = tokens
+	if seenIndexes {
+		indexes, err := decodeIndexes(indexData)
+		if err != nil {
+			return program, err
+		}
+		program.Indexes = indexes
+	}
+	if seenComps {
+		composites, err := decodeComposites(compData)
+		if err != nil {
+			return program, err
+		}
+		program.Composites = composites
+	}
 	if len(program.Tokens) == 0 {
 		return program, fmt.Errorf("unit missing token table")
 	}
@@ -1041,6 +1112,45 @@ func encodeFuncs(funcs []Func) []byte {
 	return out
 }
 
+func encodeIndexes(indexes []IndexExpr) []byte {
+	var out []byte
+	out = appendVarint(out, len(indexes))
+	for _, index := range indexes {
+		out = appendVarint(out, index.OwnerKind)
+		out = appendVarint(out, index.OwnerIndex)
+		out = appendVarint(out, index.StartTok)
+		out = appendVarint(out, index.EndTok-index.StartTok)
+		out = appendVarint(out, index.BaseStart)
+		out = appendVarint(out, index.BaseEnd-index.BaseStart)
+		out = appendVarint(out, index.OpenTok)
+		out = appendVarint(out, index.CloseTok)
+		out = appendVarint(out, index.IndexStart)
+		out = appendVarint(out, index.IndexEnd-index.IndexStart)
+	}
+	return out
+}
+
+func encodeComposites(composites []CompositeExpr) []byte {
+	var out []byte
+	out = appendVarint(out, len(composites))
+	for _, composite := range composites {
+		out = appendVarint(out, composite.OwnerKind)
+		out = appendVarint(out, composite.OwnerIndex)
+		out = appendVarint(out, composite.StartTok)
+		out = appendVarint(out, composite.EndTok-composite.StartTok)
+		out = appendVarint(out, composite.TypeStart)
+		out = appendVarint(out, composite.TypeEnd-composite.TypeStart)
+		out = appendVarint(out, composite.OpenTok)
+		out = appendVarint(out, composite.CloseTok)
+		out = appendVarint(out, len(composite.Elems))
+		for _, elem := range composite.Elems {
+			out = appendVarint(out, elem.StartTok)
+			out = appendVarint(out, elem.EndTok-elem.StartTok)
+		}
+	}
+	return out
+}
+
 func decodeDecls(data []byte) ([]Decl, error) {
 	pos := 0
 	count, next, ok := readVarint(data, pos)
@@ -1153,6 +1263,170 @@ func decodeFuncs(data []byte) ([]Func, error) {
 		return nil, fmt.Errorf("trailing func data")
 	}
 	return funcs, nil
+}
+
+func decodeIndexes(data []byte) ([]IndexExpr, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid index count")
+	}
+	pos = next
+	indexes := make([]IndexExpr, 0, count)
+	for i := 0; i < count; i++ {
+		ownerKind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid index %d owner kind", i)
+		}
+		pos = n
+		ownerIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid index %d owner index", i)
+		}
+		pos = n
+		startTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid index %d start", i)
+		}
+		pos = n
+		tokCount, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid index %d end", i)
+		}
+		pos = n
+		baseStart, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid index %d base start", i)
+		}
+		pos = n
+		baseCount, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid index %d base end", i)
+		}
+		pos = n
+		openTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid index %d open", i)
+		}
+		pos = n
+		closeTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid index %d close", i)
+		}
+		pos = n
+		indexStart, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid index %d expr start", i)
+		}
+		pos = n
+		indexCount, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid index %d expr end", i)
+		}
+		pos = n
+		indexes = append(indexes, IndexExpr{
+			OwnerKind:  ownerKind,
+			OwnerIndex: ownerIndex,
+			StartTok:   startTok,
+			EndTok:     startTok + tokCount,
+			BaseStart:  baseStart,
+			BaseEnd:    baseStart + baseCount,
+			OpenTok:    openTok,
+			CloseTok:   closeTok,
+			IndexStart: indexStart,
+			IndexEnd:   indexStart + indexCount,
+		})
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing index data")
+	}
+	return indexes, nil
+}
+
+func decodeComposites(data []byte) ([]CompositeExpr, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid composite count")
+	}
+	pos = next
+	composites := make([]CompositeExpr, 0, count)
+	for i := 0; i < count; i++ {
+		ownerKind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid composite %d owner kind", i)
+		}
+		pos = n
+		ownerIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid composite %d owner index", i)
+		}
+		pos = n
+		startTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid composite %d start", i)
+		}
+		pos = n
+		tokCount, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid composite %d end", i)
+		}
+		pos = n
+		typeStart, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid composite %d type start", i)
+		}
+		pos = n
+		typeCount, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid composite %d type end", i)
+		}
+		pos = n
+		openTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid composite %d open", i)
+		}
+		pos = n
+		closeTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid composite %d close", i)
+		}
+		pos = n
+		elemCount, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid composite %d elem count", i)
+		}
+		pos = n
+		composite := CompositeExpr{
+			OwnerKind:  ownerKind,
+			OwnerIndex: ownerIndex,
+			StartTok:   startTok,
+			EndTok:     startTok + tokCount,
+			TypeStart:  typeStart,
+			TypeEnd:    typeStart + typeCount,
+			OpenTok:    openTok,
+			CloseTok:   closeTok,
+			Elems:      make([]ExprSpan, 0, elemCount),
+		}
+		for j := 0; j < elemCount; j++ {
+			elemStart, n, ok := readVarint(data, pos)
+			if !ok {
+				return nil, fmt.Errorf("invalid composite %d elem %d start", i, j)
+			}
+			pos = n
+			elemCount, n, ok := readVarint(data, pos)
+			if !ok {
+				return nil, fmt.Errorf("invalid composite %d elem %d end", i, j)
+			}
+			pos = n
+			composite.Elems = append(composite.Elems, ExprSpan{StartTok: elemStart, EndTok: elemStart + elemCount})
+		}
+		composites = append(composites, composite)
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing composite data")
+	}
+	return composites, nil
 }
 
 func appendVarint(out []byte, v int) []byte {

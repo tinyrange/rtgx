@@ -75,6 +75,60 @@ func appMain() int { return answer }
 	}
 }
 
+func TestMarshalRoundTripExpressionShapes(t *testing.T) {
+	program := testProgram(t, []byte(`package main
+
+var values = []int{1, 2}
+
+func appMain() int { return values[0] }
+`))
+	program.Indexes = []IndexExpr{{
+		OwnerKind:  OwnerFunc,
+		OwnerIndex: 0,
+		StartTok:   17,
+		EndTok:     21,
+		BaseStart:  17,
+		BaseEnd:    18,
+		OpenTok:    18,
+		CloseTok:   20,
+		IndexStart: 19,
+		IndexEnd:   20,
+	}}
+	program.Composites = []CompositeExpr{{
+		OwnerKind:  OwnerDecl,
+		OwnerIndex: 0,
+		StartTok:   4,
+		EndTok:     12,
+		TypeStart:  4,
+		TypeEnd:    7,
+		OpenTok:    7,
+		CloseTok:   11,
+		Elems:      []ExprSpan{{StartTok: 8, EndTok: 9}, {StartTok: 10, EndTok: 11}},
+	}}
+	data, err := Marshal(program)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+	decoded, err := Unmarshal(data)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	if len(decoded.Indexes) != 1 || decoded.Indexes[0] != program.Indexes[0] {
+		t.Fatalf("decoded indexes = %#v, want %#v", decoded.Indexes, program.Indexes)
+	}
+	if len(decoded.Composites) != 1 || len(decoded.Composites[0].Elems) != 2 {
+		t.Fatalf("decoded composites = %#v, want %#v", decoded.Composites, program.Composites)
+	}
+	if decoded.Composites[0].OwnerKind != program.Composites[0].OwnerKind ||
+		decoded.Composites[0].OwnerIndex != program.Composites[0].OwnerIndex ||
+		decoded.Composites[0].TypeStart != program.Composites[0].TypeStart ||
+		decoded.Composites[0].TypeEnd != program.Composites[0].TypeEnd ||
+		decoded.Composites[0].Elems[0] != program.Composites[0].Elems[0] ||
+		decoded.Composites[0].Elems[1] != program.Composites[0].Elems[1] {
+		t.Fatalf("decoded composite = %#v, want %#v", decoded.Composites[0], program.Composites[0])
+	}
+}
+
 func testProgram(t *testing.T, src []byte) Program {
 	t.Helper()
 	dir := t.TempDir()

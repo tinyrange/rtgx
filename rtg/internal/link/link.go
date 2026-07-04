@@ -102,6 +102,8 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		return false
 	}
 	textOffset := len(dst.Text)
+	declOffset := len(dst.Decls)
+	funcOffset := len(dst.Funcs)
 	oldToNew := make([]int, len(src.Tokens))
 	for i := 0; i < len(src.Tokens); i++ {
 		tok := src.Tokens[i]
@@ -136,10 +138,76 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		fn.EndTok = mapToken(oldToNew, fn.EndTok, finalEOF)
 		dst.Funcs = append(dst.Funcs, fn)
 	}
+	for i := 0; i < len(src.Indexes); i++ {
+		index, ok := mapIndex(src.Indexes[i], oldToNew, finalEOF, declOffset, funcOffset)
+		if !ok {
+			return false
+		}
+		dst.Indexes = append(dst.Indexes, index)
+	}
+	for i := 0; i < len(src.Composites); i++ {
+		composite, ok := mapComposite(src.Composites[i], oldToNew, finalEOF, declOffset, funcOffset)
+		if !ok {
+			return false
+		}
+		dst.Composites = append(dst.Composites, composite)
+	}
 	if hasNext && (len(src.Text) == 0 || src.Text[len(src.Text)-1] != '\n') {
 		dst.Text = append(dst.Text, '\n')
 	}
 	return true
+}
+
+func mapIndex(index unit.IndexExpr, oldToNew []int, eof int, declOffset int, funcOffset int) (unit.IndexExpr, bool) {
+	ownerIndex, ok := mapOwner(index.OwnerKind, index.OwnerIndex, declOffset, funcOffset)
+	if !ok {
+		return index, false
+	}
+	index.OwnerIndex = ownerIndex
+	index.StartTok = mapToken(oldToNew, index.StartTok, eof)
+	index.EndTok = mapToken(oldToNew, index.EndTok, eof)
+	index.BaseStart = mapToken(oldToNew, index.BaseStart, eof)
+	index.BaseEnd = mapToken(oldToNew, index.BaseEnd, eof)
+	index.OpenTok = mapToken(oldToNew, index.OpenTok, eof)
+	index.CloseTok = mapToken(oldToNew, index.CloseTok, eof)
+	index.IndexStart = mapToken(oldToNew, index.IndexStart, eof)
+	index.IndexEnd = mapToken(oldToNew, index.IndexEnd, eof)
+	return index, true
+}
+
+func mapComposite(composite unit.CompositeExpr, oldToNew []int, eof int, declOffset int, funcOffset int) (unit.CompositeExpr, bool) {
+	ownerIndex, ok := mapOwner(composite.OwnerKind, composite.OwnerIndex, declOffset, funcOffset)
+	if !ok {
+		return composite, false
+	}
+	composite.OwnerIndex = ownerIndex
+	composite.StartTok = mapToken(oldToNew, composite.StartTok, eof)
+	composite.EndTok = mapToken(oldToNew, composite.EndTok, eof)
+	composite.TypeStart = mapToken(oldToNew, composite.TypeStart, eof)
+	composite.TypeEnd = mapToken(oldToNew, composite.TypeEnd, eof)
+	composite.OpenTok = mapToken(oldToNew, composite.OpenTok, eof)
+	composite.CloseTok = mapToken(oldToNew, composite.CloseTok, eof)
+	for i := 0; i < len(composite.Elems); i++ {
+		composite.Elems[i].StartTok = mapToken(oldToNew, composite.Elems[i].StartTok, eof)
+		composite.Elems[i].EndTok = mapToken(oldToNew, composite.Elems[i].EndTok, eof)
+	}
+	return composite, true
+}
+
+func mapOwner(kind int, index int, declOffset int, funcOffset int) (int, bool) {
+	if kind == unit.OwnerDecl {
+		if index < 0 {
+			return 0, false
+		}
+		return declOffset + index, true
+	}
+	if kind == unit.OwnerFunc {
+		if index < 0 {
+			return 0, false
+		}
+		return funcOffset + index, true
+	}
+	return 0, false
 }
 
 func countLinkedTokens(programs []unit.Program) int {

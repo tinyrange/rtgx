@@ -129,6 +129,49 @@ func appMain() int { return lib.Value() }
 	}
 }
 
+func TestLinkUnitsPreservesExpressionShapes(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/pkg/lib"
+
+func appMain() int { return lib.Value(1) }
+`)},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
+
+var Values = []int{1, 2}
+
+func Value(i int) int { return Values[i] }
+`)},
+	})
+	program, ok := LinkUnits(result.Units, result.Root)
+	if !ok {
+		t.Fatal("LinkUnits failed")
+	}
+	values := findLinkedDecl(program, "Values")
+	valueFn := findLinkedFunc(program, "Value")
+	if values < 0 || valueFn < 0 {
+		t.Fatalf("linked rows missing: decls=%#v funcs=%#v", program.Decls, program.Funcs)
+	}
+	if len(program.Composites) != 1 {
+		t.Fatalf("linked composites = %#v, want 1", program.Composites)
+	}
+	if len(program.Indexes) != 1 {
+		t.Fatalf("linked indexes = %#v, want 1", program.Indexes)
+	}
+	composite := program.Composites[0]
+	if composite.OwnerKind != unit.OwnerDecl || composite.OwnerIndex != values || linkedSpanText(program, composite.TypeStart, composite.TypeEnd) != "[]int" {
+		t.Fatalf("linked composite = %#v, owner decl %d", composite, values)
+	}
+	index := program.Indexes[0]
+	if index.OwnerKind != unit.OwnerFunc || index.OwnerIndex != valueFn ||
+		linkedSpanText(program, index.BaseStart, index.BaseEnd) != "Values" ||
+		linkedSpanText(program, index.IndexStart, index.IndexEnd) != "i" {
+		t.Fatalf("linked index = %#v, owner func %d", index, valueFn)
+	}
+}
+
 func TestLinkBuildRejectsInvalidInput(t *testing.T) {
 	badBuild := build.Result{Ok: false, ErrorPackage: 7}
 	linked := LinkBuild(badBuild)
@@ -164,4 +207,37 @@ func functionName(program rtgunit.Program, fn rtgunit.Func) string {
 		return ""
 	}
 	return string(program.Text[fn.NameStart:fn.NameEnd])
+}
+
+func findLinkedDecl(program unit.Program, name string) int {
+	for i := 0; i < len(program.Decls); i++ {
+		decl := program.Decls[i]
+		if decl.NameStart >= 0 && decl.NameEnd <= len(program.Text) && string(program.Text[decl.NameStart:decl.NameEnd]) == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func findLinkedFunc(program unit.Program, name string) int {
+	for i := 0; i < len(program.Funcs); i++ {
+		fn := program.Funcs[i]
+		if fn.NameStart >= 0 && fn.NameEnd <= len(program.Text) && string(program.Text[fn.NameStart:fn.NameEnd]) == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func linkedSpanText(program unit.Program, startTok int, endTok int) string {
+	if startTok < 0 || endTok <= startTok || endTok > len(program.Tokens) {
+		return ""
+	}
+	start := program.Tokens[startTok].Start
+	last := program.Tokens[endTok-1]
+	end := last.Start + last.Size
+	if start < 0 || end < start || end > len(program.Text) {
+		return ""
+	}
+	return string(program.Text[start:end])
 }

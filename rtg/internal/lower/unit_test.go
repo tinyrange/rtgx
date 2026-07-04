@@ -148,6 +148,62 @@ func appMain() int { return first() + second() }
 	}
 }
 
+func TestEmitCheckedPackageExpressionShapes(t *testing.T) {
+	graph := loadTestGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type item struct { value int }
+
+var global = []int{1, 2, 3}
+var picked = global[1]
+
+func appMain() int {
+	var local = []item{{value: global[0]}}
+	local[0] = item{value: picked}
+	return local[0].value
+}
+`)},
+	})
+	prog := check.CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	result := EmitCheckedPackage(graph.Packages[0], prog.Packages[0])
+	if !result.Ok {
+		t.Fatalf("EmitCheckedPackage failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
+	}
+	if len(result.Program.Indexes) != 4 {
+		t.Fatalf("indexes = %#v, want 4", result.Program.Indexes)
+	}
+	if len(result.Program.Composites) != 3 {
+		t.Fatalf("composites = %#v, want 3", result.Program.Composites)
+	}
+	global := findUnitDecl(result.Program, "global")
+	picked := findUnitDecl(result.Program, "picked")
+	appMain := findUnitFunc(result.Program, "appMain")
+	if global < 0 || picked < 0 || appMain < 0 {
+		t.Fatalf("unit rows missing: decls=%#v funcs=%#v", result.Program.Decls, result.Program.Funcs)
+	}
+	assertUnitComposite(t, result.Program, unit.OwnerDecl, global, "[]int", []string{"1", "2", "3"})
+	assertUnitIndex(t, result.Program, unit.OwnerDecl, picked, "global", "1")
+	assertUnitComposite(t, result.Program, unit.OwnerFunc, appMain, "[]item", []string{"{value: global[0]}"})
+	assertUnitComposite(t, result.Program, unit.OwnerFunc, appMain, "item", []string{"value: picked"})
+	assertUnitIndex(t, result.Program, unit.OwnerFunc, appMain, "global", "0")
+	assertUnitIndex(t, result.Program, unit.OwnerFunc, appMain, "local", "0")
+
+	data, ok := unit.Marshal(result.Program)
+	if !ok {
+		t.Fatal("unit Marshal failed")
+	}
+	decoded, err := rtgunit.Unmarshal(data)
+	if err != nil {
+		t.Fatalf("host unit decode failed: %v", err)
+	}
+	if len(decoded.Indexes) != len(result.Program.Indexes) || len(decoded.Composites) != len(result.Program.Composites) {
+		t.Fatalf("decoded shapes = %d/%d, want %d/%d", len(decoded.Indexes), len(decoded.Composites), len(result.Program.Indexes), len(result.Program.Composites))
+	}
+}
+
 func TestEmitCheckedPackageRejectsInvalidCheckedMetadata(t *testing.T) {
 	graph := loadTestGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -299,4 +355,71 @@ func funcName(program unit.Program, index int) string {
 		return ""
 	}
 	return string(program.Text[fn.NameStart:fn.NameEnd])
+}
+
+func findUnitDecl(program unit.Program, name string) int {
+	for i := 0; i < len(program.Decls); i++ {
+		if declName(program, i) == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func findUnitFunc(program unit.Program, name string) int {
+	for i := 0; i < len(program.Funcs); i++ {
+		if funcName(program, i) == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func assertUnitIndex(t *testing.T, program unit.Program, ownerKind int, ownerIndex int, base string, indexText string) {
+	t.Helper()
+	for i := 0; i < len(program.Indexes); i++ {
+		index := program.Indexes[i]
+		if index.OwnerKind != ownerKind || index.OwnerIndex != ownerIndex {
+			continue
+		}
+		if unitSpanText(program, index.BaseStart, index.BaseEnd) == base && unitSpanText(program, index.IndexStart, index.IndexEnd) == indexText {
+			return
+		}
+	}
+	t.Fatalf("index owner=%d/%d %s[%s] not found in %#v", ownerKind, ownerIndex, base, indexText, program.Indexes)
+}
+
+func assertUnitComposite(t *testing.T, program unit.Program, ownerKind int, ownerIndex int, typ string, elems []string) {
+	t.Helper()
+	for i := 0; i < len(program.Composites); i++ {
+		composite := program.Composites[i]
+		if composite.OwnerKind != ownerKind || composite.OwnerIndex != ownerIndex {
+			continue
+		}
+		if unitSpanText(program, composite.TypeStart, composite.TypeEnd) == typ {
+			if len(composite.Elems) != len(elems) {
+				t.Fatalf("composite %s elems = %#v, want %v", typ, composite.Elems, elems)
+			}
+			for j := 0; j < len(elems); j++ {
+				if got := unitSpanText(program, composite.Elems[j].StartTok, composite.Elems[j].EndTok); got != elems[j] {
+					t.Fatalf("composite %s elem %d = %q, want %q", typ, j, got, elems[j])
+				}
+			}
+			return
+		}
+	}
+	t.Fatalf("composite owner=%d/%d %s not found in %#v", ownerKind, ownerIndex, typ, program.Composites)
+}
+
+func unitSpanText(program unit.Program, startTok int, endTok int) string {
+	if startTok < 0 || endTok <= startTok || endTok > len(program.Tokens) {
+		return ""
+	}
+	start := program.Tokens[startTok].Start
+	last := program.Tokens[endTok-1]
+	end := last.Start + last.Size
+	if start < 0 || end < start || end > len(program.Text) {
+		return ""
+	}
+	return string(program.Text[start:end])
 }

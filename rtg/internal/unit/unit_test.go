@@ -87,6 +87,44 @@ func TestMarshalRoundTripInternalDecoder(t *testing.T) {
 	}
 }
 
+func TestMarshalRoundTripExpressionShapes(t *testing.T) {
+	program := declProgram()
+	program.Indexes = []IndexExpr{{
+		OwnerKind:  OwnerFunc,
+		OwnerIndex: 0,
+		StartTok:   13,
+		EndTok:     14,
+		BaseStart:  13,
+		BaseEnd:    14,
+		OpenTok:    13,
+		CloseTok:   13,
+		IndexStart: 13,
+		IndexEnd:   14,
+	}}
+	program.Composites = []CompositeExpr{{
+		OwnerKind:  OwnerDecl,
+		OwnerIndex: 0,
+		StartTok:   5,
+		EndTok:     6,
+		TypeStart:  5,
+		TypeEnd:    6,
+		OpenTok:    5,
+		CloseTok:   5,
+		Elems:      []ExprSpan{{StartTok: 5, EndTok: 6}},
+	}}
+	data, ok := Marshal(program)
+	if !ok {
+		t.Fatal("Marshal failed")
+	}
+	decoded, ok := Unmarshal(data)
+	if !ok {
+		t.Fatal("Unmarshal failed")
+	}
+	if !equalPrograms(decoded, program) {
+		t.Fatalf("decoded program = %#v, want %#v", decoded, program)
+	}
+}
+
 func TestUnmarshalDecodesHostUnitEncoder(t *testing.T) {
 	program := declProgram()
 	hostProgram := rtgunit.Program{
@@ -274,7 +312,8 @@ func equalPrograms(left Program, right Program) bool {
 	if left.Package != right.Package || !bytes.Equal(left.Text, right.Text) {
 		return false
 	}
-	if len(left.Tokens) != len(right.Tokens) || len(left.Decls) != len(right.Decls) || len(left.Funcs) != len(right.Funcs) {
+	if len(left.Tokens) != len(right.Tokens) || len(left.Decls) != len(right.Decls) || len(left.Funcs) != len(right.Funcs) ||
+		len(left.Indexes) != len(right.Indexes) || len(left.Composites) != len(right.Composites) {
 		return false
 	}
 	for i := 0; i < len(left.Tokens); i++ {
@@ -290,6 +329,29 @@ func equalPrograms(left Program, right Program) bool {
 	for i := 0; i < len(left.Funcs); i++ {
 		if left.Funcs[i] != right.Funcs[i] {
 			return false
+		}
+	}
+	for i := 0; i < len(left.Indexes); i++ {
+		if left.Indexes[i] != right.Indexes[i] {
+			return false
+		}
+	}
+	for i := 0; i < len(left.Composites); i++ {
+		if left.Composites[i].OwnerKind != right.Composites[i].OwnerKind ||
+			left.Composites[i].OwnerIndex != right.Composites[i].OwnerIndex ||
+			left.Composites[i].StartTok != right.Composites[i].StartTok ||
+			left.Composites[i].EndTok != right.Composites[i].EndTok ||
+			left.Composites[i].TypeStart != right.Composites[i].TypeStart ||
+			left.Composites[i].TypeEnd != right.Composites[i].TypeEnd ||
+			left.Composites[i].OpenTok != right.Composites[i].OpenTok ||
+			left.Composites[i].CloseTok != right.Composites[i].CloseTok ||
+			len(left.Composites[i].Elems) != len(right.Composites[i].Elems) {
+			return false
+		}
+		for j := 0; j < len(left.Composites[i].Elems); j++ {
+			if left.Composites[i].Elems[j] != right.Composites[i].Elems[j] {
+				return false
+			}
 		}
 	}
 	return true
