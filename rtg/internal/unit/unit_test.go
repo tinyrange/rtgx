@@ -72,6 +72,87 @@ func TestMarshalDecodesWithHostUnitDecoder(t *testing.T) {
 	}
 }
 
+func TestMarshalRoundTripInternalDecoder(t *testing.T) {
+	program := declProgram()
+	data, ok := Marshal(program)
+	if !ok {
+		t.Fatal("Marshal failed")
+	}
+	decoded, ok := Unmarshal(data)
+	if !ok {
+		t.Fatal("Unmarshal failed")
+	}
+	if !equalPrograms(decoded, program) {
+		t.Fatalf("decoded program = %#v, want %#v", decoded, program)
+	}
+}
+
+func TestUnmarshalDecodesHostUnitEncoder(t *testing.T) {
+	program := declProgram()
+	hostProgram := rtgunit.Program{
+		Package: program.Package,
+		Text:    program.Text,
+		Tokens:  hostTokenBytes(program),
+		Decls: []rtgunit.Decl{{
+			Kind:      program.Decls[0].Kind,
+			NameStart: program.Decls[0].NameStart,
+			NameEnd:   program.Decls[0].NameEnd,
+			StartTok:  program.Decls[0].StartTok,
+			EndTok:    program.Decls[0].EndTok,
+		}},
+		Funcs: []rtgunit.Func{{
+			NameStart:     program.Funcs[0].NameStart,
+			NameEnd:       program.Funcs[0].NameEnd,
+			StartTok:      program.Funcs[0].StartTok,
+			NameTok:       program.Funcs[0].NameTok,
+			ReceiverStart: program.Funcs[0].ReceiverStart,
+			ReceiverEnd:   program.Funcs[0].ReceiverEnd,
+			BodyStart:     program.Funcs[0].BodyStart,
+			BodyEnd:       program.Funcs[0].BodyEnd,
+			EndTok:        program.Funcs[0].EndTok,
+		}},
+	}
+	hostData, err := rtgunit.Marshal(hostProgram)
+	if err != nil {
+		t.Fatalf("host Marshal failed: %v", err)
+	}
+	decoded, ok := Unmarshal(hostData)
+	if !ok {
+		t.Fatal("Unmarshal host data failed")
+	}
+	if !equalPrograms(decoded, program) {
+		t.Fatalf("decoded host program = %#v, want %#v", decoded, program)
+	}
+}
+
+func TestUnmarshalRejectsMalformedUnit(t *testing.T) {
+	if _, ok := Unmarshal(nil); ok {
+		t.Fatal("empty input was accepted")
+	}
+	data, ok := Marshal(helloProgram())
+	if !ok {
+		t.Fatal("Marshal failed")
+	}
+	bad := copyBytes(data)
+	bad[0] = 'X'
+	if _, ok := Unmarshal(bad); ok {
+		t.Fatal("bad magic was accepted")
+	}
+	bad = copyBytes(data)
+	bad[4] = byte(Version + 1)
+	if _, ok := Unmarshal(bad); ok {
+		t.Fatal("bad version was accepted")
+	}
+	if _, ok := Unmarshal(data[:len(data)-1]); ok {
+		t.Fatal("truncated root was accepted")
+	}
+	bad = copyBytes(data)
+	bad[14] = 99
+	if _, ok := Unmarshal(bad); ok {
+		t.Fatal("unknown child tag was accepted")
+	}
+}
+
 func TestMarshalRejectsInvalidProgram(t *testing.T) {
 	if _, ok := Marshal(Program{}); ok {
 		t.Fatal("empty program was accepted")
@@ -186,5 +267,36 @@ func hostTokenBytes(program Program) []byte {
 		rec[7] = byte(tok.Line >> 8)
 		out = append(out, rec[:]...)
 	}
+	return out
+}
+
+func equalPrograms(left Program, right Program) bool {
+	if left.Package != right.Package || !bytes.Equal(left.Text, right.Text) {
+		return false
+	}
+	if len(left.Tokens) != len(right.Tokens) || len(left.Decls) != len(right.Decls) || len(left.Funcs) != len(right.Funcs) {
+		return false
+	}
+	for i := 0; i < len(left.Tokens); i++ {
+		if left.Tokens[i] != right.Tokens[i] {
+			return false
+		}
+	}
+	for i := 0; i < len(left.Decls); i++ {
+		if left.Decls[i] != right.Decls[i] {
+			return false
+		}
+	}
+	for i := 0; i < len(left.Funcs); i++ {
+		if left.Funcs[i] != right.Funcs[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func copyBytes(data []byte) []byte {
+	out := make([]byte, len(data))
+	copy(out, data)
 	return out
 }
