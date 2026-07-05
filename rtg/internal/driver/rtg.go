@@ -2,7 +2,7 @@
 
 package driver
 
-import rtgx "j5.nz/rtg"
+import "j5.nz/rtg/rtg/internal/backendbridge"
 
 const rtgGetdents64LinuxAmd64 = 217
 
@@ -40,7 +40,7 @@ func RunRTGCommand(args []string, env []string) int {
 		output = rtg_runtime_ArenaPersistString(output)
 		rtg_runtime_ArenaReset(mark)
 	}
-	if !rtgx.RtgCompileUnitToOutputStrip(unit, target, output, strip) {
+	if !backendbridge.CompileUnitToOutputStripEnv(unit, target, output, strip, env) {
 		print("rtg: backend compilation failed\n")
 		return 1
 	}

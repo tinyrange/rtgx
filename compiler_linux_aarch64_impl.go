@@ -89,9 +89,6 @@ func rtgTryCompileScalarProgramAarch64(p *rtgProgram, meta *rtgMeta) rtgCompileR
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 		i := g.funcQueue[queueIndex]
 		if !rtgEmitScalarFunction(&g, i) {
-			rtgPrintErr("rtg: aarch64 failed in function ")
-			write(2, meta.prog.src[meta.funcs[i].nameStart:meta.funcs[i].nameEnd], -1)
-			rtgPrintErr("\n")
 			var result rtgCompileResult
 			return result
 		}

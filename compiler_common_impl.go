@@ -259,38 +259,34 @@ func rtgAsmEmit32(a *rtgAsm, v int) {
 }
 
 func rtgFixedByteScratch(capacity int) []byte {
-	var out []byte
 	if rtgCompilerFixedTarget != 0 {
-		out = make([]byte, 0, capacity)
+		return make([]byte, 0, capacity)
 	}
+	var out []byte
 	return out
 }
 
 func rtgFixedIntScratch(capacity int) []int {
-	var out []int
 	if rtgCompilerFixedTarget != 0 {
 		if capacity <= 4 {
-			out = make([]int, 0, 4)
-			return out
+			capacity = 4
+		} else if capacity <= 8 {
+			capacity = 8
 		}
-		if capacity <= 8 {
-			out = make([]int, 0, 8)
-			return out
-		}
-		out = make([]int, 0, capacity)
+		return make([]int, 0, capacity)
 	}
+	var out []int
 	return out
 }
 
 func rtgFixedCompositeFieldScratch(capacity int) []rtgCompositeField {
-	var out []rtgCompositeField
 	if rtgCompilerFixedTarget != 0 {
 		if capacity <= 8 {
-			out = make([]rtgCompositeField, 0, 8)
-			return out
+			capacity = 8
 		}
-		out = make([]rtgCompositeField, 0, capacity)
+		return make([]rtgCompositeField, 0, capacity)
 	}
+	var out []rtgCompositeField
 	return out
 }
 
@@ -421,14 +417,8 @@ func rtgAppend32(out []byte, v int) []byte {
 }
 
 func rtgAppend64(out []byte, v int) []byte {
-	out = append(out, byte(v))
-	out = append(out, byte(v>>8))
-	out = append(out, byte(v>>16))
-	out = append(out, byte(v>>24))
-	out = append(out, byte(v>>32))
-	out = append(out, byte(v>>40))
-	out = append(out, byte(v>>48))
-	out = append(out, byte(v>>56))
+	out = rtgAppend32(out, v)
+	out = rtgAppend32(out, v>>32)
 	return out
 }
 
@@ -470,9 +460,8 @@ func rtgAppendUntil(out []byte, size int) []byte {
 }
 
 func rtgAppendStringZ(out []byte, s string) []byte {
-	text := s
-	for i := 0; i < len(text); i++ {
-		out = append(out, text[i])
+	for i := 0; i < len(s); i++ {
+		out = append(out, s[i])
 	}
 	out = append(out, 0)
 	return out
@@ -789,15 +778,6 @@ type rtgWinImportLayout struct {
 	iatRVAs      []int
 }
 
-type rtgWinImportBuildEntry struct {
-	id     int
-	dll    string
-	name   string
-	group  int
-	slot   int
-	nameAt int
-}
-
 func rtgWinImportName(id int) string {
 	if id == rtgWinImportCreateFileA {
 		return "CreateFileA"
@@ -885,28 +865,23 @@ func rtgAppendWinImports(a *rtgAsm, is64 bool) rtgWinImportLayout {
 	}
 	totalCount := rtgWinImportFixedCount + len(a.winImports)
 	layout.iatRVAs = make([]int, totalCount+1)
-	var entries []rtgWinImportBuildEntry
-	for id := 1; id <= rtgWinImportFixedCount; id++ {
-		entries = append(entries, rtgWinImportBuildEntry{id: id, dll: "kernel32.dll", name: rtgWinImportName(id)})
-	}
+	var dlls []string
+	dlls = append(dlls, "kernel32.dll")
+	var groupSlots []int
+	groupSlots = append(groupSlots, rtgWinImportFixedCount)
+	var staticGroups []int
 	for i := 0; i < len(a.winImports); i++ {
 		imp := a.winImports[i]
-		entries = append(entries, rtgWinImportBuildEntry{id: rtgWinImportFixedCount + 1 + i, dll: imp.dll, name: imp.name})
-	}
-	var dlls []string
-	for i := 0; i < len(entries); i++ {
-		group := rtgWinImportGroupIndex(dlls, entries[i].dll)
+		group := rtgWinImportGroupIndex(dlls, imp.dll)
 		if group < 0 {
-			dlls = append(dlls, entries[i].dll)
+			dlls = append(dlls, imp.dll)
+			groupSlots = append(groupSlots, 0)
 			group = len(dlls) - 1
 		}
-		entries[i].group = group
+		groupSlots[group]++
+		staticGroups = append(staticGroups, group)
 	}
 	groupCount := len(dlls)
-	groupSlots := make([]int, groupCount)
-	for i := 0; i < len(entries); i++ {
-		groupSlots[entries[i].group]++
-	}
 	importOff := rtgAlignValue(len(a.data), thunkSize)
 	a.data = rtgAppendUntil(a.data, importOff)
 	descOff := importOff
@@ -922,35 +897,18 @@ func rtgAppendWinImports(a *rtgAsm, is64 bool) rtgWinImportLayout {
 	nameOff := tableOff
 	a.data = rtgAppendUntil(a.data, nameOff)
 
-	for i := 0; i < len(entries); i++ {
-		entries[i].nameAt = len(a.data)
-		a.data = rtgAppend16(a.data, 0)
-		a.data = rtgAppendStringZ(a.data, entries[i].name)
-		if len(a.data)%2 != 0 {
-			a.data = append(a.data, 0)
-		}
+	groupUsed := make([]int, groupCount)
+	for id := 1; id <= rtgWinImportFixedCount; id++ {
+		rtgAppendWinImportEntry(a, &layout, groupUsed, groupILTOffs, groupIATOffs, dataRVA, 0, id, thunkSize, is64, rtgWinImportName(id))
+	}
+	for i := 0; i < len(a.winImports); i++ {
+		imp := a.winImports[i]
+		rtgAppendWinImportEntry(a, &layout, groupUsed, groupILTOffs, groupIATOffs, dataRVA, staticGroups[i], rtgWinImportFixedCount+1+i, thunkSize, is64, imp.name)
 	}
 	dllNameOffs := make([]int, groupCount)
 	for i := 0; i < groupCount; i++ {
 		dllNameOffs[i] = len(a.data)
 		a.data = rtgAppendStringZ(a.data, dlls[i])
-	}
-	groupUsed := make([]int, groupCount)
-	for i := 0; i < len(entries); i++ {
-		entry := entries[i]
-		slot := groupUsed[entry.group]
-		groupUsed[entry.group] = slot + 1
-		nameRVA := dataRVA + entry.nameAt
-		iltAt := groupILTOffs[entry.group] + slot*thunkSize
-		iatAt := groupIATOffs[entry.group] + slot*thunkSize
-		if is64 {
-			rtgPut64U32At(a.data, iltAt, nameRVA)
-			rtgPut64U32At(a.data, iatAt, nameRVA)
-		} else {
-			rtgPut32At(a.data, iltAt, nameRVA)
-			rtgPut32At(a.data, iatAt, nameRVA)
-		}
-		layout.iatRVAs[entry.id] = dataRVA + iatAt
 	}
 	for i := 0; i < groupCount; i++ {
 		at := descOff + i*20
@@ -961,11 +919,31 @@ func rtgAppendWinImports(a *rtgAsm, is64 bool) rtgWinImportLayout {
 
 	layout.importRVA = dataRVA + importOff
 	layout.importSize = len(a.data) - importOff
-	if rtgWinImportGetStdHandle < len(layout.iatRVAs) {
-		layout.kernelIATRVA = layout.iatRVAs[rtgWinImportGetStdHandle]
-	}
+	layout.kernelIATRVA = layout.iatRVAs[rtgWinImportGetStdHandle]
 	layout.thunkSize = thunkSize
 	return layout
+}
+
+func rtgAppendWinImportEntry(a *rtgAsm, layout *rtgWinImportLayout, groupUsed []int, groupILTOffs []int, groupIATOffs []int, dataRVA int, group int, id int, thunkSize int, is64 bool, name string) {
+	nameAt := len(a.data)
+	a.data = rtgAppend16(a.data, 0)
+	a.data = rtgAppendStringZ(a.data, name)
+	if len(a.data)%2 != 0 {
+		a.data = append(a.data, 0)
+	}
+	nameRVA := dataRVA + nameAt
+	slot := groupUsed[group]
+	groupUsed[group] = slot + 1
+	iltAt := groupILTOffs[group] + slot*thunkSize
+	iatAt := groupIATOffs[group] + slot*thunkSize
+	if is64 {
+		rtgPut64U32At(a.data, iltAt, nameRVA)
+		rtgPut64U32At(a.data, iatAt, nameRVA)
+	} else {
+		rtgPut32At(a.data, iltAt, nameRVA)
+		rtgPut32At(a.data, iatAt, nameRVA)
+	}
+	layout.iatRVAs[id] = dataRVA + iatAt
 }
 
 func rtgWinImportGroupIndex(groups []string, dll string) int {
@@ -1030,20 +1008,11 @@ func rtgAsmPatchWindows(a *rtgAsm, layout rtgWinImportLayout, imageBase int, is6
 func rtgAppendPEHeader64(out []byte, entryRVA int, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
 	sizeOfImage := rtgAlignValue(dataRVA+dataVirtualSize, rtgWinSectionAlign)
 	out = rtgAppendDOSStub(out)
-	out = append(out, 'P')
-	out = append(out, 'E')
-	out = append(out, 0)
-	out = append(out, 0)
-	out = rtgAppend16(out, 0x8664)
-	out = rtgAppend16(out, 2)
-	out = rtgAppend32(out, 0)
-	out = rtgAppend32(out, 0)
-	out = rtgAppend32(out, 0)
-	out = rtgAppend16(out, 240)
-	out = rtgAppend16(out, 0x22)
-	out = rtgAppend16(out, 0x20b)
-	out = append(out, 1)
-	out = append(out, 0)
+	out = rtgAppend32(out, 0x4550)
+	out = rtgAppend32(out, 0x00028664)
+	out = rtgAppendUntil(out, len(out)+12)
+	out = rtgAppend32(out, 0x002200f0)
+	out = rtgAppend32(out, 0x0001020b)
 	out = rtgAppend32(out, textRawSize)
 	out = rtgAppend32(out, dataRawSize)
 	out = rtgAppend32(out, 0)
@@ -1052,26 +1021,19 @@ func rtgAppendPEHeader64(out []byte, entryRVA int, textRawSize int, textVirtualS
 	out = rtgAppend64U32(out, rtgWinImageBase)
 	out = rtgAppend32(out, rtgWinSectionAlign)
 	out = rtgAppend32(out, rtgWinFileAlign)
-	out = rtgAppend16(out, 4)
-	out = rtgAppend16(out, 0)
-	out = rtgAppend16(out, 0)
-	out = rtgAppend16(out, 0)
-	out = rtgAppend16(out, 4)
-	out = rtgAppend16(out, 0)
-	out = rtgAppend32(out, 0)
+	out = rtgAppend64U32(out, 4)
+	out = rtgAppend64U32(out, 4)
 	out = rtgAppend32(out, sizeOfImage)
 	out = rtgAppend32(out, rtgWinHeadersSize)
 	out = rtgAppend32(out, 0)
-	out = rtgAppend16(out, 3)
-	out = rtgAppend16(out, 0)
-	out = rtgAppend64U32(out, 0x100000)
-	out = rtgAppend64U32(out, 0x100000)
-	out = rtgAppend64U32(out, 0x100000)
+	out = rtgAppend32(out, 3)
+	for i := 0; i < 3; i++ {
+		out = rtgAppend64U32(out, 0x100000)
+	}
 	out = rtgAppend64U32(out, 0x1000)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 16)
-	out = rtgAppend32(out, 0)
-	out = rtgAppend32(out, 0)
+	out = rtgAppendUntil(out, len(out)+8)
 	out = rtgAppend32(out, importRVA)
 	out = rtgAppend32(out, importSize)
 	for i := 2; i < 12; i++ {
@@ -1093,20 +1055,13 @@ func rtgAppendPEHeader64(out []byte, entryRVA int, textRawSize int, textVirtualS
 func rtgAppendPEHeader32(out []byte, entryRVA int, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
 	sizeOfImage := rtgAlignValue(dataRVA+dataVirtualSize, rtgWinSectionAlign)
 	out = rtgAppendDOSStub(out)
-	out = append(out, 'P')
-	out = append(out, 'E')
-	out = append(out, 0)
-	out = append(out, 0)
-	out = rtgAppend16(out, 0x14c)
-	out = rtgAppend16(out, 2)
+	out = rtgAppend32(out, 0x4550)
+	out = rtgAppend32(out, 0x0002014c)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 0)
-	out = rtgAppend16(out, 224)
-	out = rtgAppend16(out, 0x102)
-	out = rtgAppend16(out, 0x10b)
-	out = append(out, 1)
-	out = append(out, 0)
+	out = rtgAppend32(out, 0x010200e0)
+	out = rtgAppend32(out, 0x0001010b)
 	out = rtgAppend32(out, textRawSize)
 	out = rtgAppend32(out, dataRawSize)
 	out = rtgAppend32(out, 0)
@@ -1116,18 +1071,12 @@ func rtgAppendPEHeader32(out []byte, entryRVA int, textRawSize int, textVirtualS
 	out = rtgAppend32(out, rtgWinImageBase)
 	out = rtgAppend32(out, rtgWinSectionAlign)
 	out = rtgAppend32(out, rtgWinFileAlign)
-	out = rtgAppend16(out, 4)
-	out = rtgAppend16(out, 0)
-	out = rtgAppend16(out, 0)
-	out = rtgAppend16(out, 0)
-	out = rtgAppend16(out, 4)
-	out = rtgAppend16(out, 0)
-	out = rtgAppend32(out, 0)
+	out = rtgAppend64U32(out, 4)
+	out = rtgAppend64U32(out, 4)
 	out = rtgAppend32(out, sizeOfImage)
 	out = rtgAppend32(out, rtgWinHeadersSize)
 	out = rtgAppend32(out, 0)
-	out = rtgAppend16(out, 3)
-	out = rtgAppend16(out, 0)
+	out = rtgAppend32(out, 3)
 	out = rtgAppend32(out, 0x100000)
 	out = rtgAppend32(out, 0x100000)
 	out = rtgAppend32(out, 0x100000)
@@ -1155,8 +1104,7 @@ func rtgAppendPEHeader32(out []byte, entryRVA int, textRawSize int, textVirtualS
 }
 
 func rtgAppendDOSStub(out []byte) []byte {
-	out = append(out, 'M')
-	out = append(out, 'Z')
+	out = rtgAppend32(out, 0x5a4d)
 	out = rtgAppendUntil(out, 0x3c)
 	out = rtgAppend32(out, 0x80)
 	out = rtgAppendUntil(out, 0x80)
@@ -1841,18 +1789,7 @@ func rtgScan(src []byte) rtgTokens {
 			if i < srcLen {
 				i++
 			}
-			base := len(toks.data)
-			toks.data = toks.data[:base+rtgTokenStride]
-			size := i - start
-			data := toks.data
-			data[base] = byte(rtgTokString)
-			data[base+1] = byte(start)
-			data[base+2] = byte(start >> 8)
-			data[base+3] = byte(start >> 16)
-			data[base+4] = byte(size)
-			data[base+5] = byte(size >> 8)
-			data[base+6] = byte(line)
-			data[base+7] = byte(line >> 8)
+			rtgScanAppendToken(&toks, rtgTokString, start, i-start, line)
 			continue
 		}
 		if c == '\'' {
@@ -1868,18 +1805,7 @@ func rtgScan(src []byte) rtgTokens {
 			if i < srcLen {
 				i++
 			}
-			base := len(toks.data)
-			toks.data = toks.data[:base+rtgTokenStride]
-			size := i - start
-			data := toks.data
-			data[base] = byte(rtgTokChar)
-			data[base+1] = byte(start)
-			data[base+2] = byte(start >> 8)
-			data[base+3] = byte(start >> 16)
-			data[base+4] = byte(size)
-			data[base+5] = byte(size >> 8)
-			data[base+6] = byte(line)
-			data[base+7] = byte(line >> 8)
+			rtgScanAppendToken(&toks, rtgTokChar, start, i-start, line)
 			continue
 		}
 		start := i
@@ -1921,19 +1847,22 @@ func rtgScan(src []byte) rtgTokens {
 		data[base+6] = byte(line)
 		data[base+7] = byte(line >> 8)
 	}
+	rtgScanAppendToken(&toks, rtgTokEOF, srcLen, 0, line)
+	return toks
+}
+
+func rtgScanAppendToken(toks *rtgTokens, kind int, start int, size int, line int) {
 	base := len(toks.data)
 	toks.data = toks.data[:base+rtgTokenStride]
-	start := srcLen
 	data := toks.data
-	data[base] = byte(rtgTokEOF)
+	data[base] = byte(kind)
 	data[base+1] = byte(start)
 	data[base+2] = byte(start >> 8)
 	data[base+3] = byte(start >> 16)
-	data[base+4] = 0
-	data[base+5] = 0
+	data[base+4] = byte(size)
+	data[base+5] = byte(size >> 8)
 	data[base+6] = byte(line)
 	data[base+7] = byte(line >> 8)
-	return toks
 }
 
 func rtgKeywordKind(src []byte, start int, end int) int {
@@ -7677,66 +7606,37 @@ func rtgLocalNameWrittenAfter(g *rtgLinearGen, nameStart int, nameEnd int, after
 }
 
 func rtgSplitTopLevelComma(p *rtgProgram, start int, end int) ([]int, bool) {
-	ranges := make([]int, 1024)
+	var ranges []int
+	if rtgCompilerFixedTarget != 0 {
+		ranges = make([]int, 0, 16)
+	}
 	partStart := start
-	count := 0
-	paren := 0
-	brack := 0
-	brace := 0
+	depth := 0
 	i := start
+	data := p.toks.data
 	for i < end {
-		if rtgTokCharIs(p, i, '(') {
-			paren++
-		} else if rtgTokCharIs(p, i, ')') {
-			if paren > 0 {
-				paren--
+		base := i << 3
+		if base+5 < len(data) && int(data[base]) == rtgTokOp && data[base+4] == 1 {
+			c := data[base+5]
+			if c == '(' || c == '[' || c == '{' {
+				depth++
+			} else if c == ')' || c == ']' || c == '}' {
+				if depth > 0 {
+					depth--
+				}
+			} else if depth == 0 && c == ',' {
+				ranges = append(ranges, partStart)
+				ranges = append(ranges, i)
+				partStart = i + 1
 			}
-		} else if rtgTokCharIs(p, i, '[') {
-			brack++
-		} else if rtgTokCharIs(p, i, ']') {
-			if brack > 0 {
-				brack--
-			}
-		} else if rtgTokCharIs(p, i, '{') {
-			brace++
-		} else if rtgTokCharIs(p, i, '}') {
-			if brace > 0 {
-				brace--
-			}
-		} else if paren == 0 && brack == 0 && brace == 0 && rtgTokCharIs(p, i, ',') {
-			if count+1 >= len(ranges) {
-				return nil, false
-			}
-			ranges[count] = partStart
-			ranges[count+1] = i
-			count += 2
-			partStart = i + 1
 		}
 		i++
 	}
 	if partStart < end {
-		if count+1 >= len(ranges) {
-			return nil, false
-		}
-		ranges[count] = partStart
-		ranges[count+1] = end
-		count += 2
+		ranges = append(ranges, partStart)
+		ranges = append(ranges, end)
 	}
-	return rtgIntSlicePrefix(ranges, count), true
-}
-
-func rtgIntSlicePrefix(src []int, count int) []int {
-	if count < 0 {
-		count = 0
-	}
-	if count > len(src) {
-		count = len(src)
-	}
-	out := make([]int, count)
-	for i := 0; i < count; i++ {
-		out[i] = src[i]
-	}
-	return out
+	return ranges, true
 }
 
 func rtgEmitTupleReturn(g *rtgLinearGen, start int, end int) bool {

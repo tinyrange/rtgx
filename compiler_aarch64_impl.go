@@ -576,6 +576,23 @@ func rtgAarch64AsmAddr(a *rtgAsm, base int, disp int) int {
 }
 
 func rtgAarch64AsmLoadRegMem(a *rtgAsm, dst int, base int, disp int, size int) {
+	if disp != 0 && disp >= -256 && disp <= 255 {
+		imm := (disp & 511) << 12
+		if size == 1 {
+			rtgAarch64AsmEmit(a, 0x38400000|imm|(base<<5)|dst)
+			return
+		}
+		if size == 2 {
+			rtgAarch64AsmEmit(a, 0x78400000|imm|(base<<5)|dst)
+			return
+		}
+		if size == 4 {
+			rtgAarch64AsmEmit(a, 0xb8400000|imm|(base<<5)|dst)
+			return
+		}
+		rtgAarch64AsmEmit(a, 0xf8400000|imm|(base<<5)|dst)
+		return
+	}
 	addr := rtgAarch64AsmAddr(a, base, disp)
 	if size == 1 {
 		rtgAarch64AsmEmit(a, 0x39400000|(addr<<5)|dst)
@@ -593,6 +610,23 @@ func rtgAarch64AsmLoadRegMem(a *rtgAsm, dst int, base int, disp int, size int) {
 }
 
 func rtgAarch64AsmStoreRegMem(a *rtgAsm, src int, base int, disp int, size int) {
+	if disp != 0 && disp >= -256 && disp <= 255 {
+		imm := (disp & 511) << 12
+		if size == 1 {
+			rtgAarch64AsmEmit(a, 0x38000000|imm|(base<<5)|src)
+			return
+		}
+		if size == 2 {
+			rtgAarch64AsmEmit(a, 0x78000000|imm|(base<<5)|src)
+			return
+		}
+		if size == 4 {
+			rtgAarch64AsmEmit(a, 0xb8000000|imm|(base<<5)|src)
+			return
+		}
+		rtgAarch64AsmEmit(a, 0xf8000000|imm|(base<<5)|src)
+		return
+	}
 	addr := rtgAarch64AsmAddr(a, base, disp)
 	if size == 1 {
 		rtgAarch64AsmEmit(a, 0x39000000|(addr<<5)|src)
