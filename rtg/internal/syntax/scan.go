@@ -6,7 +6,7 @@ type Scanner struct {
 }
 
 func Scan(src []byte) []Token {
-	var tokens []Token
+	tokens := make([]Token, 0, scanTokenCapacity(src))
 	i := 0
 	line := 1
 	for i < len(src) {
@@ -135,7 +135,7 @@ func Scan(src []byte) []Token {
 }
 
 func (s *Scanner) Scan(src []byte) {
-	s.Tokens = nil
+	s.Tokens = make([]Token, 0, scanTokenCapacity(src))
 	s.Ok = true
 	i := 0
 	line := 1
@@ -317,6 +317,14 @@ func appendScanToken(tokens []Token, kind int, start int, end int, line int) []T
 	tok.End = end
 	tok.Line = line
 	return append(tokens, tok)
+}
+
+func scanTokenCapacity(src []byte) int {
+	capacity := len(src) / 4
+	if capacity < 16 {
+		return 16
+	}
+	return capacity + 16
 }
 
 func (s *Scanner) add(kind int, start int, end int, line int) {
