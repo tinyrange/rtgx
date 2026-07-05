@@ -2,10 +2,7 @@
 
 package unit
 
-const (
-	Magic   = "RTGU"
-	Version = 1
-)
+const Version = 1
 
 const (
 	TagUnit       = 1
@@ -15,27 +12,6 @@ const (
 	TagTokens     = 8
 	TagDecls      = 9
 	TagFuncs      = 10
-	TagIndexes    = 11
-	TagComps      = 12
-	TagAssigns    = 13
-	TagReturns    = 14
-	TagCalls      = 15
-	TagRefs       = 16
-	TagSels       = 17
-	TagTypes      = 18
-	TagTypeRefs   = 19
-	TagLocals     = 20
-	TagSigs       = 21
-	TagDeclMeta   = 22
-	TagImports    = 23
-	TagSymbols    = 24
-	TagInitOrder  = 25
-	TagConsts     = 26
-	TagTypeFields = 27
-	TagTypeIfaces = 28
-	TagMethods    = 29
-	TagTypeFuncs  = 30
-	TagStmts      = 31
 )
 
 const (
@@ -80,56 +56,14 @@ type Decl struct {
 }
 
 type Import struct {
-	Name       string
-	ImportPath string
-	Package    int
-	NameTok    int
-	PathTok    int
-	Dot        bool
-	Blank      bool
+	NameTok int
+	PathTok int
 }
-
-const (
-	SymbolConst = iota + 1
-	SymbolVar
-	SymbolType
-	SymbolFunc
-	SymbolMethod
-)
 
 type Symbol struct {
-	Name       string
-	Kind       int
-	Package    int
-	Token      int
-	OwnerKind  int
-	OwnerIndex int
-}
-
-type DeclMeta struct {
-	DeclIndex  int
-	Symbol     int
-	ValueIndex int
-	TypeStart  int
-	TypeEnd    int
-	ValueStart int
-	ValueEnd   int
-	Values     []ExprSpan
-	Alias      bool
-}
-
-const (
-	ConstInt = iota + 1
-	ConstString
-	ConstBool
-)
-
-type ConstValue struct {
-	DeclIndex int
-	Kind      int
-	Int       int
-	String    string
-	Bool      bool
+	Name    string
+	Package int
+	Token   int
 }
 
 type Func struct {
@@ -144,189 +78,6 @@ type Func struct {
 	EndTok        int
 }
 
-type Field struct {
-	NameTok   int
-	TypeStart int
-	TypeEnd   int
-	Variadic  bool
-}
-
-type FuncSignature struct {
-	FuncIndex int
-	Receiver  []Field
-	Params    []Field
-	Results   []Field
-}
-
-const (
-	TypeOther = iota
-	TypeNamed
-	TypeStruct
-	TypeInterface
-	TypeMap
-	TypeSlice
-	TypeArray
-	TypePointer
-	TypeFunc
-)
-
-type TypeInfo struct {
-	NameStart int
-	NameEnd   int
-	Kind      int
-	Decl      int
-	Symbol    int
-	Alias     bool
-	TypeStart int
-	TypeEnd   int
-	LenStart  int
-	LenEnd    int
-	KeyStart  int
-	KeyEnd    int
-	ElemStart int
-	ElemEnd   int
-}
-
-type TypeFields struct {
-	TypeIndex int
-	Fields    []Field
-}
-
-type InterfaceMethod struct {
-	NameTok int
-	Params  []Field
-	Results []Field
-}
-
-type InterfaceEmbed struct {
-	TypeStart int
-	TypeEnd   int
-}
-
-type TypeIface struct {
-	TypeIndex int
-	Methods   []InterfaceMethod
-	Embeds    []InterfaceEmbed
-}
-
-type TypeFuncSig struct {
-	TypeIndex int
-	Params    []Field
-	Results   []Field
-}
-
-type MethodInfo struct {
-	NameTok   int
-	TypeIndex int
-	Symbol    int
-	FuncIndex int
-	Pointer   bool
-}
-
-const (
-	OwnerDecl = iota + 1
-	OwnerFunc
-)
-
-type ExprSpan struct {
-	StartTok int
-	EndTok   int
-}
-
-const (
-	StmtOther = iota
-	StmtReturn
-	StmtIf
-	StmtFor
-	StmtSwitch
-	StmtCase
-	StmtDefault
-	StmtDecl
-	StmtAssign
-	StmtExpr
-	StmtBlock
-	StmtBreak
-	StmtContinue
-	StmtGoto
-	StmtDefer
-	StmtGo
-	StmtFallthrough
-	StmtLabel
-)
-
-type Statement struct {
-	FuncIndex int
-	Kind      int
-	StartTok  int
-	EndTok    int
-	ExprStart int
-	ExprEnd   int
-	BodyStart int
-	BodyEnd   int
-	ElseStart int
-	ElseEnd   int
-}
-
-type IndexExpr struct {
-	OwnerKind  int
-	OwnerIndex int
-	StartTok   int
-	EndTok     int
-	BaseStart  int
-	BaseEnd    int
-	OpenTok    int
-	CloseTok   int
-	IndexStart int
-	IndexEnd   int
-}
-
-type CompositeExpr struct {
-	OwnerKind  int
-	OwnerIndex int
-	StartTok   int
-	EndTok     int
-	TypeStart  int
-	TypeEnd    int
-	OpenTok    int
-	CloseTok   int
-	Elems      []ExprSpan
-}
-
-const (
-	AssignUnknown = iota
-	AssignSet
-	AssignDefine
-	AssignAdd
-	AssignSub
-	AssignMul
-	AssignDiv
-	AssignMod
-	AssignAnd
-	AssignOr
-	AssignXor
-)
-
-type Assignment struct {
-	FuncIndex  int
-	Kind       int
-	StartTok   int
-	EndTok     int
-	OpTok      int
-	LeftStart  int
-	LeftEnd    int
-	RightStart int
-	RightEnd   int
-	Targets    []ExprSpan
-	Values     []ExprSpan
-}
-
-type Return struct {
-	FuncIndex int
-	StartTok  int
-	EndTok    int
-	Values    []ExprSpan
-}
-
 const (
 	CallUnknown = iota
 	CallScope
@@ -336,15 +87,10 @@ const (
 )
 
 type Call struct {
-	OwnerKind  int
-	OwnerIndex int
-	Kind       int
-	CalleeTok  int
-	BaseTok    int
-	DotTok     int
-	ArgsStart  int
-	ArgsEnd    int
-	Args       []ExprSpan
+	Kind      int
+	CalleeTok int
+	BaseTok   int
+	DotTok    int
 }
 
 const (
@@ -357,23 +103,13 @@ const (
 )
 
 type NameRef struct {
-	OwnerKind  int
-	OwnerIndex int
-	Kind       int
-	Token      int
-	Index      int
-	Package    int
+	Kind    int
+	Token   int
+	Index   int
+	Package int
 }
 
-const (
-	SelectorUnknown = iota
-	SelectorImport
-)
-
 type Selector struct {
-	OwnerKind   int
-	OwnerIndex  int
-	Kind        int
 	BaseTok     int
 	DotTok      int
 	NameTok     int
@@ -393,30 +129,12 @@ const (
 )
 
 type TypeRef struct {
-	OwnerKind  int
-	OwnerIndex int
-	Kind       int
-	Token      int
-	BaseTok    int
-	DotTok     int
-	Package    int
-	Symbol     int
-}
-
-type LocalDecl struct {
-	FuncIndex  int
-	Kind       int
-	NameStart  int
-	NameEnd    int
-	Token      int
-	Scope      int
-	ValueIndex int
-	TypeStart  int
-	TypeEnd    int
-	ValueStart int
-	ValueEnd   int
-	Values     []ExprSpan
-	Alias      bool
+	Kind    int
+	Token   int
+	BaseTok int
+	DotTok  int
+	Package int
+	Symbol  int
 }
 
 type Program struct {
@@ -427,68 +145,18 @@ type Program struct {
 	Imports    []Import
 	Symbols    []Symbol
 	Decls      []Decl
-	DeclMeta   []DeclMeta
-	InitOrder  []int
-	Consts     []ConstValue
 	Funcs      []Func
-	Signatures []FuncSignature
-	Stmts      []Statement
-	Types      []TypeInfo
-	TypeFields []TypeFields
-	TypeIfaces []TypeIface
-	TypeFuncs  []TypeFuncSig
-	Methods    []MethodInfo
 	TypeRefs   []TypeRef
-	Locals     []LocalDecl
-	Indexes    []IndexExpr
-	Composites []CompositeExpr
-	Assigns    []Assignment
-	Returns    []Return
 	Calls      []Call
 	Refs       []NameRef
 	Selectors  []Selector
 }
 
-var LastMarshalError int
-var LastMarshalIndex int
-var LastMarshalDetail int
-var LastMarshalA int
-var LastMarshalB int
-var LastMarshalC int
-
 func Marshal(program Program) ([]byte, bool) {
-	LastMarshalError = 0
-	LastMarshalIndex = -1
-	LastMarshalDetail = 0
-	LastMarshalA = 0
-	LastMarshalB = 0
-	LastMarshalC = 0
-	if len(program.Package) == 0 || len(program.Text) == 0 || len(program.Tokens) == 0 {
-		LastMarshalError = 1
-		return nil, false
-	}
-	tokenData, ok := encodeTokens(program.Text, program.Tokens)
-	if !ok {
-		LastMarshalError = 2
-		return nil, false
-	}
-	declData, ok := encodeDecls(program.Decls)
-	if !ok {
-		LastMarshalError = 5
-		return nil, false
-	}
-	funcData, ok := encodeFuncs(program.Funcs)
-	if !ok {
-		LastMarshalError = 9
-		return nil, false
-	}
-	rootLen := 0
-	rootLen += nodeSizeString(program.Package)
-	rootLen += nodeSizeString(program.ImportPath)
-	rootLen += nodeSize(program.Text)
-	rootLen += nodeSize(tokenData)
-	rootLen += nodeSize(declData)
-	rootLen += nodeSize(funcData)
+	tokenData := encodeTokens(program.Tokens)
+	declData := encodeDecls(program.Decls)
+	funcData := encodeFuncs(program.Funcs)
+	rootLen := 36 + len(program.Package) + len(program.ImportPath) + len(program.Text) + len(tokenData) + len(declData) + len(funcData)
 
 	out := make([]byte, 0, 14+rootLen)
 	out = append(out, 'R')
@@ -508,46 +176,13 @@ func Marshal(program Program) ([]byte, bool) {
 	return out, true
 }
 
-func Unmarshal(data []byte) (Program, bool) {
-	return Program{}, false
-}
-
-func encodeTokens(text []byte, tokens []Token) ([]byte, bool) {
+func encodeTokens(tokens []Token) []byte {
 	out := make([]byte, 0, len(tokens)*4)
 	out = appendVarint(out, len(tokens))
 	prevStart := 0
 	prevLine := 0
 	for i := 0; i < len(tokens); i++ {
 		tok := tokens[i]
-		if tok.Kind < 0 || tok.Kind > 255 || tok.Start < prevStart || tok.Line < prevLine || tok.Size < 0 {
-			LastMarshalIndex = i
-			LastMarshalDetail = 1
-			return nil, false
-		}
-		if tok.Start > len(text) || tok.Start+tok.Size > len(text) {
-			LastMarshalIndex = i
-			LastMarshalDetail = 2
-			LastMarshalA = tok.Start
-			LastMarshalB = tok.Size
-			LastMarshalC = len(text)
-			return nil, false
-		}
-		if tok.Start > 0xffffff || tok.Line > 0xffff {
-			LastMarshalIndex = i
-			LastMarshalDetail = 3
-			return nil, false
-		}
-		if tok.Kind == TokenOp {
-			if tok.Size > 255 {
-				LastMarshalIndex = i
-				LastMarshalDetail = 4
-				return nil, false
-			}
-		} else if tok.Size > 0xffff {
-			LastMarshalIndex = i
-			LastMarshalDetail = 5
-			return nil, false
-		}
 		out = appendVarint(out, tok.Kind)
 		out = appendVarint(out, tok.Start-prevStart)
 		out = appendVarint(out, tok.Size)
@@ -555,37 +190,28 @@ func encodeTokens(text []byte, tokens []Token) ([]byte, bool) {
 		prevStart = tok.Start
 		prevLine = tok.Line
 	}
-	return out, true
+	return out
 }
 
-func encodeDecls(decls []Decl) ([]byte, bool) {
+func encodeDecls(decls []Decl) []byte {
 	out := make([]byte, 0, len(decls)*5+1)
 	out = appendVarint(out, len(decls))
 	for i := 0; i < len(decls); i++ {
 		decl := decls[i]
-		if decl.Kind < 0 || decl.NameStart < 0 || decl.NameEnd < decl.NameStart || decl.StartTok < 0 || decl.EndTok < decl.StartTok {
-			return nil, false
-		}
 		out = appendVarint(out, decl.Kind)
 		out = appendVarint(out, decl.NameStart)
 		out = appendVarint(out, decl.NameEnd-decl.NameStart)
 		out = appendVarint(out, decl.StartTok)
 		out = appendVarint(out, decl.EndTok-decl.StartTok)
 	}
-	return out, true
+	return out
 }
 
-func encodeFuncs(funcs []Func) ([]byte, bool) {
+func encodeFuncs(funcs []Func) []byte {
 	out := make([]byte, 0, len(funcs)*9+1)
 	out = appendVarint(out, len(funcs))
 	for i := 0; i < len(funcs); i++ {
 		fn := funcs[i]
-		if fn.NameStart < 0 || fn.NameEnd < fn.NameStart || fn.StartTok < 0 || fn.NameTok < fn.StartTok {
-			return nil, false
-		}
-		if fn.ReceiverStart < 0 || fn.ReceiverEnd < fn.ReceiverStart || fn.BodyStart < 0 || fn.BodyEnd < fn.BodyStart || fn.EndTok < fn.BodyEnd {
-			return nil, false
-		}
 		out = appendVarint(out, fn.NameStart)
 		out = appendVarint(out, fn.NameEnd-fn.NameStart)
 		out = appendVarint(out, fn.StartTok)
@@ -596,7 +222,7 @@ func encodeFuncs(funcs []Func) ([]byte, bool) {
 		out = appendVarint(out, fn.BodyEnd-fn.BodyStart)
 		out = appendVarint(out, fn.EndTok-fn.BodyEnd)
 	}
-	return out, true
+	return out
 }
 
 func appendNode(out []byte, tag int, payload []byte) []byte {
@@ -606,14 +232,6 @@ func appendNode(out []byte, tag int, payload []byte) []byte {
 		out = append(out, payload[i])
 	}
 	return out
-}
-
-func nodeSize(payload []byte) int {
-	return 6 + len(payload)
-}
-
-func nodeSizeString(payload string) int {
-	return 6 + len(payload)
 }
 
 func appendUint16(out []byte, v int) []byte {

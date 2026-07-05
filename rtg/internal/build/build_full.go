@@ -1,4 +1,4 @@
-//go:build rtg
+//go:build !rtg
 
 package build
 
@@ -21,24 +21,36 @@ type PackageUnit struct {
 	ImportPath string
 	Name       string
 	Program    unit.Program
+	Data       []byte
 }
 
 type Result struct {
-	Check        check.Program
-	Units        []PackageUnit
-	Root         int
-	Ok           bool
-	Error        int
-	ErrorPackage int
-	ErrorFile    int
-	ErrorToken   int
+	Check           check.Program
+	Units           []PackageUnit
+	Root            int
+	Ok              bool
+	Error           int
+	LowerError      int
+	LowerUnitError  int
+	LowerUnitIndex  int
+	LowerUnitDetail int
+	LowerUnitA      int
+	LowerUnitB      int
+	LowerUnitC      int
+	ErrorPackage    int
+	ErrorFile       int
+	ErrorToken      int
 }
 
 func BuildUnits(graph load.Graph) Result {
-	return BuildPrograms(graph)
+	return buildUnits(graph, true)
 }
 
 func BuildPrograms(graph load.Graph) Result {
+	return buildUnits(graph, false)
+}
+
+func buildUnits(graph load.Graph, encodePackages bool) Result {
 	prog := check.CheckGraph(graph)
 	result := Result{
 		Check:        prog,
@@ -54,9 +66,29 @@ func BuildPrograms(graph load.Graph) Result {
 	}
 	for i := 0; i < len(graph.Packages); i++ {
 		pkg := graph.Packages[i]
-		emit := lower.EmitCheckedPackageFast(pkg, prog.Packages[i])
+		var emit lower.Result
+		if encodePackages {
+			emit = lower.EmitCheckedPackage(pkg, prog.Packages[i])
+		} else {
+			emit = lower.EmitCheckedPackageFast(pkg, prog.Packages[i])
+		}
 		if !emit.Ok {
+			result.LowerError = emit.Error
+			result.LowerUnitError = emit.UnitError
+			result.LowerUnitIndex = emit.UnitIndex
+			result.LowerUnitDetail = emit.UnitDetail
+			result.LowerUnitA = emit.UnitA
+			result.LowerUnitB = emit.UnitB
+			result.LowerUnitC = emit.UnitC
 			return buildFail(result, BuildErrLower, i, emit.ErrorFile, emit.ErrorToken)
+		}
+		var data []byte
+		if encodePackages {
+			var ok bool
+			data, ok = unit.Marshal(emit.Program)
+			if !ok {
+				return buildFail(result, BuildErrUnit, i, -1, -1)
+			}
 		}
 		if pkg.Ref.ImportPath == graph.Root {
 			result.Root = len(result.Units)
@@ -65,6 +97,7 @@ func BuildPrograms(graph load.Graph) Result {
 			ImportPath: pkg.Ref.ImportPath,
 			Name:       pkg.Name,
 			Program:    emit.Program,
+			Data:       data,
 		})
 	}
 	if result.Root < 0 {
