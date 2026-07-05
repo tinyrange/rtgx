@@ -39,7 +39,7 @@ func BuildUnits(graph load.Graph) Result {
 }
 
 func BuildPrograms(graph load.Graph) Result {
-	prog := check.CheckGraph(graph)
+	prog := check.CheckGraphCore(graph)
 	result := Result{
 		Check:        prog,
 		Root:         -1,

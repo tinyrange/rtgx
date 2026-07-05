@@ -2,7 +2,6 @@ package driver
 
 import (
 	"j5.nz/rtg/rtg/internal/load"
-	"j5.nz/rtg/rtg/internal/syntax"
 )
 
 const (
@@ -140,12 +139,11 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 		}
 		found = true
 		c.files = append(c.files, load.SourceFile{Path: path, Src: src})
-		parsed := syntax.ParseFile(src)
-		if !parsed.Ok {
+		imports, importsOK := collectSourceImports(c.module, c.stdRoot, src)
+		if !importsOK {
 			c.fail(SourceErrParse, path)
 			return
 		}
-		imports := load.FileImports(c.module, c.stdRoot, parsed)
 		for j := 0; j < len(imports); j++ {
 			if !imports[j].Ok {
 				c.fail(SourceErrImport, imports[j].ImportPath)
