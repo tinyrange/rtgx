@@ -61,7 +61,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 		}
 	}
 	sortTypes(info.Types)
-	info.TypeRefs = buildPackageTypeRefs(pkg, info, checked)
+	info.TypeRefs = buildPackageTypeRefsCore(pkg, info, checked)
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Funcs); i++ {
@@ -83,10 +83,10 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			bodyTokens := bodyEnd - bodyStart
 			out.Refs = make([]NameRef, 0, coreRefCapacity(bodyTokens))
 			out.Selectors = make([]SelectorRef, 0, coreSelectorCapacity(bodyTokens))
-			out.Refs = appendExprRefs(out.Refs, file, fileIndex, info, scope, bodyStart, bodyEnd)
-			out.Selectors = appendExprSelectors(out.Selectors, file, fileIndex, info, checked, scope, bodyStart, bodyEnd)
+			out.Refs = appendExprPackageRefsCore(out.Refs, file, fileIndex, info, scope, bodyStart, bodyEnd)
+			out.Selectors = appendImportSelectorsCore(out.Selectors, file, fileIndex, info, checked, scope, bodyStart, bodyEnd)
 			out.Locals = buildFuncLocalTypeSpansCore(file, fn)
-			out.TypeRefs = buildFuncTypeRefs(file, fileIndex, info, checked, signature, out.Locals, scope)
+			out.TypeRefs = buildFuncTypeRefsCore(file, fileIndex, info, checked, signature, out.Locals, scope)
 			info.Bodies = append(info.Bodies, out)
 		}
 	}
@@ -150,12 +150,157 @@ func buildDeclInfoCore(file syntax.File, fileIndex int, info PackageInfo, checke
 		valueTokens := out.ValueEnd - out.ValueStart
 		out.Refs = make([]NameRef, 0, coreRefCapacity(valueTokens))
 		out.Selectors = make([]SelectorRef, 0, coreSelectorCapacity(valueTokens))
-		out.Refs = appendExprRefs(out.Refs, file, fileIndex, info, FuncScope{}, out.ValueStart, out.ValueEnd)
-		out.Selectors = appendExprSelectors(out.Selectors, file, fileIndex, info, checked, FuncScope{}, out.ValueStart, out.ValueEnd)
+		out.Refs = appendExprPackageRefsCore(out.Refs, file, fileIndex, info, FuncScope{}, out.ValueStart, out.ValueEnd)
+		out.Selectors = appendImportSelectorsCore(out.Selectors, file, fileIndex, info, checked, FuncScope{}, out.ValueStart, out.ValueEnd)
 	} else {
 		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, decl.EndTok)
 	}
 	return out
+}
+
+func appendExprPackageRefsCore(refs []NameRef, file syntax.File, fileIndex int, info PackageInfo, scope FuncScope, start int, end int) []NameRef {
+	for i := start; i < end && i < len(file.Tokens); i++ {
+		if file.Tokens[i].Kind != syntax.TokenIdent || shouldSkipIdentRef(file, i, end) {
+			continue
+		}
+		name := tokenString(file, i)
+		if name == "_" || isBuiltinName(name) || LookupScopeName(scope, name) >= 0 || LookupImport(info, fileIndex, name) >= 0 {
+			continue
+		}
+		symbolIndex := LookupPackageSymbol(info, name)
+		if symbolIndex >= 0 {
+			refs = append(refs, NameRef{Name: name, Kind: RefPackage, Token: i, Index: symbolIndex, Package: info.Symbols[symbolIndex].Package})
+		}
+	}
+	return refs
+}
+
+func appendImportSelectorsCore(selectors []SelectorRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, start int, end int) []SelectorRef {
+	for i := start + 1; i+1 < end && i+1 < len(file.Tokens); i++ {
+		if !tokenTextIs(file, i, ".") {
+			continue
+		}
+		if file.Tokens[i-1].Kind != syntax.TokenIdent || file.Tokens[i+1].Kind != syntax.TokenIdent {
+			continue
+		}
+		baseName := tokenString(file, i-1)
+		name := tokenString(file, i+1)
+		if baseName == "_" || name == "_" {
+			continue
+		}
+		selector := resolveSelector(fileIndex, info, checked, scope, baseName, name, i-1, i, i+1)
+		if selector.Kind == SelectorImport {
+			selectors = append(selectors, selector)
+		}
+	}
+	return selectors
+}
+
+func buildPackageTypeRefsCore(pkg load.Package, info PackageInfo, checked []PackageInfo) []TypeRef {
+	var refs []TypeRef
+	for i := 0; i < len(info.Decls); i++ {
+		decl := info.Decls[i]
+		if decl.TypeStart < 0 || decl.TypeEnd <= decl.TypeStart {
+			continue
+		}
+		file := pkg.Files[decl.File].File
+		if decl.Kind == SymbolType {
+			typeIndex := LookupType(info, decl.Name)
+			if typeIndex >= 0 {
+				refs = appendTypeInfoRefsCore(refs, pkg, info, checked, info.Types[typeIndex], i)
+				continue
+			}
+		}
+		refs = appendDeclTypeSpanRefsCore(refs, file, decl.File, info, checked, FuncScope{}, i, decl.TypeStart, decl.TypeEnd)
+	}
+	return refs
+}
+
+func appendTypeInfoRefsCore(refs []TypeRef, pkg load.Package, info PackageInfo, checked []PackageInfo, typ TypeInfo, ownerDecl int) []TypeRef {
+	file := pkg.Files[typ.File].File
+	if typ.Kind == TypeStruct {
+		for i := 0; i < len(typ.Fields); i++ {
+			field := typ.Fields[i]
+			refs = appendDeclTypeSpanRefsCore(refs, file, typ.File, info, checked, FuncScope{}, ownerDecl, field.TypeStart, field.TypeEnd)
+		}
+		return refs
+	}
+	if typ.Kind == TypeInterface {
+		for i := 0; i < len(typ.InterfaceEmbeds); i++ {
+			embed := typ.InterfaceEmbeds[i]
+			refs = appendDeclTypeSpanRefsCore(refs, file, typ.File, info, checked, FuncScope{}, ownerDecl, embed.TypeStart, embed.TypeEnd)
+		}
+		for i := 0; i < len(typ.InterfaceMethods); i++ {
+			base := len(refs)
+			refs = appendSignatureTypeRefsCore(refs, file, typ.File, info, checked, FuncScope{}, typ.InterfaceMethods[i].Signature)
+			markTypeRefOwnerDecl(refs, base, ownerDecl)
+		}
+		return refs
+	}
+	return appendDeclTypeSpanRefsCore(refs, file, typ.File, info, checked, FuncScope{}, ownerDecl, typ.TypeStart, typ.TypeEnd)
+}
+
+func buildFuncTypeRefsCore(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, signature FuncSignature, locals []LocalDeclInfo, scope FuncScope) []TypeRef {
+	var refs []TypeRef
+	refs = appendSignatureTypeRefsCore(refs, file, fileIndex, info, checked, scope, signature)
+	for i := 0; i < len(locals); i++ {
+		local := locals[i]
+		if local.TypeStart >= 0 && local.TypeEnd > local.TypeStart {
+			refs = appendTypeSpanRefsCore(refs, file, fileIndex, info, checked, scope, local.TypeStart, local.TypeEnd)
+		}
+	}
+	return refs
+}
+
+func appendSignatureTypeRefsCore(refs []TypeRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, signature FuncSignature) []TypeRef {
+	for i := 0; i < len(signature.Receiver); i++ {
+		field := signature.Receiver[i]
+		refs = appendTypeSpanRefsCore(refs, file, fileIndex, info, checked, scope, field.TypeStart, field.TypeEnd)
+	}
+	for i := 0; i < len(signature.Params); i++ {
+		field := signature.Params[i]
+		refs = appendTypeSpanRefsCore(refs, file, fileIndex, info, checked, scope, field.TypeStart, field.TypeEnd)
+	}
+	for i := 0; i < len(signature.Results); i++ {
+		field := signature.Results[i]
+		refs = appendTypeSpanRefsCore(refs, file, fileIndex, info, checked, scope, field.TypeStart, field.TypeEnd)
+	}
+	return refs
+}
+
+func appendDeclTypeSpanRefsCore(refs []TypeRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, ownerDecl int, start int, end int) []TypeRef {
+	base := len(refs)
+	refs = appendTypeSpanRefsCore(refs, file, fileIndex, info, checked, scope, start, end)
+	markTypeRefOwnerDecl(refs, base, ownerDecl)
+	return refs
+}
+
+func appendTypeSpanRefsCore(refs []TypeRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, start int, end int) []TypeRef {
+	for i := start; i < end && i < len(file.Tokens); i++ {
+		if file.Tokens[i].Kind != syntax.TokenIdent {
+			continue
+		}
+		if i > start && tokenTextIs(file, i-1, ".") {
+			continue
+		}
+		name := tokenString(file, i)
+		if name == "_" {
+			continue
+		}
+		if i+2 < end && tokenTextIs(file, i+1, ".") && file.Tokens[i+2].Kind == syntax.TokenIdent {
+			ref := resolveSelectorTypeRef(fileIndex, info, checked, scope, name, tokenString(file, i+2), i, i+1, i+2)
+			if ref.Kind == TypeRefImportSelector {
+				refs = append(refs, ref)
+			}
+			i += 2
+			continue
+		}
+		ref := resolveDirectTypeRef(fileIndex, info, scope, name, i)
+		if ref.Kind == TypeRefPackage {
+			refs = append(refs, ref)
+		}
+	}
+	return refs
 }
 
 func buildFuncScopeCore(file syntax.File, fn syntax.FuncDecl) (FuncScope, bool, int) {

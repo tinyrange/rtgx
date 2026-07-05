@@ -90,28 +90,27 @@ func LoadPackage(module Module, stdRoot string, ref PackageRef, files []SourceFi
 		return packageFail(pkg, PackageErrNoFiles, -1, -1)
 	}
 	for i := 0; i < len(selected); i++ {
-		src := cloneSource(selected[i].Src)
 		parsed := syntax.ParseFile(selected[i].Src)
 		if !parsed.Ok {
-			pkg.Files = append(pkg.Files, newParsedFile(selected[i].Path, src, parsed))
+			pkg.Files = append(pkg.Files, newParsedFile(selected[i].Path, selected[i].Src, parsed))
 			return packageFail(pkg, PackageErrParse, i, -1)
 		}
 		name := string(syntax.TokenText(parsed.Src, parsed.Tokens[parsed.PackageName]))
 		if pkg.Name == "" {
 			pkg.Name = name
 		} else if pkg.Name != name {
-			pkg.Files = append(pkg.Files, newParsedFile(selected[i].Path, src, parsed))
+			pkg.Files = append(pkg.Files, newParsedFile(selected[i].Path, selected[i].Src, parsed))
 			return packageFail(pkg, PackageErrName, i, -1)
 		}
 		refs := FileImports(module, stdRoot, parsed)
 		for j := 0; j < len(refs); j++ {
 			pkg.Imports = appendImport(pkg.Imports, refs[j])
 			if !refs[j].Ok {
-				pkg.Files = append(pkg.Files, newParsedFile(selected[i].Path, src, parsed))
+				pkg.Files = append(pkg.Files, newParsedFile(selected[i].Path, selected[i].Src, parsed))
 				return packageFail(pkg, PackageErrImport, i, len(pkg.Imports)-1)
 			}
 		}
-		pkg.Files = append(pkg.Files, newParsedFile(selected[i].Path, src, parsed))
+		pkg.Files = append(pkg.Files, newParsedFile(selected[i].Path, selected[i].Src, parsed))
 	}
 	return pkg
 }
@@ -126,14 +125,6 @@ func newParsedFile(path string, src []byte, file syntax.File) ParsedFile {
 		Funcs:   file.Funcs,
 		File:    file,
 	}
-}
-
-func cloneSource(src []byte) []byte {
-	out := make([]byte, len(src))
-	for i := 0; i < len(src); i++ {
-		out[i] = src[i]
-	}
-	return out
 }
 
 type graphBuilder struct {
