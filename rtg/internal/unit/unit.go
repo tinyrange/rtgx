@@ -153,10 +153,10 @@ type Program struct {
 }
 
 func Marshal(program Program) ([]byte, bool) {
-	tokenData := encodeTokens(program.Tokens)
-	declData := encodeDecls(program.Decls)
-	funcData := encodeFuncs(program.Funcs)
-	rootLen := 36 + len(program.Package) + len(program.ImportPath) + len(program.Text) + len(tokenData) + len(declData) + len(funcData)
+	tokenLen := encodedTokensLen(program.Tokens)
+	declLen := encodedDeclsLen(program.Decls)
+	funcLen := encodedFuncsLen(program.Funcs)
+	rootLen := 36 + len(program.Package) + len(program.ImportPath) + len(program.Text) + tokenLen + declLen + funcLen
 
 	out := make([]byte, 0, 14+rootLen)
 	out = append(out, 'R')
@@ -167,17 +167,35 @@ func Marshal(program Program) ([]byte, bool) {
 	out = appendUint16(out, 0)
 	out = appendUint16(out, TagUnit)
 	out = appendUint32(out, rootLen)
-	out = appendNode(out, TagPackage, []byte(program.Package))
-	out = appendNode(out, TagImportPath, []byte(program.ImportPath))
+	out = appendStringNode(out, TagPackage, program.Package)
+	out = appendStringNode(out, TagImportPath, program.ImportPath)
 	out = appendNode(out, TagText, program.Text)
-	out = appendNode(out, TagTokens, tokenData)
-	out = appendNode(out, TagDecls, declData)
-	out = appendNode(out, TagFuncs, funcData)
+	out = appendNodeHeader(out, TagTokens, tokenLen)
+	out = appendEncodedTokens(out, program.Tokens)
+	out = appendNodeHeader(out, TagDecls, declLen)
+	out = appendEncodedDecls(out, program.Decls)
+	out = appendNodeHeader(out, TagFuncs, funcLen)
+	out = appendEncodedFuncs(out, program.Funcs)
 	return out, true
 }
 
-func encodeTokens(tokens []Token) []byte {
-	out := make([]byte, 0, len(tokens)*4)
+func encodedTokensLen(tokens []Token) int {
+	size := varintLen(len(tokens))
+	prevStart := 0
+	prevLine := 0
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
+		size += varintLen(tok.Kind)
+		size += varintLen(tok.Start - prevStart)
+		size += varintLen(tok.Size)
+		size += varintLen(tok.Line - prevLine)
+		prevStart = tok.Start
+		prevLine = tok.Line
+	}
+	return size
+}
+
+func appendEncodedTokens(out []byte, tokens []Token) []byte {
 	out = appendVarint(out, len(tokens))
 	prevStart := 0
 	prevLine := 0
@@ -193,8 +211,20 @@ func encodeTokens(tokens []Token) []byte {
 	return out
 }
 
-func encodeDecls(decls []Decl) []byte {
-	out := make([]byte, 0, len(decls)*5+1)
+func encodedDeclsLen(decls []Decl) int {
+	size := varintLen(len(decls))
+	for i := 0; i < len(decls); i++ {
+		decl := decls[i]
+		size += varintLen(decl.Kind)
+		size += varintLen(decl.NameStart)
+		size += varintLen(decl.NameEnd - decl.NameStart)
+		size += varintLen(decl.StartTok)
+		size += varintLen(decl.EndTok - decl.StartTok)
+	}
+	return size
+}
+
+func appendEncodedDecls(out []byte, decls []Decl) []byte {
 	out = appendVarint(out, len(decls))
 	for i := 0; i < len(decls); i++ {
 		decl := decls[i]
@@ -207,8 +237,24 @@ func encodeDecls(decls []Decl) []byte {
 	return out
 }
 
-func encodeFuncs(funcs []Func) []byte {
-	out := make([]byte, 0, len(funcs)*9+1)
+func encodedFuncsLen(funcs []Func) int {
+	size := varintLen(len(funcs))
+	for i := 0; i < len(funcs); i++ {
+		fn := funcs[i]
+		size += varintLen(fn.NameStart)
+		size += varintLen(fn.NameEnd - fn.NameStart)
+		size += varintLen(fn.StartTok)
+		size += varintLen(fn.NameTok - fn.StartTok)
+		size += varintLen(fn.ReceiverStart)
+		size += varintLen(fn.ReceiverEnd - fn.ReceiverStart)
+		size += varintLen(fn.BodyStart)
+		size += varintLen(fn.BodyEnd - fn.BodyStart)
+		size += varintLen(fn.EndTok - fn.BodyEnd)
+	}
+	return size
+}
+
+func appendEncodedFuncs(out []byte, funcs []Func) []byte {
 	out = appendVarint(out, len(funcs))
 	for i := 0; i < len(funcs); i++ {
 		fn := funcs[i]
@@ -225,12 +271,25 @@ func encodeFuncs(funcs []Func) []byte {
 	return out
 }
 
-func appendNode(out []byte, tag int, payload []byte) []byte {
-	out = appendUint16(out, tag)
-	out = appendUint32(out, len(payload))
+func appendStringNode(out []byte, tag int, payload string) []byte {
+	out = appendNodeHeader(out, tag, len(payload))
 	for i := 0; i < len(payload); i++ {
 		out = append(out, payload[i])
 	}
+	return out
+}
+
+func appendNode(out []byte, tag int, payload []byte) []byte {
+	out = appendNodeHeader(out, tag, len(payload))
+	for i := 0; i < len(payload); i++ {
+		out = append(out, payload[i])
+	}
+	return out
+}
+
+func appendNodeHeader(out []byte, tag int, size int) []byte {
+	out = appendUint16(out, tag)
+	out = appendUint32(out, size)
 	return out
 }
 
@@ -254,4 +313,13 @@ func appendVarint(out []byte, v int) []byte {
 		v = v >> 7
 	}
 	return append(out, byte(v))
+}
+
+func varintLen(v int) int {
+	size := 1
+	for v >= 0x80 {
+		size++
+		v = v >> 7
+	}
+	return size
 }
