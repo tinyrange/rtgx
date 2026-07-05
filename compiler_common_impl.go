@@ -5391,11 +5391,7 @@ func rtgFunctionLocalCap(fn *rtgFuncDecl) int {
 
 func rtgEmitLinearRange(g *rtgLinearGen, start int, end int) bool {
 	var bp rtgBodyParse
-	stmtCap := end - start + 4
-	if stmtCap < 8 {
-		stmtCap = 8
-	}
-	stmtData := make([]int, stmtCap*rtgStmtWordCount)
+	stmtData := make([]int, rtgStmtWordCount)
 	rtgBodyStmtData = stmtData
 	prog := g.meta.prog
 	bp.prog = prog
@@ -5418,12 +5414,12 @@ func rtgEmitLinearRange(g *rtgLinearGen, start int, end int) bool {
 			return true
 		}
 		rtgBodyStmtData = stmtData
-		before := bp.stmtCount
+		bp.stmtCount = 0
 		next := rtgParseOneStatement(&bp, i, end)
-		if !bp.ok || next <= i || bp.stmtCount <= before {
+		if !bp.ok || next <= i || bp.stmtCount != 1 {
 			return false
 		}
-		stmt := rtgBodyStmtAt(&bp, bp.stmtCount-1)
+		stmt := rtgBodyStmtAt(&bp, 0)
 		if !bp.ok {
 			return false
 		}
@@ -5791,7 +5787,7 @@ func rtgEmitLinearElse(g *rtgLinearGen, stmt *rtgStmt) bool {
 	if rtgTokIsKind(p, stmt.elseStart, rtgTokIf) && rtgTokIsKind(p, stmt.elseStart-1, rtgTokElse) {
 		var nested rtgBodyParse
 		oldStmtData := rtgBodyStmtData
-		stmtData := make([]int, 16*rtgStmtWordCount)
+		stmtData := make([]int, rtgStmtWordCount)
 		rtgBodyStmtData = stmtData
 		nested.prog = p
 		nested.stmtCount = 0

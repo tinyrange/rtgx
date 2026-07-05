@@ -19,9 +19,11 @@ jobs:
           - name: linux-amd64
             runner: ubuntu-latest
             full-targets: true
+            performance_gate: true
           - name: linux-arm64
             runner: ubuntu-24.04-arm
             full-targets: false
+            performance_gate: false
 
     steps:
       - name: Check out repository
@@ -45,10 +47,21 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      - name: Build frontend backend
+        run: |
+          go build -o "$RUNNER_TEMP/rtg-backend" .
+          echo "RTG_BACKEND=$RUNNER_TEMP/rtg-backend" >> "$GITHUB_ENV"
+
       - name: Run backend tests
         env:
           RTG_CROSS_ARCH_TESTS: ${{ matrix.full-targets && '1' || '' }}
-        run: go test -count=1 -timeout 30m -v -skip '^TestCompilerPerformance$' .
+        run: |
+          if [ "${{ matrix.performance_gate }}" = "true" ]; then
+            go test -count=1 -timeout 30m .
+          else
+            tests="$(go test -list '^Test' . | grep '^Test' | grep -v '^TestCompilerPerformance$' | paste -sd'|' -)"
+            go test -count=1 -timeout 30m -run "^(${tests})$" .
+          fi
 
   frontend-corpus:
     name: Frontend corpus tests
@@ -66,4 +79,7 @@ jobs:
           cache: false
 
       - name: Run frontend corpus tests
-        run: go test -count=1 -v ./rtg_tests
+        env:
+          RTG_FRONTEND_EXTENDED_TESTS: "1"
+          RTG_FRONTEND_SELFHOST_TESTS: "1"
+        run: go test -count=1 ./rtg_tests

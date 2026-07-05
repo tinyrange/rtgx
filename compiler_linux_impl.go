@@ -7,9 +7,7 @@ func rtgReadAll(fd int, out []byte) []byte {
 		if n <= 0 {
 			return out
 		}
-		for i := 0; i < n; i++ {
-			out = append(out, buf[i])
-		}
+		out = append(out, buf[:n]...)
 	}
 }
 
