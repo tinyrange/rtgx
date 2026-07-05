@@ -69,7 +69,7 @@ func (fs RTGFS) ReadFile(path string) ([]byte, bool) {
 	if fd < 0 {
 		return nil, false
 	}
-	var out []byte
+	out := make([]byte, 0, 524288)
 	buf := make([]byte, 4096)
 	for {
 		n := read(fd, buf, -1)
@@ -94,7 +94,7 @@ func (fs RTGFS) ReadDir(path string) ([]DirEntry, bool) {
 		return nil, false
 	}
 	buf := make([]byte, 32768)
-	var out []DirEntry
+	out := make([]DirEntry, 0, 32)
 	for {
 		n := syscall(rtgGetdents64LinuxAmd64, fd, buf, len(buf))
 		if n < 0 {

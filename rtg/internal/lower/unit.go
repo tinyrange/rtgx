@@ -376,19 +376,12 @@ func (b *unitBuilder) addCheckedSymbols(info check.PackageInfo, files []fileToke
 			return false
 		}
 		var out unit.Symbol
-		out.Name = lowerTokenString(files[symbolFile], symbolToken)
+		out.Name = symbols[i].Name
 		out.Package = symbols[i].Package
 		out.Token = token
 		b.program.Symbols = append(b.program.Symbols, out)
 	}
 	return true
-}
-
-func lowerTokenString(file fileTokens, tok int) string {
-	if tok < 0 || tok >= len(file.file.Tokens) {
-		return ""
-	}
-	return string(syntax.TokenText(file.src, file.file.Tokens[tok]))
 }
 
 func (b *unitBuilder) addDeclResolution(decl check.DeclInfo, mapping tokenMap, ownerIndex int) bool {
