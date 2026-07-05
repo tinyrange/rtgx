@@ -594,6 +594,9 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		dst.Methods = append(dst.Methods, method)
 	}
 	for i := 0; i < len(src.TypeRefs); i++ {
+		if tokenSkipped(skip, src.TypeRefs[i].Token) {
+			continue
+		}
 		ref, ok := mapTypeRef(src.TypeRefs[i], oldToNew, finalEOF, declOffset, funcOffset, symbolOffsets)
 		if !ok {
 			return false
@@ -636,6 +639,9 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		dst.Returns = append(dst.Returns, ret)
 	}
 	for i := 0; i < len(src.Calls); i++ {
+		if tokenSkipped(skip, src.Calls[i].CalleeTok) {
+			continue
+		}
 		call, ok := mapCall(src.Calls[i], oldToNew, finalEOF, declOffset, funcOffset)
 		if !ok {
 			return false
@@ -643,7 +649,7 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		dst.Calls = append(dst.Calls, call)
 	}
 	for i := 0; i < len(src.Refs); i++ {
-		if src.Refs[i].Kind == unit.RefImport {
+		if src.Refs[i].Kind == unit.RefImport || tokenSkipped(skip, src.Refs[i].Token) {
 			continue
 		}
 		ref, ok := mapRef(src.Refs[i], oldToNew, finalEOF, declOffset, funcOffset, symbolOffsets)
@@ -653,7 +659,7 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		dst.Refs = append(dst.Refs, ref)
 	}
 	for i := 0; i < len(src.Selectors); i++ {
-		if src.Selectors[i].BaseKind == unit.RefImport {
+		if src.Selectors[i].BaseKind == unit.RefImport || tokenSkipped(skip, src.Selectors[i].NameTok) {
 			continue
 		}
 		selector, ok := mapSelector(src.Selectors[i], oldToNew, finalEOF, declOffset, funcOffset, symbolOffsets)
@@ -696,7 +702,11 @@ func linkedTokenSkip(program unit.Program) ([]bool, []int) {
 		if call.Kind == unit.CallImportSelector {
 			markRedirectToken(skip, redirect, call.BaseTok, call.CalleeTok)
 			markRedirectToken(skip, redirect, call.DotTok, call.CalleeTok)
+			markUnsafePointerCallTokens(program, skip, call)
 		}
+	}
+	if programImportsUnsafe(program) {
+		markUnsafePointerConversionTokens(program, skip)
 	}
 	return skip, redirect
 }
@@ -728,6 +738,92 @@ func markRedirectToken(skip []bool, redirect []int, tok int, target int) {
 	}
 	skip[tok] = true
 	redirect[tok] = target
+}
+
+func tokenSkipped(skip []bool, tok int) bool {
+	return tok >= 0 && tok < len(skip) && skip[tok]
+}
+
+func markUnsafePointerCallTokens(program unit.Program, skip []bool, call unit.Call) {
+	if !tokenTextEquals(program, call.BaseTok, "unsafe") || !tokenTextEquals(program, call.CalleeTok, "Pointer") {
+		return
+	}
+	open := call.CalleeTok + 1
+	close := findMatchingParen(program, open)
+	if close < 0 {
+		return
+	}
+	markSkipToken(skip, call.CalleeTok)
+	markSkipToken(skip, open)
+	markSkipToken(skip, close)
+}
+
+func markUnsafePointerConversionTokens(program unit.Program, skip []bool) {
+	for i := 0; i+4 < len(program.Tokens); i++ {
+		if !tokenTextEquals(program, i, "(") || !tokenTextEquals(program, i+1, "*") {
+			continue
+		}
+		typeEnd := findMatchingParen(program, i)
+		if typeEnd <= i+2 || typeEnd+1 >= len(program.Tokens) || !tokenTextEquals(program, typeEnd+1, "(") {
+			continue
+		}
+		valueEnd := findMatchingParen(program, typeEnd+1)
+		if valueEnd < 0 {
+			continue
+		}
+		for j := i; j <= typeEnd; j++ {
+			markSkipToken(skip, j)
+		}
+		markSkipToken(skip, typeEnd+1)
+		markSkipToken(skip, valueEnd)
+		i = valueEnd
+	}
+}
+
+func markSkipToken(skip []bool, tok int) {
+	if tok < 0 || tok >= len(skip) {
+		return
+	}
+	skip[tok] = true
+}
+
+func programImportsUnsafe(program unit.Program) bool {
+	for i := 0; i < len(program.Imports); i++ {
+		imp := program.Imports[i]
+		if imp.ImportPath == "unsafe" || tokenTextEquals(program, imp.PathTok, "\"unsafe\"") || tokenTextEquals(program, imp.PathTok, "`unsafe`") {
+			return true
+		}
+	}
+	return false
+}
+
+func findMatchingParen(program unit.Program, open int) int {
+	if !tokenTextEquals(program, open, "(") {
+		return -1
+	}
+	depth := 0
+	for i := open; i < len(program.Tokens); i++ {
+		if tokenTextEquals(program, i, "(") {
+			depth++
+		} else if tokenTextEquals(program, i, ")") {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func tokenTextEquals(program unit.Program, tok int, want string) bool {
+	if tok < 0 || tok >= len(program.Tokens) {
+		return false
+	}
+	token := program.Tokens[tok]
+	if token.Start < 0 || token.Start+token.Size > len(program.Text) {
+		return false
+	}
+	return string(program.Text[token.Start:token.Start+token.Size]) == want
 }
 
 func linkedTokenReplacements(program unit.Program, aliases []string, symbolOffsets []int) []string {
@@ -1249,13 +1345,20 @@ func mapAssignment(assign unit.Assignment, oldToNew []int, eof int, funcOffset i
 		return assign, false
 	}
 	assign.FuncIndex += funcOffset
-	assign.StartTok = mapToken(oldToNew, assign.StartTok, eof)
-	assign.EndTok = mapToken(oldToNew, assign.EndTok, eof)
+	var ok bool
+	assign.StartTok, assign.EndTok, ok = mapTokenSpan(oldToNew, assign.StartTok, assign.EndTok, eof)
+	if !ok {
+		return assign, false
+	}
 	assign.OpTok = mapToken(oldToNew, assign.OpTok, eof)
-	assign.LeftStart = mapToken(oldToNew, assign.LeftStart, eof)
-	assign.LeftEnd = mapToken(oldToNew, assign.LeftEnd, eof)
-	assign.RightStart = mapToken(oldToNew, assign.RightStart, eof)
-	assign.RightEnd = mapToken(oldToNew, assign.RightEnd, eof)
+	assign.LeftStart, assign.LeftEnd, ok = mapTokenSpan(oldToNew, assign.LeftStart, assign.LeftEnd, eof)
+	if !ok {
+		return assign, false
+	}
+	assign.RightStart, assign.RightEnd, ok = mapTokenSpan(oldToNew, assign.RightStart, assign.RightEnd, eof)
+	if !ok {
+		return assign, false
+	}
 	for i := 0; i < len(assign.Targets); i++ {
 		assign.Targets[i] = mapExprSpan(assign.Targets[i], oldToNew, eof)
 	}
@@ -1294,8 +1397,10 @@ func mapCall(call unit.Call, oldToNew []int, eof int, declOffset int, funcOffset
 		call.BaseTok = eof
 		call.DotTok = eof
 	}
-	call.ArgsStart = mapToken(oldToNew, call.ArgsStart, eof)
-	call.ArgsEnd = mapToken(oldToNew, call.ArgsEnd, eof)
+	call.ArgsStart, call.ArgsEnd, ok = mapTokenSpan(oldToNew, call.ArgsStart, call.ArgsEnd, eof)
+	if !ok {
+		return call, false
+	}
 	for i := 0; i < len(call.Args); i++ {
 		call.Args[i] = mapExprSpan(call.Args[i], oldToNew, eof)
 	}
@@ -1344,8 +1449,13 @@ func mapSelector(selector unit.Selector, oldToNew []int, eof int, declOffset int
 }
 
 func mapExprSpan(span unit.ExprSpan, oldToNew []int, eof int) unit.ExprSpan {
-	span.StartTok = mapToken(oldToNew, span.StartTok, eof)
-	span.EndTok = mapToken(oldToNew, span.EndTok, eof)
+	start, end, ok := mapTokenSpan(oldToNew, span.StartTok, span.EndTok, eof)
+	if !ok {
+		start = eof
+		end = eof
+	}
+	span.StartTok = start
+	span.EndTok = end
 	return span
 }
 
@@ -1356,12 +1466,42 @@ func mapNullableSpan(start int, end int, oldToNew []int, eof int) (int, int, boo
 	if start < 0 || end < start {
 		return 0, 0, false
 	}
-	mappedStart := mapToken(oldToNew, start, eof)
-	mappedEnd := mapToken(oldToNew, end, eof)
-	if mappedStart < 0 || mappedEnd < mappedStart {
+	return mapTokenSpan(oldToNew, start, end, eof)
+}
+
+func mapTokenSpan(oldToNew []int, start int, end int, eof int) (int, int, bool) {
+	if start < 0 || end < start {
 		return 0, 0, false
 	}
-	return mappedStart, mappedEnd, true
+	if start == end {
+		mapped := mapToken(oldToNew, start, eof)
+		return mapped, mapped, mapped >= 0
+	}
+	mappedStart := mapToken(oldToNew, start, eof)
+	mappedEnd := mapToken(oldToNew, end, eof)
+	if mappedStart >= 0 && mappedEnd >= mappedStart {
+		return mappedStart, mappedEnd, true
+	}
+	first := -1
+	last := -1
+	limit := end
+	if limit > len(oldToNew) {
+		limit = len(oldToNew)
+	}
+	for i := start; i < limit; i++ {
+		mapped := mapToken(oldToNew, i, eof)
+		if mapped < 0 || mapped == eof {
+			continue
+		}
+		if first < 0 {
+			first = mapped
+		}
+		last = mapped
+	}
+	if first < 0 {
+		return eof, eof, true
+	}
+	return first, last + 1, true
 }
 
 func mapOwner(kind int, index int, declOffset int, funcOffset int) (int, bool) {

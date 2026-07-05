@@ -202,6 +202,54 @@ type Graph struct { Value int }
 	}
 }
 
+func TestLinkUnitsErasesUnsafePointerRoundTrip(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/std/unsafe/unsafe.go", Src: []byte(`package unsafe
+
+type Pointer *byte
+`)},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "unsafe"
+
+type pair struct {
+	a int32
+	b int32
+}
+
+func appMain() int {
+	v := pair{a: 9, b: 5}
+	p := unsafe.Pointer(&v)
+	q := (*pair)(p)
+	if int(q.a)+int(q.b) == 14 {
+		print("PASS\n")
+		return 0
+	}
+	print("FAIL\n")
+	return 1
+}
+`)},
+	})
+	program, ok := LinkUnits(result.Units, result.Root)
+	if !ok {
+		t.Fatal("LinkUnits failed")
+	}
+	if bytes.Contains(program.Text, []byte("Pointer(&v)")) || bytes.Contains(program.Text, []byte("(*pair)(p)")) {
+		t.Fatalf("linked text still contains unsafe pointer conversions:\n%s", string(program.Text))
+	}
+	if !bytes.Contains(program.Text, []byte("p := &v")) || !bytes.Contains(program.Text, []byte("q :=p")) {
+		t.Fatalf("linked text missing erased unsafe pointer values:\n%s", string(program.Text))
+	}
+	linked := LinkBuild(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuild failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if _, err := rtgunit.Unmarshal(linked.Data); err != nil {
+		t.Fatalf("linked unit did not decode: %v", err)
+	}
+}
+
 func TestLinkBuildAddsRootEntrypointWrapper(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

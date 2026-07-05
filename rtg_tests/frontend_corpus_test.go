@@ -189,7 +189,7 @@ func frontendCompiler(t *testing.T, root string) frontendConfig {
 	return frontendConfig{
 		compiler: frontendPath,
 		target:   frontendTarget(t),
-		env:      []string{"RTG_BACKEND=" + frontendBackendPath},
+		env:      []string{"RTG_BACKEND=" + frontendBackendPath, "RTG_STDROOT=" + filepath.Join(root, "rtg", "std")},
 	}
 }
 

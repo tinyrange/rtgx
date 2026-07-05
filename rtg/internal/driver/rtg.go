@@ -25,7 +25,7 @@ func RunRTGCommand(args []string, env []string) int {
 	if resetArena {
 		mark = rtg_runtime_ArenaMark()
 	}
-	built := BuildFromFS(commandArgs, rtgWorkDir(env), "/std", RTGFS{})
+	built := BuildFromFS(commandArgs, rtgWorkDir(env), rtgStdRoot(env), RTGFS{})
 	if !built.Ok {
 		printRTGBuildError(built)
 		return 1
@@ -62,6 +62,19 @@ func rtgWorkDir(env []string) string {
 		}
 	}
 	return "."
+}
+
+func rtgStdRoot(env []string) string {
+	for i := 0; i < len(env); i++ {
+		item := env[i]
+		if len(item) >= 12 &&
+			item[0] == 'R' && item[1] == 'T' && item[2] == 'G' && item[3] == '_' &&
+			item[4] == 'S' && item[5] == 'T' && item[6] == 'D' && item[7] == 'R' &&
+			item[8] == 'O' && item[9] == 'O' && item[10] == 'T' && item[11] == '=' {
+			return item[12:]
+		}
+	}
+	return "/std"
 }
 
 func (fs RTGFS) ReadFile(path string) ([]byte, bool) {

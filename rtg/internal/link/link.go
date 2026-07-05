@@ -339,7 +339,11 @@ func linkedTokenActions(program unit.Program, aliases []string, symbolOffsets []
 		if call.Kind == unit.CallImportSelector {
 			markRedirectToken(actions, call.BaseTok, call.CalleeTok)
 			markRedirectToken(actions, call.DotTok, call.CalleeTok)
+			markUnsafePointerCallTokens(program, actions, call)
 		}
+	}
+	if programImportsUnsafe(program) {
+		markUnsafePointerConversionTokens(program, actions)
 	}
 	for i := 0; i < len(program.Symbols); i++ {
 		symbol := program.Symbols[i]
@@ -424,6 +428,88 @@ func markReplacementToken(actions []int, tok int, replacement int) {
 		return
 	}
 	actions[tok] = replacement + 1
+}
+
+func markSkipToken(actions []int, tok int) {
+	if tok < 0 || tok >= len(actions) {
+		return
+	}
+	actions[tok] = -1
+}
+
+func markUnsafePointerCallTokens(program unit.Program, actions []int, call unit.Call) {
+	if !tokenTextEquals(program, call.BaseTok, "unsafe") || !tokenTextEquals(program, call.CalleeTok, "Pointer") {
+		return
+	}
+	open := call.CalleeTok + 1
+	close := findMatchingParen(program, open)
+	if close < 0 {
+		return
+	}
+	markSkipToken(actions, call.CalleeTok)
+	markSkipToken(actions, open)
+	markSkipToken(actions, close)
+}
+
+func markUnsafePointerConversionTokens(program unit.Program, actions []int) {
+	for i := 0; i+4 < len(program.Tokens); i++ {
+		if !tokenTextEquals(program, i, "(") || !tokenTextEquals(program, i+1, "*") {
+			continue
+		}
+		typeEnd := findMatchingParen(program, i)
+		if typeEnd <= i+2 || typeEnd+1 >= len(program.Tokens) || !tokenTextEquals(program, typeEnd+1, "(") {
+			continue
+		}
+		valueEnd := findMatchingParen(program, typeEnd+1)
+		if valueEnd < 0 {
+			continue
+		}
+		for j := i; j <= typeEnd; j++ {
+			markSkipToken(actions, j)
+		}
+		markSkipToken(actions, typeEnd+1)
+		markSkipToken(actions, valueEnd)
+		i = valueEnd
+	}
+}
+
+func programImportsUnsafe(program unit.Program) bool {
+	for i := 0; i < len(program.Imports); i++ {
+		pathTok := program.Imports[i].PathTok
+		if tokenTextEquals(program, pathTok, "\"unsafe\"") || tokenTextEquals(program, pathTok, "`unsafe`") {
+			return true
+		}
+	}
+	return false
+}
+
+func findMatchingParen(program unit.Program, open int) int {
+	if !tokenTextEquals(program, open, "(") {
+		return -1
+	}
+	depth := 0
+	for i := open; i < len(program.Tokens); i++ {
+		if tokenTextEquals(program, i, "(") {
+			depth++
+		} else if tokenTextEquals(program, i, ")") {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func tokenTextEquals(program unit.Program, tok int, want string) bool {
+	if tok < 0 || tok >= len(program.Tokens) {
+		return false
+	}
+	token := program.Tokens[tok]
+	if token.Start < 0 || token.Start+token.Size > len(program.Text) {
+		return false
+	}
+	return string(program.Text[token.Start:token.Start+token.Size]) == want
 }
 
 func tokenActionSkips(action int) bool {
