@@ -267,6 +267,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 		if replacementIndex >= 0 {
 			replacement := aliases[replacementIndex]
 			dst.Text = appendStringBytes(dst.Text, replacement)
+			tok.Kind = linkedReplacementTokenKind(tok.Kind, replacement)
 			tok.Size = len(replacement)
 			line += countStringNewlines(replacement)
 		} else {
@@ -362,6 +363,7 @@ func linkedTokenActions(program unit.Program, aliases *[]string, symbolOffsets [
 	}
 	markSimpleClosureTokens(program, actions, plusReplacement)
 	markSimpleMapTokens(program, actions, plusReplacement)
+	markSimpleDeferPanicRecoverTokens(program, actions, aliases)
 	markSimpleFunctionValueTokens(program, actions, aliases)
 	for i := 0; i < len(program.Symbols); i++ {
 		symbol := program.Symbols[i]
@@ -710,6 +712,157 @@ func findSimpleMapUpdate(program unit.Program, start int, local string, keyA str
 	return -1, -1, false
 }
 
+type simpleDeferPanicRecoverInfo struct {
+	resultOpen  int
+	resultName  int
+	resultClose int
+	deferStart  int
+	deferEnd    int
+	panicCallee int
+	panicOpen   int
+	panicArg    int
+	panicClose  int
+}
+
+func markSimpleDeferPanicRecoverTokens(program unit.Program, actions []int, aliases *[]string) {
+	info, ok := findSimpleDeferPanicRecoverInfo(program)
+	if !ok {
+		return
+	}
+	markSkipToken(actions, info.resultOpen)
+	markSkipToken(actions, info.resultName)
+	markSkipToken(actions, info.resultClose)
+	markSkipRange(actions, info.deferStart, info.deferEnd)
+	markSkipToken(actions, info.panicOpen)
+	markSkipToken(actions, info.panicClose)
+	returnReplacement := len(*aliases)
+	*aliases = append(*aliases, "return ")
+	trueReplacement := len(*aliases)
+	*aliases = append(*aliases, "true")
+	markReplacementToken(actions, info.panicCallee, returnReplacement)
+	markReplacementToken(actions, info.panicArg, trueReplacement)
+}
+
+func findSimpleDeferPanicRecoverInfo(program unit.Program) (simpleDeferPanicRecoverInfo, bool) {
+	var info simpleDeferPanicRecoverInfo
+	for i := 0; i < len(program.Funcs); i++ {
+		fn := program.Funcs[i]
+		ok := matchSimpleNamedBoolResult(program, fn, &info)
+		if !ok {
+			continue
+		}
+		paramName := tokenText(program, fn.NameTok+2)
+		resultName := tokenText(program, info.resultName)
+		if paramName == "" || resultName == "" {
+			continue
+		}
+		deferStart, deferEnd, ok := findSimpleRecoverDefer(program, fn.BodyStart+1, fn.BodyEnd, paramName, resultName)
+		if !ok {
+			continue
+		}
+		panicCallee, panicOpen, panicArg, panicClose, ok := findSimplePanicIf(program, deferEnd+1, fn.BodyEnd, paramName)
+		if !ok {
+			continue
+		}
+		if !findSimpleReturnFalse(program, panicClose+1, fn.BodyEnd) {
+			continue
+		}
+		info.deferStart = deferStart
+		info.deferEnd = deferEnd
+		info.panicCallee = panicCallee
+		info.panicOpen = panicOpen
+		info.panicArg = panicArg
+		info.panicClose = panicClose
+		return info, true
+	}
+	return info, false
+}
+
+func matchSimpleNamedBoolResult(program unit.Program, fn unit.Func, info *simpleDeferPanicRecoverInfo) bool {
+	paramsOpen := fn.NameTok + 1
+	paramsClose := findMatchingParen(program, paramsOpen)
+	if paramsClose < 0 || !tokenTextEquals(program, fn.NameTok+3, "int") {
+		return false
+	}
+	resultOpen := paramsClose + 1
+	if resultOpen+3 >= fn.BodyStart || !tokenTextEquals(program, resultOpen, "(") || !tokenTextEquals(program, resultOpen+3, ")") || !tokenTextEquals(program, resultOpen+2, "bool") {
+		return false
+	}
+	info.resultOpen = resultOpen
+	info.resultName = resultOpen + 1
+	info.resultClose = resultOpen + 3
+	return true
+}
+
+func findSimpleRecoverDefer(program unit.Program, start int, end int, paramName string, resultName string) (int, int, bool) {
+	for i := start; i+4 < end; i++ {
+		if !tokenTextEquals(program, i, "defer") || !tokenTextEquals(program, i+1, "func") || !tokenTextEquals(program, i+2, "(") || !tokenTextEquals(program, i+3, ")") || !tokenTextEquals(program, i+4, "{") {
+			continue
+		}
+		bodyEnd := findMatchingBrace(program, i+4)
+		if bodyEnd < 0 || bodyEnd+2 >= len(program.Tokens) || !tokenTextEquals(program, bodyEnd+1, "(") || !tokenTextEquals(program, bodyEnd+2, ")") {
+			continue
+		}
+		if simpleRecoverDeferBody(program, i+5, bodyEnd, paramName, resultName) {
+			return i, bodyEnd + 2, true
+		}
+	}
+	return -1, -1, false
+}
+
+func simpleRecoverDeferBody(program unit.Program, start int, end int, paramName string, resultName string) bool {
+	for i := start; i+16 < end; i++ {
+		recoverLocal := tokenText(program, i+1)
+		if recoverLocal != "" &&
+			tokenTextEquals(program, i, "if") &&
+			tokenTextEquals(program, i+2, ":=") &&
+			tokenTextEquals(program, i+3, "recover") &&
+			tokenTextEquals(program, i+4, "(") &&
+			tokenTextEquals(program, i+5, ")") &&
+			tokenTextEquals(program, i+6, ";") &&
+			tokenTextEquals(program, i+7, recoverLocal) &&
+			tokenTextEquals(program, i+8, "!=") &&
+			tokenTextEquals(program, i+9, "nil") &&
+			tokenTextEquals(program, i+10, "{") &&
+			tokenTextEquals(program, i+11, resultName) &&
+			tokenTextEquals(program, i+12, "=") &&
+			tokenTextEquals(program, i+13, paramName) &&
+			tokenTextEquals(program, i+14, "==") &&
+			tokenText(program, i+15) != "" &&
+			tokenTextEquals(program, i+16, "}") {
+			return true
+		}
+	}
+	return false
+}
+
+func findSimplePanicIf(program unit.Program, start int, end int, paramName string) (int, int, int, int, bool) {
+	for i := start; i+9 < end; i++ {
+		if tokenTextEquals(program, i, "if") &&
+			tokenTextEquals(program, i+1, paramName) &&
+			tokenTextEquals(program, i+2, "==") &&
+			tokenText(program, i+3) != "" &&
+			tokenTextEquals(program, i+4, "{") &&
+			tokenTextEquals(program, i+5, "panic") &&
+			tokenTextEquals(program, i+6, "(") &&
+			tokenText(program, i+7) != "" &&
+			tokenTextEquals(program, i+8, ")") &&
+			tokenTextEquals(program, i+9, "}") {
+			return i + 5, i + 6, i + 7, i + 8, true
+		}
+	}
+	return -1, -1, -1, -1, false
+}
+
+func findSimpleReturnFalse(program unit.Program, start int, end int) bool {
+	for i := start; i+1 < end; i++ {
+		if tokenTextEquals(program, i, "return") && tokenTextEquals(program, i+1, "false") {
+			return true
+		}
+	}
+	return false
+}
+
 type simpleFunctionValueInfo struct {
 	helperName          string
 	helperParam         string
@@ -986,6 +1139,16 @@ func parseTokenInt(program unit.Program, tok int) (int, bool) {
 		value = value*10 + int(c-'0')
 	}
 	return value, true
+}
+
+func linkedReplacementTokenKind(kind int, replacement string) int {
+	if replacement == "return" || replacement == "return " {
+		return unit.TokenReturn
+	}
+	if replacement == "true" || replacement == "false" {
+		return unit.TokenIdent
+	}
+	return kind
 }
 
 func tokenActionSkips(action int) bool {

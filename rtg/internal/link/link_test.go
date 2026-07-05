@@ -385,6 +385,52 @@ func appMain() int {
 	}
 }
 
+func TestLinkBuildCoreLowersSimpleDeferPanicRecover(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func guarded(v int) (ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			ok = v == 3
+		}
+	}()
+	if v == 3 {
+		panic("expected")
+	}
+	return false
+}
+
+func appMain() int {
+	if guarded(3) {
+		print("PASS\n")
+		return 0
+	}
+	print("FAIL\n")
+	return 1
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d marshal=%d/%d", linked.Error, linked.ErrorPackage, unit.LastMarshalError, unit.LastMarshalIndex)
+	}
+	decoded, ok := unit.Unmarshal(linked.Data)
+	if !ok {
+		t.Fatal("linked core unit did not decode")
+	}
+	if bytes.Contains(decoded.Text, []byte("defer")) || bytes.Contains(decoded.Text, []byte("recover")) || bytes.Contains(decoded.Text, []byte("panic")) || bytes.Contains(decoded.Text, []byte("(ok bool)")) {
+		t.Fatalf("linked text still contains unsupported panic/defer syntax:\n%s", string(decoded.Text))
+	}
+	if !bytes.Contains(decoded.Text, []byte("func guarded(v int)")) ||
+		!bytes.Contains(decoded.Text, []byte("bool")) ||
+		!bytes.Contains(decoded.Text, []byte("return true")) ||
+		!bytes.Contains(decoded.Text, []byte("return false")) {
+		t.Fatalf("linked text missing lowered boolean control flow:\n%s", string(decoded.Text))
+	}
+}
+
 func TestLinkBuildCoreFoldsPackageInitVarDeps(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
