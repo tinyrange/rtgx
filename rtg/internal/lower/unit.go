@@ -93,6 +93,14 @@ func EmitRootChecked(graph load.Graph, prog check.Program) Result {
 }
 
 func EmitCheckedPackage(pkg load.Package, info check.PackageInfo) Result {
+	return emitCheckedPackage(pkg, info, true)
+}
+
+func EmitCheckedPackageFast(pkg load.Package, info check.PackageInfo) Result {
+	return emitCheckedPackage(pkg, info, false)
+}
+
+func emitCheckedPackage(pkg load.Package, info check.PackageInfo, validateUnit bool) Result {
 	result := Result{Ok: true, Error: EmitOK, ErrorFile: -1, ErrorToken: -1}
 	if !pkg.Ok || pkg.Name == "" || len(pkg.Files) == 0 {
 		return emitFail(result, EmitErrPackage, -1, -1)
@@ -104,6 +112,7 @@ func EmitCheckedPackage(pkg load.Package, info check.PackageInfo) Result {
 	builder.program.Package = pkg.Name
 	builder.program.ImportPath = pkg.Ref.ImportPath
 	builder.finalEOF = countPackageTokens(pkg)
+	builder.reserveCheckedPackage(pkg, info)
 	files := make([]fileTokens, len(pkg.Files))
 	for i := 0; i < len(pkg.Files); i++ {
 		if !pkg.Files[i].File.Ok {
@@ -151,7 +160,7 @@ func EmitCheckedPackage(pkg load.Package, info check.PackageInfo) Result {
 	if !builder.addCheckedMethods(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
-	if !builder.finishUnit() {
+	if !builder.finishUnit(validateUnit) {
 		result.UnitError = builder.unitError
 		result.UnitIndex = builder.unitIndex
 		result.UnitDetail = builder.unitDetail
@@ -184,6 +193,92 @@ type unitBuilder struct {
 type fileTokens struct {
 	file     syntax.File
 	oldToNew []int
+}
+
+func (b *unitBuilder) reserveCheckedPackage(pkg load.Package, info check.PackageInfo) {
+	textCap := 0
+	tokenCap := 1
+	for i := 0; i < len(pkg.Files); i++ {
+		src := pkg.Files[i].File.Src
+		textCap += len(src)
+		tokenCap += len(pkg.Files[i].File.Tokens)
+		if i+1 < len(pkg.Files) && (len(src) == 0 || src[len(src)-1] != '\n') {
+			textCap++
+		}
+	}
+	typeFieldCap := 0
+	typeIfaceCap := 0
+	typeFuncCap := 0
+	for i := 0; i < len(info.Types); i++ {
+		typ := info.Types[i]
+		if typ.Kind == check.TypeStruct {
+			typeFieldCap++
+		} else if typ.Kind == check.TypeInterface {
+			typeIfaceCap++
+		} else if typ.Kind == check.TypeFunc {
+			typeFuncCap++
+		}
+	}
+	constCap := 0
+	indexCap := 0
+	compositeCap := 0
+	callCap := 0
+	refCap := 0
+	selectorCap := 0
+	for i := 0; i < len(info.Decls); i++ {
+		decl := info.Decls[i]
+		if decl.Kind == check.SymbolConst && decl.Const.Ok {
+			constCap++
+		}
+		indexCap += len(decl.Indexes)
+		compositeCap += len(decl.Composites)
+		callCap += len(decl.Calls)
+		refCap += len(decl.Refs)
+		selectorCap += len(decl.Selectors)
+	}
+	stmtCap := 0
+	localCap := 0
+	typeRefCap := len(info.TypeRefs)
+	assignCap := 0
+	returnCap := 0
+	for i := 0; i < len(info.Bodies); i++ {
+		body := info.Bodies[i]
+		stmtCap += len(body.Body.Stmts)
+		localCap += len(body.Locals)
+		typeRefCap += len(body.TypeRefs)
+		indexCap += len(body.Indexes)
+		compositeCap += len(body.Composites)
+		callCap += len(body.Calls)
+		refCap += len(body.Refs)
+		selectorCap += len(body.Selectors)
+		assignCap += len(body.Assigns)
+		returnCap += len(body.Returns)
+	}
+	b.program.Text = make([]byte, 0, textCap)
+	b.program.Tokens = make([]unit.Token, 0, tokenCap)
+	b.program.Imports = make([]unit.Import, 0, len(info.Imports))
+	b.program.Symbols = make([]unit.Symbol, 0, len(info.Symbols))
+	b.program.Decls = make([]unit.Decl, 0, len(info.Decls))
+	b.program.DeclMeta = make([]unit.DeclMeta, 0, len(info.Decls))
+	b.program.InitOrder = make([]int, 0, len(info.InitOrder))
+	b.program.Consts = make([]unit.ConstValue, 0, constCap)
+	b.program.Funcs = make([]unit.Func, 0, len(info.Bodies))
+	b.program.Signatures = make([]unit.FuncSignature, 0, len(info.Bodies))
+	b.program.Stmts = make([]unit.Statement, 0, stmtCap)
+	b.program.Types = make([]unit.TypeInfo, 0, len(info.Types))
+	b.program.TypeFields = make([]unit.TypeFields, 0, typeFieldCap)
+	b.program.TypeIfaces = make([]unit.TypeIface, 0, typeIfaceCap)
+	b.program.TypeFuncs = make([]unit.TypeFuncSig, 0, typeFuncCap)
+	b.program.Methods = make([]unit.MethodInfo, 0, len(info.Methods))
+	b.program.TypeRefs = make([]unit.TypeRef, 0, typeRefCap)
+	b.program.Locals = make([]unit.LocalDecl, 0, localCap)
+	b.program.Indexes = make([]unit.IndexExpr, 0, indexCap)
+	b.program.Composites = make([]unit.CompositeExpr, 0, compositeCap)
+	b.program.Assigns = make([]unit.Assignment, 0, assignCap)
+	b.program.Returns = make([]unit.Return, 0, returnCap)
+	b.program.Calls = make([]unit.Call, 0, callCap)
+	b.program.Refs = make([]unit.NameRef, 0, refCap)
+	b.program.Selectors = make([]unit.Selector, 0, selectorCap)
 }
 
 func (b *unitBuilder) addFile(file syntax.File, fileIndex int, hasNext bool) bool {
@@ -245,7 +340,7 @@ func appendBytes(out []byte, data []byte) []byte {
 	return out
 }
 
-func (b *unitBuilder) finishUnit() bool {
+func (b *unitBuilder) finishUnit(validate bool) bool {
 	line := b.lineOffset + 1
 	b.program.Tokens = append(b.program.Tokens, unit.Token{
 		Kind:  unit.TokenEOF,
@@ -253,6 +348,9 @@ func (b *unitBuilder) finishUnit() bool {
 		Size:  0,
 		Line:  line,
 	})
+	if !validate {
+		return true
+	}
 	_, ok := unit.Marshal(b.program)
 	if !ok {
 		b.unitError = unit.LastMarshalError

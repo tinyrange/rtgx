@@ -10,14 +10,37 @@ type RTGFS struct{}
 
 func syscall(num int, fd int, buf []byte, size int) int { return 0 }
 
+func rtg_runtime_ArenaMark() int { return 0 }
+
+func rtg_runtime_ArenaReset(mark int) {}
+
+func rtg_runtime_ArenaPersistString(value string) string { return value }
+
+func rtg_runtime_ArenaPersistBytes(value []byte) []byte { return value }
+
 func RunRTGCommand(args []string, env []string) int {
 	commandArgs := dropProgramArg(args)
+	resetArena := rtgFrontendCanResetArena()
+	mark := 0
+	if resetArena {
+		mark = rtg_runtime_ArenaMark()
+	}
 	built := BuildFromFS(commandArgs, rtgWorkDir(env), "/std", RTGFS{})
 	if !built.Ok {
 		printRTGBuildError(built)
 		return 1
 	}
-	if !rtgx.RtgCompileUnitToOutputStrip(built.Unit, built.Options.Target, built.Options.Output, built.Options.Strip) {
+	unit := built.Unit
+	target := built.Options.Target
+	output := built.Options.Output
+	strip := built.Options.Strip
+	if resetArena {
+		unit = rtg_runtime_ArenaPersistBytes(unit)
+		target = rtg_runtime_ArenaPersistString(target)
+		output = rtg_runtime_ArenaPersistString(output)
+		rtg_runtime_ArenaReset(mark)
+	}
+	if !rtgx.RtgCompileUnitToOutputStrip(unit, target, output, strip) {
 		print("rtg: backend compilation failed\n")
 		return 1
 	}

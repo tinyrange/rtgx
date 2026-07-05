@@ -37,12 +37,12 @@ func BuildUnit(workDir string, stdRoot string, arg string, files []load.SourceFi
 	if !workspace.Ok {
 		return pipelineFail(result, PipelineErrLoad, -1, workspace.ErrorFile, -1)
 	}
-	built := build.BuildUnits(workspace.Graph)
+	built := build.BuildPrograms(workspace.Graph)
 	result.Build = built
 	if !built.Ok {
 		return pipelineFail(result, PipelineErrBuild, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
-	linked := link.LinkBuild(built)
+	linked := link.LinkBuildCore(built)
 	result.Link = linked
 	if !linked.Ok {
 		return pipelineFail(result, PipelineErrLink, linked.ErrorPackage, -1, -1)

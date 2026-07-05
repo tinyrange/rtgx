@@ -21,6 +21,14 @@ type Result struct {
 }
 
 func LinkBuild(result build.Result) Result {
+	return linkBuild(result, false)
+}
+
+func LinkBuildCore(result build.Result) Result {
+	return linkBuild(result, true)
+}
+
+func linkBuild(result build.Result, coreOnly bool) Result {
 	out := Result{Ok: true, Error: LinkOK, ErrorPackage: -1}
 	if !result.Ok {
 		out.Ok = false
@@ -36,7 +44,14 @@ func LinkBuild(result build.Result) Result {
 	var program unit.Program
 	pkg := 0
 	ok := false
-	program, pkg, ok = LinkUnitData(result.Units, result.Root)
+	if coreOnly {
+		program, ok = LinkUnitsCore(result.Units, result.Root)
+	} else {
+		program, ok = LinkUnits(result.Units, result.Root)
+	}
+	if !ok {
+		program, pkg, ok = LinkUnitData(result.Units, result.Root)
+	}
 	if !ok {
 		out.Ok = false
 		out.Error = LinkErrUnit
@@ -44,7 +59,11 @@ func LinkBuild(result build.Result) Result {
 		return out
 	}
 	var data []byte
-	data, ok = unit.Marshal(program)
+	if coreOnly {
+		data, ok = marshalCoreProgram(program)
+	} else {
+		data, ok = unit.Marshal(program)
+	}
 	if !ok {
 		out.Ok = false
 		out.Error = LinkErrUnit
@@ -53,6 +72,31 @@ func LinkBuild(result build.Result) Result {
 	out.Program = program
 	out.Data = data
 	return out
+}
+
+func marshalCoreProgram(program unit.Program) ([]byte, bool) {
+	program.Imports = nil
+	program.Symbols = nil
+	program.DeclMeta = nil
+	program.InitOrder = nil
+	program.Consts = nil
+	program.Signatures = nil
+	program.Stmts = nil
+	program.Types = nil
+	program.TypeFields = nil
+	program.TypeIfaces = nil
+	program.TypeFuncs = nil
+	program.Methods = nil
+	program.TypeRefs = nil
+	program.Locals = nil
+	program.Indexes = nil
+	program.Composites = nil
+	program.Assigns = nil
+	program.Returns = nil
+	program.Calls = nil
+	program.Refs = nil
+	program.Selectors = nil
+	return unit.Marshal(program)
 }
 
 func LinkUnitData(units []build.PackageUnit, root int) (unit.Program, int, bool) {
@@ -90,7 +134,27 @@ func LinkUnits(units []build.PackageUnit, root int) (unit.Program, bool) {
 	return LinkPrograms(programs, root, units[root].Name)
 }
 
+func LinkUnitsCore(units []build.PackageUnit, root int) (unit.Program, bool) {
+	var empty unit.Program
+	if root < 0 || root >= len(units) {
+		return empty, false
+	}
+	programs := make([]unit.Program, len(units))
+	for i := 0; i < len(units); i++ {
+		programs[i] = units[i].Program
+	}
+	return LinkProgramsCore(programs, root, units[root].Name)
+}
+
 func LinkPrograms(programs []unit.Program, root int, rootName string) (unit.Program, bool) {
+	return linkPrograms(programs, root, rootName, false)
+}
+
+func LinkProgramsCore(programs []unit.Program, root int, rootName string) (unit.Program, bool) {
+	return linkPrograms(programs, root, rootName, true)
+}
+
+func linkPrograms(programs []unit.Program, root int, rootName string, coreOnly bool) (unit.Program, bool) {
 	var empty unit.Program
 	if root < 0 || root >= len(programs) || rootName == "" {
 		return empty, false
@@ -100,12 +164,17 @@ func LinkPrograms(programs []unit.Program, root int, rootName string) (unit.Prog
 		return empty, false
 	}
 	program := unit.Program{Package: rootName, ImportPath: programs[root].ImportPath}
+	if coreOnly {
+		reserveCoreLinkedProgram(&program, programs)
+	} else {
+		reserveLinkedProgram(&program, programs)
+	}
 	finalEOF := countLinkedTokens(programs)
 	symbolOffsets := packageSymbolOffsets(programs)
 	aliases := packageSymbolAliases(programs, root, symbolOffsets)
 	lineOffset := 0
 	for i := 0; i < len(programs); i++ {
-		ok := appendProgram(&program, programs[i], finalEOF, lineOffset, symbolOffsets, aliases, i+1 < len(programs))
+		ok := appendProgram(&program, programs[i], finalEOF, lineOffset, symbolOffsets, aliases, i+1 < len(programs), coreOnly)
 		if !ok {
 			return empty, false
 		}
@@ -118,6 +187,105 @@ func LinkPrograms(programs []unit.Program, root int, rootName string) (unit.Prog
 		Line:  lineOffset + 1,
 	})
 	return program, true
+}
+
+func reserveCoreLinkedProgram(program *unit.Program, programs []unit.Program) {
+	textCap := 0
+	tokenCap := 1
+	declCap := 0
+	funcCap := 0
+	for i := 0; i < len(programs); i++ {
+		p := programs[i]
+		textCap += len(p.Text) + 1
+		tokenCap += len(p.Tokens)
+		declCap += len(p.Decls)
+		funcCap += len(p.Funcs)
+	}
+	program.Text = make([]byte, 0, textCap)
+	program.Tokens = make([]unit.Token, 0, tokenCap)
+	program.Decls = make([]unit.Decl, 0, declCap)
+	program.Funcs = make([]unit.Func, 0, funcCap)
+}
+
+func reserveLinkedProgram(program *unit.Program, programs []unit.Program) {
+	textCap := 0
+	tokenCap := 1
+	importCap := 0
+	symbolCap := 0
+	declCap := 0
+	declMetaCap := 0
+	initOrderCap := 0
+	constCap := 0
+	funcCap := 0
+	signatureCap := 0
+	stmtCap := 0
+	typeCap := 0
+	typeFieldCap := 0
+	typeIfaceCap := 0
+	typeFuncCap := 0
+	methodCap := 0
+	typeRefCap := 0
+	localCap := 0
+	indexCap := 0
+	compositeCap := 0
+	assignCap := 0
+	returnCap := 0
+	callCap := 0
+	refCap := 0
+	selectorCap := 0
+	for i := 0; i < len(programs); i++ {
+		p := programs[i]
+		textCap += len(p.Text) + 1
+		tokenCap += len(p.Tokens)
+		importCap += len(p.Imports)
+		symbolCap += len(p.Symbols)
+		declCap += len(p.Decls)
+		declMetaCap += len(p.DeclMeta)
+		initOrderCap += len(p.InitOrder)
+		constCap += len(p.Consts)
+		funcCap += len(p.Funcs)
+		signatureCap += len(p.Signatures)
+		stmtCap += len(p.Stmts)
+		typeCap += len(p.Types)
+		typeFieldCap += len(p.TypeFields)
+		typeIfaceCap += len(p.TypeIfaces)
+		typeFuncCap += len(p.TypeFuncs)
+		methodCap += len(p.Methods)
+		typeRefCap += len(p.TypeRefs)
+		localCap += len(p.Locals)
+		indexCap += len(p.Indexes)
+		compositeCap += len(p.Composites)
+		assignCap += len(p.Assigns)
+		returnCap += len(p.Returns)
+		callCap += len(p.Calls)
+		refCap += len(p.Refs)
+		selectorCap += len(p.Selectors)
+	}
+	program.Text = make([]byte, 0, textCap)
+	program.Tokens = make([]unit.Token, 0, tokenCap)
+	program.Imports = make([]unit.Import, 0, importCap)
+	program.Symbols = make([]unit.Symbol, 0, symbolCap)
+	program.Decls = make([]unit.Decl, 0, declCap)
+	program.DeclMeta = make([]unit.DeclMeta, 0, declMetaCap)
+	program.InitOrder = make([]int, 0, initOrderCap)
+	program.Consts = make([]unit.ConstValue, 0, constCap)
+	program.Funcs = make([]unit.Func, 0, funcCap)
+	program.Signatures = make([]unit.FuncSignature, 0, signatureCap)
+	program.Stmts = make([]unit.Statement, 0, stmtCap)
+	program.Types = make([]unit.TypeInfo, 0, typeCap)
+	program.TypeFields = make([]unit.TypeFields, 0, typeFieldCap)
+	program.TypeIfaces = make([]unit.TypeIface, 0, typeIfaceCap)
+	program.TypeFuncs = make([]unit.TypeFuncSig, 0, typeFuncCap)
+	program.Methods = make([]unit.MethodInfo, 0, methodCap)
+	program.TypeRefs = make([]unit.TypeRef, 0, typeRefCap)
+	program.Locals = make([]unit.LocalDecl, 0, localCap)
+	program.Indexes = make([]unit.IndexExpr, 0, indexCap)
+	program.Composites = make([]unit.CompositeExpr, 0, compositeCap)
+	program.Assigns = make([]unit.Assignment, 0, assignCap)
+	program.Returns = make([]unit.Return, 0, returnCap)
+	program.Calls = make([]unit.Call, 0, callCap)
+	program.Refs = make([]unit.NameRef, 0, refCap)
+	program.Selectors = make([]unit.Selector, 0, selectorCap)
 }
 
 func preparePrograms(programs []unit.Program, root int) ([]unit.Program, bool) {
@@ -252,7 +420,7 @@ func linkedProgramText(program unit.Program, start int, end int) string {
 	return string(program.Text[start:end])
 }
 
-func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset int, symbolOffsets []int, aliases []string, hasNext bool) bool {
+func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset int, symbolOffsets []int, aliases []string, hasNext bool, coreOnly bool) bool {
 	if src.Package == "" || len(src.Text) == 0 || len(src.Tokens) == 0 {
 		return false
 	}
@@ -314,26 +482,28 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		decl.NameEnd = nameEnd
 		dst.Decls = append(dst.Decls, decl)
 	}
-	for i := 0; i < len(src.DeclMeta); i++ {
-		meta, ok := mapDeclMeta(src.DeclMeta[i], oldToNew, finalEOF, declOffset, symbolOffset)
-		if !ok {
-			return false
+	if !coreOnly {
+		for i := 0; i < len(src.DeclMeta); i++ {
+			meta, ok := mapDeclMeta(src.DeclMeta[i], oldToNew, finalEOF, declOffset, symbolOffset)
+			if !ok {
+				return false
+			}
+			dst.DeclMeta = append(dst.DeclMeta, meta)
 		}
-		dst.DeclMeta = append(dst.DeclMeta, meta)
-	}
-	for i := 0; i < len(src.InitOrder); i++ {
-		decl := src.InitOrder[i]
-		if decl < 0 || decl >= len(src.Decls) {
-			return false
+		for i := 0; i < len(src.InitOrder); i++ {
+			decl := src.InitOrder[i]
+			if decl < 0 || decl >= len(src.Decls) {
+				return false
+			}
+			dst.InitOrder = append(dst.InitOrder, declOffset+decl)
 		}
-		dst.InitOrder = append(dst.InitOrder, declOffset+decl)
-	}
-	for i := 0; i < len(src.Consts); i++ {
-		value, ok := mapConst(src.Consts[i], declOffset, len(src.Decls))
-		if !ok {
-			return false
+		for i := 0; i < len(src.Consts); i++ {
+			value, ok := mapConst(src.Consts[i], declOffset, len(src.Decls))
+			if !ok {
+				return false
+			}
+			dst.Consts = append(dst.Consts, value)
 		}
-		dst.Consts = append(dst.Consts, value)
 	}
 	for i := 0; i < len(src.Funcs); i++ {
 		fn := src.Funcs[i]
@@ -351,6 +521,12 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		fn.BodyEnd = mapToken(oldToNew, fn.BodyEnd, finalEOF)
 		fn.EndTok = mapToken(oldToNew, fn.EndTok, finalEOF)
 		dst.Funcs = append(dst.Funcs, fn)
+	}
+	if coreOnly {
+		if hasNext && (len(src.Text) == 0 || src.Text[len(src.Text)-1] != '\n') {
+			dst.Text = append(dst.Text, '\n')
+		}
+		return true
 	}
 	for i := 0; i < len(src.Symbols); i++ {
 		symbol := src.Symbols[i]

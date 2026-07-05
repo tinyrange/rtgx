@@ -41,6 +41,14 @@ type Result struct {
 }
 
 func BuildUnits(graph load.Graph) Result {
+	return buildUnits(graph, true)
+}
+
+func BuildPrograms(graph load.Graph) Result {
+	return buildUnits(graph, false)
+}
+
+func buildUnits(graph load.Graph, encodePackages bool) Result {
 	prog := check.CheckGraph(graph)
 	result := Result{
 		Check:        prog,
@@ -56,7 +64,12 @@ func BuildUnits(graph load.Graph) Result {
 	}
 	for i := 0; i < len(graph.Packages); i++ {
 		pkg := graph.Packages[i]
-		emit := lower.EmitCheckedPackage(pkg, prog.Packages[i])
+		var emit lower.Result
+		if encodePackages {
+			emit = lower.EmitCheckedPackage(pkg, prog.Packages[i])
+		} else {
+			emit = lower.EmitCheckedPackageFast(pkg, prog.Packages[i])
+		}
 		if !emit.Ok {
 			result.LowerError = emit.Error
 			result.LowerUnitError = emit.UnitError
@@ -67,9 +80,13 @@ func BuildUnits(graph load.Graph) Result {
 			result.LowerUnitC = emit.UnitC
 			return buildFail(result, BuildErrLower, i, emit.ErrorFile, emit.ErrorToken)
 		}
-		data, ok := unit.Marshal(emit.Program)
-		if !ok {
-			return buildFail(result, BuildErrUnit, i, -1, -1)
+		var data []byte
+		if encodePackages {
+			var ok bool
+			data, ok = unit.Marshal(emit.Program)
+			if !ok {
+				return buildFail(result, BuildErrUnit, i, -1, -1)
+			}
 		}
 		if pkg.Ref.ImportPath == graph.Root {
 			result.Root = len(result.Units)
