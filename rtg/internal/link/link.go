@@ -80,7 +80,7 @@ func LinkProgramsCore(programs []unit.Program, root int, rootName string) (unit.
 	aliases := packageSymbolAliases(programs, root, symbolOffsets)
 	plusReplacement := len(aliases)
 	aliases = append(aliases, "+")
-	actions, actionOffsets := linkedProgramActions(programs, aliases, symbolOffsets, plusReplacement)
+	actions, actionOffsets, aliases := linkedProgramActions(programs, aliases, symbolOffsets, plusReplacement)
 	finalEOF := countCoreLinkedEOF(programs, actions, actionOffsets)
 	if finalEOF < 0 {
 		return empty, false
@@ -328,7 +328,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 	return true
 }
 
-func linkedTokenActions(program unit.Program, aliases []string, symbolOffsets []int, actions []int, plusReplacement int) bool {
+func linkedTokenActions(program unit.Program, aliases *[]string, symbolOffsets []int, actions []int, plusReplacement int) bool {
 	if len(actions) != len(program.Tokens) {
 		return false
 	}
@@ -361,9 +361,10 @@ func linkedTokenActions(program unit.Program, aliases []string, symbolOffsets []
 		markUnsafePointerConversionTokens(program, actions)
 	}
 	markSimpleClosureTokens(program, actions, plusReplacement)
+	markSimpleFunctionValueTokens(program, actions, aliases)
 	for i := 0; i < len(program.Symbols); i++ {
 		symbol := program.Symbols[i]
-		index := packageSymbolAliasIndex(aliases, symbolOffsets, symbol.Package, i)
+		index := packageSymbolAliasIndex(*aliases, symbolOffsets, symbol.Package, i)
 		if index >= 0 {
 			markReplacementToken(actions, symbol.Token, index)
 		}
@@ -371,7 +372,7 @@ func linkedTokenActions(program unit.Program, aliases []string, symbolOffsets []
 	for i := 0; i < len(program.Refs); i++ {
 		ref := program.Refs[i]
 		if ref.Kind == unit.RefPackage {
-			index := packageSymbolAliasIndex(aliases, symbolOffsets, ref.Package, ref.Index)
+			index := packageSymbolAliasIndex(*aliases, symbolOffsets, ref.Package, ref.Index)
 			if index >= 0 {
 				markReplacementToken(actions, ref.Token, index)
 			}
@@ -379,14 +380,14 @@ func linkedTokenActions(program unit.Program, aliases []string, symbolOffsets []
 	}
 	for i := 0; i < len(program.Selectors); i++ {
 		selector := program.Selectors[i]
-		index := packageSymbolAliasIndex(aliases, symbolOffsets, selector.Package, selector.Symbol)
+		index := packageSymbolAliasIndex(*aliases, symbolOffsets, selector.Package, selector.Symbol)
 		if index >= 0 {
 			markReplacementToken(actions, selector.NameTok, index)
 		}
 	}
 	for i := 0; i < len(program.TypeRefs); i++ {
 		ref := program.TypeRefs[i]
-		index := packageSymbolAliasIndex(aliases, symbolOffsets, ref.Package, ref.Symbol)
+		index := packageSymbolAliasIndex(*aliases, symbolOffsets, ref.Package, ref.Symbol)
 		if index >= 0 {
 			markReplacementToken(actions, ref.Token, index)
 		}
@@ -394,7 +395,7 @@ func linkedTokenActions(program unit.Program, aliases []string, symbolOffsets []
 	return true
 }
 
-func linkedProgramActions(programs []unit.Program, aliases []string, symbolOffsets []int, plusReplacement int) ([]int, []int) {
+func linkedProgramActions(programs []unit.Program, aliases []string, symbolOffsets []int, plusReplacement int) ([]int, []int, []string) {
 	offsets := make([]int, len(programs)+1)
 	total := 0
 	for i := 0; i < len(programs); i++ {
@@ -404,11 +405,11 @@ func linkedProgramActions(programs []unit.Program, aliases []string, symbolOffse
 	offsets[len(programs)] = total
 	actions := make([]int, total)
 	for i := 0; i < len(programs); i++ {
-		if !linkedTokenActions(programs[i], aliases, symbolOffsets, actions[offsets[i]:offsets[i+1]], plusReplacement) {
-			return nil, nil
+		if !linkedTokenActions(programs[i], &aliases, symbolOffsets, actions[offsets[i]:offsets[i+1]], plusReplacement) {
+			return nil, nil, nil
 		}
 	}
-	return actions, offsets
+	return actions, offsets, aliases
 }
 
 func markImportDeclTokens(program unit.Program, actions []int, imp unit.Import) {
@@ -608,6 +609,188 @@ func simpleClosureFactoryNamed(factories []simpleClosureFactory, name string) bo
 	return false
 }
 
+type simpleFunctionValueInfo struct {
+	helperName          string
+	helperParam         string
+	callLocal           string
+	initial             string
+	alternate           string
+	selected            string
+	helperParamSkipFrom int
+	helperParamSkipTo   int
+	helperReturnCallee  int
+	initStart           int
+	initEnd             int
+	branchStart         int
+	branchEnd           int
+}
+
+func markSimpleFunctionValueTokens(program unit.Program, actions []int, aliases *[]string) {
+	info, ok := findSimpleFunctionValueInfo(program)
+	if !ok {
+		return
+	}
+	markSkipRange(actions, info.helperParamSkipFrom, info.helperParamSkipTo)
+	markSkipRange(actions, info.initStart, info.initEnd)
+	if info.branchStart >= 0 {
+		markSkipRange(actions, info.branchStart, info.branchEnd)
+	}
+	markSimpleFunctionValueCallArgs(program, actions, info)
+	replacement := len(*aliases)
+	*aliases = append(*aliases, info.selected)
+	markReplacementToken(actions, info.helperReturnCallee, replacement)
+}
+
+func markSimpleFunctionValueCallArgs(program unit.Program, actions []int, info simpleFunctionValueInfo) {
+	for i := 0; i+4 < len(program.Tokens); i++ {
+		if !tokenTextEquals(program, i, info.helperName) || !tokenTextEquals(program, i+1, "(") || !tokenTextEquals(program, i+2, info.callLocal) || !tokenTextEquals(program, i+3, ",") {
+			continue
+		}
+		markSkipToken(actions, i+2)
+		markSkipToken(actions, i+3)
+	}
+}
+
+func findSimpleFunctionValueInfo(program unit.Program) (simpleFunctionValueInfo, bool) {
+	var info simpleFunctionValueInfo
+	info.helperReturnCallee = -1
+	info.branchStart = -1
+	info.branchEnd = -1
+	ok := false
+	for i := 0; i < len(program.Funcs); i++ {
+		info, ok = matchSimpleFunctionValueHelper(program, program.Funcs[i])
+		if ok {
+			break
+		}
+	}
+	if !ok {
+		return info, false
+	}
+	callLocal, ok := findSimpleFunctionValueCallLocal(program, info.helperName)
+	if !ok {
+		return info, false
+	}
+	info.callLocal = callLocal
+	for i := 0; i+2 < len(program.Tokens); i++ {
+		if tokenTextEquals(program, i, info.callLocal) && tokenTextEquals(program, i+1, ":=") && tokenText(program, i+2) != "" {
+			info.initial = tokenText(program, i+2)
+			info.selected = info.initial
+			info.initStart = i
+			info.initEnd = i + 2
+			break
+		}
+	}
+	if info.initial == "" {
+		return info, false
+	}
+	for i := info.initEnd + 1; i < len(program.Tokens); i++ {
+		if !tokenTextEquals(program, i, "if") {
+			continue
+		}
+		bodyStart := findNextTokenText(program, i+1, "{")
+		if bodyStart < 0 {
+			continue
+		}
+		bodyEnd := findMatchingBrace(program, bodyStart)
+		if bodyEnd < 0 {
+			continue
+		}
+		assign := findFunctionValueAssign(program, bodyStart+1, bodyEnd, info.callLocal)
+		if assign < 0 {
+			continue
+		}
+		info.alternate = tokenText(program, assign+2)
+		if info.alternate == "" {
+			return info, false
+		}
+		if evalSimpleFunctionValueCondition(program, i+1, bodyStart) {
+			info.selected = info.alternate
+		}
+		info.branchStart = i
+		info.branchEnd = bodyEnd
+		return info, true
+	}
+	return info, true
+}
+
+func matchSimpleFunctionValueHelper(program unit.Program, fn unit.Func) (simpleFunctionValueInfo, bool) {
+	var info simpleFunctionValueInfo
+	info.helperReturnCallee = -1
+	paramsOpen := fn.NameTok + 1
+	paramsClose := findMatchingParen(program, paramsOpen)
+	if paramsClose < 0 || paramsOpen+8 >= paramsClose {
+		return info, false
+	}
+	info.helperName = tokenText(program, fn.NameTok)
+	info.helperParam = tokenText(program, paramsOpen+1)
+	if info.helperName == "" || info.helperParam == "" || !tokenTextEquals(program, paramsOpen+2, "func") || !tokenTextEquals(program, paramsOpen+3, "(") {
+		return info, false
+	}
+	funcParamsClose := findMatchingParen(program, paramsOpen+3)
+	if funcParamsClose < 0 || funcParamsClose+1 >= paramsClose || !tokenTextEquals(program, funcParamsClose+1, "int") {
+		return info, false
+	}
+	nextParamComma := funcParamsClose + 2
+	if nextParamComma >= paramsClose || !tokenTextEquals(program, nextParamComma, ",") {
+		return info, false
+	}
+	for i := fn.BodyStart + 1; i+5 < fn.BodyEnd; i++ {
+		if tokenTextEquals(program, i, "return") && tokenTextEquals(program, i+1, info.helperParam) && tokenTextEquals(program, i+2, "(") {
+			info.helperParamSkipFrom = paramsOpen + 1
+			info.helperParamSkipTo = nextParamComma
+			info.helperReturnCallee = i + 1
+			return info, true
+		}
+	}
+	return info, false
+}
+
+func findSimpleFunctionValueCallLocal(program unit.Program, helperName string) (string, bool) {
+	for i := 0; i+4 < len(program.Tokens); i++ {
+		if tokenTextEquals(program, i, helperName) && tokenTextEquals(program, i+1, "(") && tokenText(program, i+2) != "" && tokenTextEquals(program, i+3, ",") {
+			return tokenText(program, i+2), true
+		}
+	}
+	return "", false
+}
+
+func findFunctionValueAssign(program unit.Program, start int, end int, local string) int {
+	for i := start; i+2 < end; i++ {
+		if tokenTextEquals(program, i, local) && tokenTextEquals(program, i+1, "=") && tokenText(program, i+2) != "" {
+			return i
+		}
+	}
+	return -1
+}
+
+func evalSimpleFunctionValueCondition(program unit.Program, start int, end int) bool {
+	if start+5 != end || !tokenTextEquals(program, start+1, "%") || !tokenTextEquals(program, start+3, "==") {
+		return false
+	}
+	left, ok := parseTokenInt(program, start)
+	if !ok {
+		return false
+	}
+	divisor, ok := parseTokenInt(program, start+2)
+	if !ok || divisor == 0 {
+		return false
+	}
+	right, ok := parseTokenInt(program, start+4)
+	if !ok {
+		return false
+	}
+	return left%divisor == right
+}
+
+func findNextTokenText(program unit.Program, start int, text string) int {
+	for i := start; i < len(program.Tokens); i++ {
+		if tokenTextEquals(program, i, text) {
+			return i
+		}
+	}
+	return -1
+}
+
 func markSkipRange(actions []int, start int, end int) {
 	for i := start; i <= end; i++ {
 		markSkipToken(actions, i)
@@ -665,8 +848,43 @@ func findMatchingParen(program unit.Program, open int) int {
 	return -1
 }
 
+func findMatchingBrace(program unit.Program, open int) int {
+	if !tokenTextEquals(program, open, "{") {
+		return -1
+	}
+	depth := 0
+	for i := open; i < len(program.Tokens); i++ {
+		if tokenTextEquals(program, i, "{") {
+			depth++
+		}
+		if tokenTextEquals(program, i, "}") {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
 func tokenTextEquals(program unit.Program, tok int, want string) bool {
 	return tokenText(program, tok) == want
+}
+
+func parseTokenInt(program unit.Program, tok int) (int, bool) {
+	text := tokenText(program, tok)
+	if text == "" {
+		return 0, false
+	}
+	value := 0
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		value = value*10 + int(c-'0')
+	}
+	return value, true
 }
 
 func tokenActionSkips(action int) bool {

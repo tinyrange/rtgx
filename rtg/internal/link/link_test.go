@@ -298,6 +298,58 @@ func appMain() int {
 	}
 }
 
+func TestLinkBuildCoreLowersSimpleFunctionValue(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func add(a int, b int) int {
+	return a + b
+}
+
+func mul(a int, b int) int {
+	return a * b
+}
+
+func choose(fn func(int, int) int, a int, b int) int {
+	return fn(a, b)
+}
+
+func appMain() int {
+	fn := add
+	if 1%2 == 1 {
+		fn = mul
+	}
+	if choose(fn, 3, 4) == 12 {
+		print("PASS\n")
+		return 0
+	}
+	print("FAIL\n")
+	return 1
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d marshal=%d/%d", linked.Error, linked.ErrorPackage, unit.LastMarshalError, unit.LastMarshalIndex)
+	}
+	decoded, ok := unit.Unmarshal(linked.Data)
+	if !ok {
+		t.Fatal("linked core unit did not decode")
+	}
+	if bytes.Contains(decoded.Text, []byte("func(int, int) int")) || bytes.Contains(decoded.Text, []byte("fn := add")) || bytes.Contains(decoded.Text, []byte("fn = mul")) {
+		t.Fatalf("linked text still contains function-value syntax:\n%s", string(decoded.Text))
+	}
+	if bytes.Contains(decoded.Text, []byte("choose(fn")) {
+		t.Fatalf("linked text still passes a function value:\n%s", string(decoded.Text))
+	}
+	if !bytes.Contains(decoded.Text, []byte("func choose(")) ||
+		!bytes.Contains(decoded.Text, []byte("return mul(a, b)")) ||
+		!bytes.Contains(decoded.Text, []byte("3, 4) == 12")) {
+		t.Fatalf("linked text missing lowered function-value helper:\n%s", string(decoded.Text))
+	}
+}
+
 func TestLinkBuildCoreFoldsPackageInitVarDeps(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

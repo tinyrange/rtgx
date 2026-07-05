@@ -348,7 +348,7 @@ func linkPrograms(programs []unit.Program, root int, rootName string, coreOnly b
 	} else {
 		reserveLinkedProgram(&program, programs)
 	}
-	finalEOF := countLinkedTokens(programs)
+	finalEOF := countLinkedTokens(programs, coreOnly)
 	symbolOffsets := packageSymbolOffsets(programs)
 	aliases := packageSymbolAliases(programs, root, symbolOffsets)
 	lineOffset := 0
@@ -608,8 +608,8 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 	funcOffset := len(dst.Funcs)
 	typeOffset := len(dst.Types)
 	oldToNew := make([]int, len(src.Tokens))
-	skip, redirect := linkedTokenSkip(src)
-	replacements := linkedTokenReplacements(src, aliases, symbolOffsets)
+	skip, redirect := linkedTokenSkip(src, coreOnly)
+	replacements := linkedTokenReplacements(src, aliases, symbolOffsets, coreOnly)
 	prevEnd := 0
 	line := countNewlines(dst.Text) + 1
 	for i := 0; i < len(src.Tokens); i++ {
@@ -699,6 +699,9 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 	}
 	for i := 0; i < len(src.Funcs); i++ {
 		fn := src.Funcs[i]
+		if tokenSkipped(skip, fn.NameTok) {
+			continue
+		}
 		fn.StartTok = mapToken(oldToNew, fn.StartTok, finalEOF)
 		fn.NameTok = mapToken(oldToNew, fn.NameTok, finalEOF)
 		nameStart, nameEnd, ok := mappedTokenTextSpan(dst, fn.NameTok)
@@ -870,7 +873,7 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 	return true
 }
 
-func linkedTokenSkip(program unit.Program) ([]bool, []int) {
+func linkedTokenSkip(program unit.Program, coreOnly bool) ([]bool, []int) {
 	skip := make([]bool, len(program.Tokens))
 	redirect := make([]int, len(program.Tokens))
 	for i := 0; i < len(redirect); i++ {
@@ -905,6 +908,9 @@ func linkedTokenSkip(program unit.Program) ([]bool, []int) {
 		markUnsafePointerConversionTokens(program, skip)
 	}
 	markSimpleClosureSkipTokens(program, skip)
+	if coreOnly {
+		markSimpleFunctionValueSkipTokens(program, skip)
+	}
 	return skip, redirect
 }
 
@@ -1026,6 +1032,195 @@ func isSimpleClosureCall(program unit.Program, call unit.Call) bool {
 	factories := findSimpleClosureFactories(program)
 	locals := findSimpleClosureLocals(program, factories)
 	return nameInList(locals, tokenText(program, call.CalleeTok))
+}
+
+type simpleFunctionValueInfo struct {
+	helperName          string
+	helperParam         string
+	callLocal           string
+	initial             string
+	alternate           string
+	selected            string
+	helperParamSkipFrom int
+	helperParamSkipTo   int
+	helperReturnCallee  int
+	initStart           int
+	initEnd             int
+	branchStart         int
+	branchEnd           int
+}
+
+func markSimpleFunctionValueSkipTokens(program unit.Program, skip []bool) {
+	info, ok := findSimpleFunctionValueInfo(program)
+	if !ok {
+		return
+	}
+	markSkipRange(skip, info.helperParamSkipFrom, info.helperParamSkipTo)
+	markSkipRange(skip, info.initStart, info.initEnd)
+	if info.branchStart >= 0 {
+		markSkipRange(skip, info.branchStart, info.branchEnd)
+	}
+	markSimpleFunctionValueCallArgs(program, skip, info)
+}
+
+func markSimpleFunctionValueCallArgs(program unit.Program, skip []bool, info simpleFunctionValueInfo) {
+	for i := 0; i+4 < len(program.Tokens); i++ {
+		if !tokenTextEquals(program, i, info.helperName) || !tokenTextEquals(program, i+1, "(") || !tokenTextEquals(program, i+2, info.callLocal) || !tokenTextEquals(program, i+3, ",") {
+			continue
+		}
+		markSkipToken(skip, i+2)
+		markSkipToken(skip, i+3)
+	}
+}
+
+func markSimpleFunctionValueReplacementTokens(program unit.Program, replacements []string) {
+	info, ok := findSimpleFunctionValueInfo(program)
+	if !ok {
+		return
+	}
+	if info.helperReturnCallee >= 0 && info.helperReturnCallee < len(replacements) {
+		replacements[info.helperReturnCallee] = info.selected
+	}
+}
+
+func findSimpleFunctionValueInfo(program unit.Program) (simpleFunctionValueInfo, bool) {
+	var info simpleFunctionValueInfo
+	info.helperReturnCallee = -1
+	info.branchStart = -1
+	info.branchEnd = -1
+	ok := false
+	for i := 0; i < len(program.Funcs); i++ {
+		info, ok = matchSimpleFunctionValueHelper(program, program.Funcs[i])
+		if ok {
+			break
+		}
+	}
+	if !ok {
+		return info, false
+	}
+	callLocal, ok := findSimpleFunctionValueCallLocal(program, info.helperName)
+	if !ok {
+		return info, false
+	}
+	info.callLocal = callLocal
+	for i := 0; i+2 < len(program.Tokens); i++ {
+		if tokenTextEquals(program, i, info.callLocal) && tokenTextEquals(program, i+1, ":=") && tokenText(program, i+2) != "" {
+			info.initial = tokenText(program, i+2)
+			info.selected = info.initial
+			info.initStart = i
+			info.initEnd = i + 2
+			break
+		}
+	}
+	if info.initial == "" {
+		return info, false
+	}
+	for i := info.initEnd + 1; i < len(program.Tokens); i++ {
+		if !tokenTextEquals(program, i, "if") {
+			continue
+		}
+		bodyStart := findNextTokenText(program, i+1, "{")
+		if bodyStart < 0 {
+			continue
+		}
+		bodyEnd := findMatchingBrace(program, bodyStart)
+		if bodyEnd < 0 {
+			continue
+		}
+		assign := findFunctionValueAssign(program, bodyStart+1, bodyEnd, info.callLocal)
+		if assign < 0 {
+			continue
+		}
+		info.alternate = tokenText(program, assign+2)
+		if info.alternate == "" {
+			return info, false
+		}
+		if evalSimpleFunctionValueCondition(program, i+1, bodyStart) {
+			info.selected = info.alternate
+		}
+		info.branchStart = i
+		info.branchEnd = bodyEnd
+		return info, true
+	}
+	return info, true
+}
+
+func matchSimpleFunctionValueHelper(program unit.Program, fn unit.Func) (simpleFunctionValueInfo, bool) {
+	var info simpleFunctionValueInfo
+	info.helperReturnCallee = -1
+	paramsOpen := fn.NameTok + 1
+	paramsClose := findMatchingParen(program, paramsOpen)
+	if paramsClose < 0 || paramsOpen+8 >= paramsClose {
+		return info, false
+	}
+	info.helperName = tokenText(program, fn.NameTok)
+	info.helperParam = tokenText(program, paramsOpen+1)
+	if info.helperName == "" || info.helperParam == "" || !tokenTextEquals(program, paramsOpen+2, "func") || !tokenTextEquals(program, paramsOpen+3, "(") {
+		return info, false
+	}
+	funcParamsClose := findMatchingParen(program, paramsOpen+3)
+	if funcParamsClose < 0 || funcParamsClose+1 >= paramsClose || !tokenTextEquals(program, funcParamsClose+1, "int") {
+		return info, false
+	}
+	nextParamComma := funcParamsClose + 2
+	if nextParamComma >= paramsClose || !tokenTextEquals(program, nextParamComma, ",") {
+		return info, false
+	}
+	for i := fn.BodyStart + 1; i+5 < fn.BodyEnd; i++ {
+		if tokenTextEquals(program, i, "return") && tokenTextEquals(program, i+1, info.helperParam) && tokenTextEquals(program, i+2, "(") {
+			info.helperParamSkipFrom = paramsOpen + 1
+			info.helperParamSkipTo = nextParamComma
+			info.helperReturnCallee = i + 1
+			return info, true
+		}
+	}
+	return info, false
+}
+
+func findSimpleFunctionValueCallLocal(program unit.Program, helperName string) (string, bool) {
+	for i := 0; i+4 < len(program.Tokens); i++ {
+		if tokenTextEquals(program, i, helperName) && tokenTextEquals(program, i+1, "(") && tokenText(program, i+2) != "" && tokenTextEquals(program, i+3, ",") {
+			return tokenText(program, i+2), true
+		}
+	}
+	return "", false
+}
+
+func findFunctionValueAssign(program unit.Program, start int, end int, local string) int {
+	for i := start; i+2 < end; i++ {
+		if tokenTextEquals(program, i, local) && tokenTextEquals(program, i+1, "=") && tokenText(program, i+2) != "" {
+			return i
+		}
+	}
+	return -1
+}
+
+func evalSimpleFunctionValueCondition(program unit.Program, start int, end int) bool {
+	if start+5 != end || !tokenTextEquals(program, start+1, "%") || !tokenTextEquals(program, start+3, "==") {
+		return false
+	}
+	left, ok := parseTokenInt(program, start)
+	if !ok {
+		return false
+	}
+	divisor, ok := parseTokenInt(program, start+2)
+	if !ok || divisor == 0 {
+		return false
+	}
+	right, ok := parseTokenInt(program, start+4)
+	if !ok {
+		return false
+	}
+	return left%divisor == right
+}
+
+func findNextTokenText(program unit.Program, start int, text string) int {
+	for i := start; i < len(program.Tokens); i++ {
+		if tokenTextEquals(program, i, text) {
+			return i
+		}
+	}
+	return -1
 }
 
 func findSimpleClosureFactories(program unit.Program) []simpleClosureFactory {
@@ -1164,6 +1359,25 @@ func findMatchingParen(program unit.Program, open int) int {
 	return -1
 }
 
+func findMatchingBrace(program unit.Program, open int) int {
+	if !tokenTextEquals(program, open, "{") {
+		return -1
+	}
+	depth := 0
+	for i := open; i < len(program.Tokens); i++ {
+		if tokenTextEquals(program, i, "{") {
+			depth++
+		}
+		if tokenTextEquals(program, i, "}") {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
 func tokenText(program unit.Program, tok int) string {
 	if tok < 0 || tok >= len(program.Tokens) {
 		return ""
@@ -1179,7 +1393,16 @@ func tokenTextEquals(program unit.Program, tok int, want string) bool {
 	return tokenText(program, tok) == want
 }
 
-func linkedTokenReplacements(program unit.Program, aliases []string, symbolOffsets []int) []string {
+func parseTokenInt(program unit.Program, tok int) (int, bool) {
+	text := tokenText(program, tok)
+	if text == "" {
+		return 0, false
+	}
+	value, err := strconv.Atoi(text)
+	return value, err == nil
+}
+
+func linkedTokenReplacements(program unit.Program, aliases []string, symbolOffsets []int, coreOnly bool) []string {
 	out := make([]string, len(program.Tokens))
 	for i := 0; i < len(program.Symbols); i++ {
 		symbol := program.Symbols[i]
@@ -1212,6 +1435,9 @@ func linkedTokenReplacements(program unit.Program, aliases []string, symbolOffse
 		}
 	}
 	markSimpleClosureReplacementTokens(program, out)
+	if coreOnly {
+		markSimpleFunctionValueReplacementTokens(program, out)
+	}
 	return out
 }
 
@@ -1894,11 +2120,11 @@ func packageSymbolOffsets(programs []unit.Program) []int {
 	return out
 }
 
-func countLinkedTokens(programs []unit.Program) int {
+func countLinkedTokens(programs []unit.Program, coreOnly bool) int {
 	count := 0
 	for i := 0; i < len(programs); i++ {
 		tokens := programs[i].Tokens
-		skip, _ := linkedTokenSkip(programs[i])
+		skip, _ := linkedTokenSkip(programs[i], coreOnly)
 		for j := 0; j < len(tokens); j++ {
 			if tokens[j].Kind != unit.TokenEOF && !skip[j] {
 				count++
