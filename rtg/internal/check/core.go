@@ -77,9 +77,8 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			out.Kind = coreFuncKind(fn)
 			out.File = fileIndex
 			out.Func = i
-			bodyTokens := bodyEnd - bodyStart
-			out.CoreRefs = make([]CoreNameRef, 0, coreRefCapacity(bodyTokens))
-			out.CoreSelectors = make([]CoreSelectorRef, 0, coreSelectorCapacity(bodyTokens))
+			out.CoreRefs = make([]CoreNameRef, 0, countExprPackageRefsCore(file, fileIndex, info, scope, bodyStart, bodyEnd))
+			out.CoreSelectors = make([]CoreSelectorRef, 0, countImportSelectorsCore(file, fileIndex, info, checked, scope, bodyStart, bodyEnd))
 			out.CoreRefs = appendExprPackageRefsCore(out.CoreRefs, file, fileIndex, info, scope, bodyStart, bodyEnd)
 			out.CoreSelectors = appendImportSelectorsCore(out.CoreSelectors, file, fileIndex, info, checked, scope, bodyStart, bodyEnd)
 			locals := buildFuncLocalTypeSpansCore(file, fn)
@@ -144,9 +143,8 @@ func buildDeclInfoCore(file syntax.File, fileIndex int, info PackageInfo, checke
 	if valueStart >= 0 {
 		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, valueStart)
 		out.ValueStart, out.ValueEnd = trimDeclSpan(file, valueStart+1, decl.EndTok)
-		valueTokens := out.ValueEnd - out.ValueStart
-		out.CoreRefs = make([]CoreNameRef, 0, coreRefCapacity(valueTokens))
-		out.CoreSelectors = make([]CoreSelectorRef, 0, coreSelectorCapacity(valueTokens))
+		out.CoreRefs = make([]CoreNameRef, 0, countExprPackageRefsCore(file, fileIndex, info, CoreScope{}, out.ValueStart, out.ValueEnd))
+		out.CoreSelectors = make([]CoreSelectorRef, 0, countImportSelectorsCore(file, fileIndex, info, checked, CoreScope{}, out.ValueStart, out.ValueEnd))
 		out.CoreRefs = appendExprPackageRefsCore(out.CoreRefs, file, fileIndex, info, CoreScope{}, out.ValueStart, out.ValueEnd)
 		out.CoreSelectors = appendImportSelectorsCore(out.CoreSelectors, file, fileIndex, info, checked, CoreScope{}, out.ValueStart, out.ValueEnd)
 	} else {
@@ -164,6 +162,22 @@ type CoreScopeName struct {
 	Token int
 }
 
+func countExprPackageRefsCore(file syntax.File, fileIndex int, info PackageInfo, scope CoreScope, start int, end int) int {
+	count := 0
+	for i := start; i < end && i < len(file.Tokens); i++ {
+		if file.Tokens[i].Kind != syntax.TokenIdent || shouldSkipIdentRef(file, i, end) {
+			continue
+		}
+		if tokenTextIs(file, i, "_") || lookupScopeTokenNameCore(scope, file, i) >= 0 || lookupImportTokenNameCore(info, fileIndex, file, i) >= 0 {
+			continue
+		}
+		if lookupPackageSymbolTokenCore(info, file, fileIndex, i) >= 0 {
+			count++
+		}
+	}
+	return count
+}
+
 func appendExprPackageRefsCore(refs []CoreNameRef, file syntax.File, fileIndex int, info PackageInfo, scope CoreScope, start int, end int) []CoreNameRef {
 	for i := start; i < end && i < len(file.Tokens); i++ {
 		if file.Tokens[i].Kind != syntax.TokenIdent || shouldSkipIdentRef(file, i, end) {
@@ -178,6 +192,26 @@ func appendExprPackageRefsCore(refs []CoreNameRef, file syntax.File, fileIndex i
 		}
 	}
 	return refs
+}
+
+func countImportSelectorsCore(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int) int {
+	count := 0
+	for i := start + 1; i+1 < end && i+1 < len(file.Tokens); i++ {
+		if !tokenTextIs(file, i, ".") {
+			continue
+		}
+		if file.Tokens[i-1].Kind != syntax.TokenIdent || file.Tokens[i+1].Kind != syntax.TokenIdent {
+			continue
+		}
+		if tokenTextIs(file, i-1, "_") || tokenTextIs(file, i+1, "_") {
+			continue
+		}
+		selector := resolveImportSelectorCore(fileIndex, info, checked, scope, file, i-1, i, i+1)
+		if selector.Kind == SelectorImport {
+			count++
+		}
+	}
+	return count
 }
 
 func appendImportSelectorsCore(selectors []CoreSelectorRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int) []CoreSelectorRef {
@@ -745,28 +779,6 @@ func buildFuncLocalTypeSpansCore(file syntax.File, fn syntax.FuncDecl) []CoreLoc
 		i = specEnd
 	}
 	return decls
-}
-
-func coreRefCapacity(tokens int) int {
-	if tokens <= 0 {
-		return 0
-	}
-	capacity := tokens / 4
-	if capacity < 4 {
-		return 4
-	}
-	return capacity
-}
-
-func coreSelectorCapacity(tokens int) int {
-	if tokens <= 0 {
-		return 0
-	}
-	capacity := tokens / 16
-	if capacity < 2 {
-		return 2
-	}
-	return capacity
 }
 
 func coreScopeCapacity(tokens int) int {

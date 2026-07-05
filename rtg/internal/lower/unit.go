@@ -119,14 +119,12 @@ func (b *unitBuilder) reserveCheckedPackage(pkg load.Package, info check.Package
 	selectorCap := 0
 	for i := 0; i < len(info.Decls); i++ {
 		decl := info.Decls[i]
-		callCap += len(decl.Calls)
 		refCap += len(decl.CoreRefs)
 		selectorCap += len(decl.CoreSelectors)
 	}
 	for i := 0; i < len(info.Bodies); i++ {
 		body := info.Bodies[i]
 		typeRefCap += len(body.CoreTypeRefs)
-		callCap += len(body.Calls)
 		refCap += len(body.CoreRefs)
 		selectorCap += len(body.CoreSelectors)
 	}
@@ -299,9 +297,6 @@ func (b *unitBuilder) addCheckedDecls(info check.PackageInfo, files []fileTokens
 		}
 		ownerIndex := len(b.program.Decls) - 1
 		b.declRows[index] = ownerIndex
-		if !b.addDeclCalls(declInfo, files[declInfo.File].tokens, ownerIndex) {
-			return false
-		}
 		if !b.addDeclResolution(declInfo, files[declInfo.File].tokens, ownerIndex) {
 			return false
 		}
@@ -356,9 +351,6 @@ func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens
 		}
 		ownerIndex := len(b.program.Funcs) - 1
 		b.funcRows[i] = ownerIndex
-		if !b.addBodyCalls(body, files[body.File].tokens, ownerIndex) {
-			return false
-		}
 		if !b.addBodyResolution(body, files[body.File].tokens, ownerIndex) {
 			return false
 		}
@@ -399,18 +391,6 @@ func lowerTokenString(file fileTokens, tok int) string {
 	return string(syntax.TokenText(file.src, file.file.Tokens[tok]))
 }
 
-func (b *unitBuilder) addDeclCalls(decl check.DeclInfo, mapping tokenMap, ownerIndex int) bool {
-	for i := 0; i < len(decl.Calls); i++ {
-		call, ok := mapCallRef(decl.Calls[i], mapping, b.finalEOF, ownerIndex)
-		if !ok {
-			b.setErr(EmitErrCheck, decl.File, decl.Token)
-			return false
-		}
-		b.program.Calls = append(b.program.Calls, call)
-	}
-	return true
-}
-
 func (b *unitBuilder) addDeclResolution(decl check.DeclInfo, mapping tokenMap, ownerIndex int) bool {
 	for i := 0; i < len(decl.CoreRefs); i++ {
 		ref, ok := mapCoreNameRef(decl.CoreRefs[i], mapping, b.finalEOF, ownerIndex)
@@ -427,18 +407,6 @@ func (b *unitBuilder) addDeclResolution(decl check.DeclInfo, mapping tokenMap, o
 			return false
 		}
 		b.program.Selectors = append(b.program.Selectors, selector)
-	}
-	return true
-}
-
-func (b *unitBuilder) addBodyCalls(body check.FuncBody, mapping tokenMap, ownerIndex int) bool {
-	for i := 0; i < len(body.Calls); i++ {
-		call, ok := mapCallRef(body.Calls[i], mapping, b.finalEOF, ownerIndex)
-		if !ok {
-			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
-			return false
-		}
-		b.program.Calls = append(b.program.Calls, call)
 	}
 	return true
 }
@@ -479,25 +447,6 @@ func (b *unitBuilder) addBodyTypeRefs(body check.FuncBody, mapping tokenMap, own
 	return true
 }
 
-func mapTypeRef(ref check.TypeRef, mapping tokenMap, eof int, ownerIndex int) (unit.TypeRef, bool) {
-	kind, ok := unitTypeRefKind(ref.Kind)
-	if !ok {
-		return unit.TypeRef{}, false
-	}
-	out := unit.TypeRef{
-		Kind:    kind,
-		Token:   mapToken(mapping, ref.Token, eof),
-		BaseTok: mapToken(mapping, ref.BaseToken, eof),
-		DotTok:  mapToken(mapping, ref.DotToken, eof),
-		Package: ref.Package,
-		Symbol:  ref.Symbol,
-	}
-	if ownerIndex < 0 || out.Token < 0 || out.BaseTok < 0 || out.DotTok < 0 || out.Package < -1 || out.Symbol < -1 {
-		return out, false
-	}
-	return out, true
-}
-
 func mapCoreTypeRef(ref check.CoreTypeRef, mapping tokenMap, eof int, ownerIndex int) (unit.TypeRef, bool) {
 	kind, ok := unitTypeRefKind(ref.Kind)
 	if !ok {
@@ -536,19 +485,6 @@ func unitTypeRefKind(kind int) (int, bool) {
 	return 0, false
 }
 
-func mapNameRef(ref check.NameRef, mapping tokenMap, eof int, ownerIndex int) (unit.NameRef, bool) {
-	out := unit.NameRef{
-		Kind:    ref.Kind,
-		Token:   mapToken(mapping, ref.Token, eof),
-		Index:   ref.Index,
-		Package: ref.Package,
-	}
-	if ownerIndex < 0 || out.Token < 0 || out.Index < -1 || out.Package < -1 {
-		return out, false
-	}
-	return out, true
-}
-
 func mapCoreNameRef(ref check.CoreNameRef, mapping tokenMap, eof int, ownerIndex int) (unit.NameRef, bool) {
 	out := unit.NameRef{
 		Kind:    ref.Kind,
@@ -557,24 +493,6 @@ func mapCoreNameRef(ref check.CoreNameRef, mapping tokenMap, eof int, ownerIndex
 		Package: ref.Package,
 	}
 	if ownerIndex < 0 || out.Token < 0 || out.Index < -1 || out.Package < -1 {
-		return out, false
-	}
-	return out, true
-}
-
-func mapSelectorRef(selector check.SelectorRef, mapping tokenMap, eof int, ownerIndex int) (unit.Selector, bool) {
-	out := unit.Selector{
-		BaseTok:     mapToken(mapping, selector.BaseToken, eof),
-		DotTok:      mapToken(mapping, selector.DotToken, eof),
-		NameTok:     mapToken(mapping, selector.NameToken, eof),
-		BaseKind:    selector.BaseRef.Kind,
-		BaseIndex:   selector.BaseRef.Index,
-		BasePackage: selector.BaseRef.Package,
-		Package:     selector.Package,
-		Symbol:      selector.Symbol,
-	}
-	if ownerIndex < 0 || out.BaseTok < 0 || out.DotTok < 0 || out.NameTok < 0 ||
-		out.BaseIndex < -1 || out.BasePackage < -1 || out.Package < -1 || out.Symbol < -1 {
 		return out, false
 	}
 	return out, true
@@ -593,19 +511,6 @@ func mapCoreSelectorRef(selector check.CoreSelectorRef, mapping tokenMap, eof in
 	}
 	if ownerIndex < 0 || out.BaseTok < 0 || out.DotTok < 0 || out.NameTok < 0 ||
 		out.BaseIndex < -1 || out.BasePackage < -1 || out.Package < -1 || out.Symbol < -1 {
-		return out, false
-	}
-	return out, true
-}
-
-func mapCallRef(call check.CallRef, mapping tokenMap, eof int, ownerIndex int) (unit.Call, bool) {
-	out := unit.Call{
-		Kind:      call.Kind,
-		CalleeTok: mapToken(mapping, call.CalleeToken, eof),
-		BaseTok:   mapToken(mapping, call.BaseToken, eof),
-		DotTok:    mapToken(mapping, call.DotToken, eof),
-	}
-	if ownerIndex < 0 || out.CalleeTok < 0 || out.BaseTok < 0 || out.DotTok < 0 {
 		return out, false
 	}
 	return out, true
