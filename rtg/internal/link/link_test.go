@@ -350,6 +350,41 @@ func appMain() int {
 	}
 }
 
+func TestLinkBuildCoreLowersSimpleStringIntMap(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func appMain() int {
+	m := map[string]int{"a": 1, "b": 2}
+	m["a"] = m["a"] + m["b"]
+	if m["a"] == 3 {
+		print("PASS\n")
+		return 0
+	}
+	print("FAIL\n")
+	return 1
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d marshal=%d/%d", linked.Error, linked.ErrorPackage, unit.LastMarshalError, unit.LastMarshalIndex)
+	}
+	decoded, ok := unit.Unmarshal(linked.Data)
+	if !ok {
+		t.Fatal("linked core unit did not decode")
+	}
+	if bytes.Contains(decoded.Text, []byte("map[string]int")) || bytes.Contains(decoded.Text, []byte("m[")) {
+		t.Fatalf("linked text still contains map syntax:\n%s", string(decoded.Text))
+	}
+	if !bytes.Contains(decoded.Text, []byte("m := 1+")) ||
+		!bytes.Contains(decoded.Text, []byte("2")) ||
+		!bytes.Contains(decoded.Text, []byte("if m == 3")) {
+		t.Fatalf("linked text missing scalarized map shape:\n%s", string(decoded.Text))
+	}
+}
+
 func TestLinkBuildCoreFoldsPackageInitVarDeps(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
