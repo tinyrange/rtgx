@@ -12,6 +12,164 @@ import (
 	"j5.nz/rtg/rtgunit"
 )
 
+func TestTargetProfilesSeparateMachineWidthsFromBackendSlots(t *testing.T) {
+	tests := []struct {
+		target      int
+		arch        int
+		os          int
+		intBits     int
+		pointerBits int
+	}{
+		{rtgTargetLinuxAmd64, rtgArchAmd64, rtgOSLinux, 64, 64},
+		{rtgTargetLinux386, rtgArch386, rtgOSLinux, 32, 32},
+		{rtgTargetLinuxAarch64, rtgArchAarch64, rtgOSLinux, 64, 64},
+		{rtgTargetLinuxArm, rtgArchArm, rtgOSLinux, 32, 32},
+		{rtgTargetWindowsAmd64, rtgArchAmd64, rtgOSWindows, 64, 64},
+		{rtgTargetWindows386, rtgArch386, rtgOSWindows, 32, 32},
+		{rtgTargetWasiWasm32, rtgArchWasm32, rtgOSWasi, 32, 32},
+		{rtgTargetDarwinArm64, rtgArchAarch64, rtgOSDarwin, 64, 64},
+	}
+	for _, test := range tests {
+		p, ok := rtgProfileForTarget(test.target)
+		if !ok || !rtgProfileIsValid(p) {
+			t.Fatalf("target %d profile invalid: %#v", test.target, p)
+		}
+		if p.arch != test.arch || p.os != test.os || p.intBits != test.intBits || p.pointerBits != test.pointerBits {
+			t.Fatalf("target %d profile = %#v", test.target, p)
+		}
+		if p.backendSlotSize != rtgBackendValueSlotSize {
+			t.Fatalf("target %d backend slot = %d, want %d", test.target, p.backendSlotSize, rtgBackendValueSlotSize)
+		}
+		if p.codePointerBits != p.pointerBits || p.funcPointerBits != p.pointerBits || p.addressModel != rtgAddressModelFlat {
+			t.Fatalf("target %d flat pointer model = %#v", test.target, p)
+		}
+		if p.floatModel != rtgFloatScaledInteger {
+			t.Fatalf("target %d float model = %d, want explicitly documented scaled-integer compatibility mode", test.target, p.floatModel)
+		}
+		if !rtgProfileHasRuntime(p, rtgRuntimePrint|rtgRuntimeRead|rtgRuntimeWrite) {
+			t.Fatalf("target %d missing required runtime capabilities: %#v", test.target, p)
+		}
+	}
+	if _, ok := rtgProfileForTarget(999); ok {
+		t.Fatal("unknown target unexpectedly has a profile")
+	}
+	p, _ := rtgProfileForTarget(rtgTargetLinuxAmd64)
+	p.charBits = 7
+	if rtgProfileIsValid(p) {
+		t.Fatal("profile accepted CHAR_BIT < 8")
+	}
+	p, _ = rtgProfileForTarget(rtgTargetLinuxAmd64)
+	p.pointerBits = 8
+	if rtgProfileIsValid(p) {
+		t.Fatal("profile accepted unsupported pointer width")
+	}
+}
+
+func TestFreestandingProfileRequiresExplicitRuntimeContracts(t *testing.T) {
+	p, _ := rtgProfileForTarget(rtgTargetLinux386)
+	p.runtimeCaps = rtgRuntimePrint | rtgRuntimeHeap | rtgRuntimeVolatileMemory | rtgRuntimeInterrupts
+	p.heapModel = rtgHeapBump
+	p.oomModel = rtgOOMResult
+	p.volatileWidths = rtgVolatileWidth8 | rtgVolatileWidth16 | rtgVolatileWidth32
+	p.interruptModel = rtgInterruptVector
+	p.addressModel = rtgAddressModelHarvard
+	p.pointerBits = 16
+	p.codePointerBits = 24
+	p.funcPointerBits = 24
+	p.maxAlign = 2
+	p.floatModel = rtgFloatIEEESoft
+	if !rtgProfileIsValid(p) {
+		t.Fatalf("explicit freestanding profile rejected: %#v", p)
+	}
+
+	p.heapModel = rtgHeapNone
+	if rtgProfileIsValid(p) {
+		t.Fatal("heap capability accepted without an allocation model")
+	}
+	p.heapModel = rtgHeapBump
+	p.volatileWidths = 0
+	if rtgProfileIsValid(p) {
+		t.Fatal("volatile-memory capability accepted without supported access widths")
+	}
+	p.volatileWidths = rtgVolatileWidth8
+	p.interruptModel = rtgInterruptNone
+	if rtgProfileIsValid(p) {
+		t.Fatal("interrupt capability accepted without an interrupt ABI")
+	}
+}
+
+func TestArenaSizeConfigurationIsBounded(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  int
+		ok    bool
+	}{
+		{"256", 256, true},
+		{"2048", 2048, true},
+		{"1073741824", 1073741824, true},
+		{"", 0, false},
+		{"255", 0, false},
+		{"1073741825", 0, false},
+		{"2k", 0, false},
+	} {
+		got, ok := rtgParsePositiveDecimal(test.value)
+		if got != test.want || ok != test.ok {
+			t.Fatalf("rtgParsePositiveDecimal(%q) = (%d, %v), want (%d, %v)", test.value, got, ok, test.want, test.ok)
+		}
+	}
+
+	oldSize := rtgCompilerArenaSize
+	oldArch := rtgTargetArch
+	t.Cleanup(func() {
+		rtgCompilerArenaSize = oldSize
+		rtgTargetArch = oldArch
+	})
+	rtgCompilerArenaSize = 2048
+	rtgTargetArch = rtgArchAmd64
+	if got := rtgStringArenaSize(); got != 2048 {
+		t.Fatalf("configured arena size = %d, want 2048", got)
+	}
+}
+
+func TestPointerTypesRetainAddressSpace(t *testing.T) {
+	var m rtgMeta
+	dataPointer := rtgAddPointerType(&m, 0, rtgPointerSpaceData)
+	codePointer := rtgAddPointerType(&m, 0, rtgPointerSpaceCode)
+	functionPointer := rtgAddPointerType(&m, 0, rtgPointerSpaceFunction)
+	if rtgPointerAddressSpace(&m, dataPointer) != rtgPointerSpaceData {
+		t.Fatal("data pointer lost its address space")
+	}
+	if rtgPointerAddressSpace(&m, codePointer) != rtgPointerSpaceCode {
+		t.Fatal("code pointer lost its address space")
+	}
+	if rtgPointerAddressSpace(&m, functionPointer) != rtgPointerSpaceFunction {
+		t.Fatal("function pointer lost its address space")
+	}
+	if m.types[dataPointer].size != rtgBackendValueSlotSize {
+		t.Fatalf("pointer backend value size = %d, want %d", m.types[dataPointer].size, rtgBackendValueSlotSize)
+	}
+}
+
+func TestExpressionParserCapacityTracksTokenRange(t *testing.T) {
+	oldFixedTarget := rtgCompilerFixedTarget
+	rtgCompilerFixedTarget = 0
+	t.Cleanup(func() { rtgCompilerFixedTarget = oldFixedTarget })
+
+	program := rtgParseProgram([]byte("package main\nvar value = 1 + 2\n"))
+	if !program.ok {
+		t.Fatal("test program did not parse")
+	}
+	var expression rtgExprParse
+	rtgParseExpressionInto(&expression, &program, 5, 8)
+	if !expression.ok {
+		t.Fatal("test expression did not parse")
+	}
+	if cap(expression.exprs) > 8 || cap(expression.args) > 8 || cap(expression.fields) > 4 {
+		t.Fatalf("small expression retained oversized scratch storage: exprs=%d args=%d fields=%d",
+			cap(expression.exprs), cap(expression.args), cap(expression.fields))
+	}
+}
+
 func TestBuildMetaHandlesMoreThanInitialFuncCapacity(t *testing.T) {
 	src := []byte("package main\n")
 	for i := 0; i < 1301; i++ {

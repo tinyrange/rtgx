@@ -2445,6 +2445,7 @@ func rtgWasm32EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	if g.appendAddrEmitted {
 		return g.appendAddrLabel
 	}
+	arenaAllocLabel := rtgEnsureArenaAllocHelper(g)
 	g.appendAddrEmitted = true
 	g.appendAddrLabel = rtgAsmNewLabel(a)
 	afterLabel := rtgAsmNewLabel(a)
@@ -2453,11 +2454,9 @@ func rtgWasm32EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	noGrowLabel := rtgAsmNewLabel(a)
 	capNonZeroLabel := rtgAsmNewLabel(a)
 	capReadyLabel := rtgAsmNewLabel(a)
-	heapReadyLabel := rtgAsmNewLabel(a)
 	copyLoopLabel := rtgAsmNewLabel(a)
 	copyDoneLabel := rtgAsmNewLabel(a)
 	returnLabel := rtgAsmNewLabel(a)
-	rtgStringHeapOffsets(g)
 	ptrSlotOff := g.asm.bssSize
 	lenSlotOff := ptrSlotOff + 4
 	capSlotOff := lenSlotOff + 4
@@ -2506,19 +2505,9 @@ func rtgWasm32EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	rtgWasm32EmitRegReg(a, rtgWasm32OpMulRegReg, rtgWasm32RegRax, rtgWasm32RegRcx)
 	rtgAsmStoreRaxBss(a, allocSizeOff)
 
-	rtgAsmLoadRaxBss(a, g.stringHeapOff)
-	rtgAsmCmpRaxImm8(a, 0)
-	rtgAsmJnzLabel(a, heapReadyLabel)
-	rtgAsmMovRaxBssAddr(a, g.stringHeapDataOff)
-	rtgAsmStoreRaxBss(a, g.stringHeapOff)
-	rtgAsmMarkLabel(a, heapReadyLabel)
-	rtgAsmLoadRaxBss(a, g.stringHeapOff)
-	rtgAsmStoreRaxBss(a, destOff)
 	rtgAsmLoadRaxBss(a, allocSizeOff)
-	rtgAsmMovRcxRax(a)
-	rtgAsmLoadRaxBss(a, g.stringHeapOff)
-	rtgAsmAddRaxRcx(a)
-	rtgAsmStoreRaxBss(a, g.stringHeapOff)
+	rtgAsmCallLabel(a, arenaAllocLabel)
+	rtgAsmStoreRaxBss(a, destOff)
 
 	rtgAsmLoadRaxBss(a, oldLenOff)
 	rtgAsmPushRax(a)

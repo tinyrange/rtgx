@@ -3,6 +3,7 @@
 package build
 
 import (
+	"j5.nz/rtg/rtg/internal/arena"
 	"j5.nz/rtg/rtg/internal/check"
 	"j5.nz/rtg/rtg/internal/load"
 	"j5.nz/rtg/rtg/internal/lower"
@@ -21,6 +22,8 @@ type PackageUnit struct {
 	ImportPath string
 	Name       string
 	Program    unit.Program
+	ArenaStart int
+	ArenaEnd   int
 }
 
 type Result struct {
@@ -38,7 +41,9 @@ func BuildUnits(graph load.Graph) Result {
 }
 
 func BuildPrograms(graph load.Graph) Result {
-	prog := check.CheckGraphCore(graph)
+	headerStart := arena.Mark()
+	prog := check.CheckGraphHeadersCore(graph)
+	headerEnd := arena.Mark()
 	result := Result{
 		Root:         -1,
 		Ok:           true,
@@ -51,8 +56,14 @@ func BuildPrograms(graph load.Graph) Result {
 		return buildFail(result, BuildErrCheck, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
 	}
 	for i := 0; i < len(graph.Packages); i++ {
+		prog = check.CheckGraphPackageCore(graph, prog, i)
+		if !prog.Ok {
+			return buildFail(result, BuildErrCheck, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+		}
 		pkg := graph.Packages[i]
+		unitStart := arena.Mark()
 		emit := lower.EmitCheckedPackageFast(pkg, prog.Packages[i])
+		unitEnd := arena.Mark()
 		if !emit.Ok {
 			return buildFail(result, BuildErrLower, i, emit.ErrorFile, emit.ErrorToken)
 		}
@@ -60,14 +71,19 @@ func BuildPrograms(graph load.Graph) Result {
 			result.Root = len(result.Units)
 		}
 		result.Units = append(result.Units, PackageUnit{
-			ImportPath: pkg.Ref.ImportPath,
-			Name:       pkg.Name,
+			ImportPath: emit.Program.ImportPath,
+			Name:       emit.Program.Package,
 			Program:    emit.Program,
+			ArenaStart: unitStart,
+			ArenaEnd:   unitEnd,
 		})
+		arena.Discard(prog.Packages[i].CoreArenaStart, prog.Packages[i].CoreArenaEnd)
+		arena.Discard(pkg.CoreArenaStart, pkg.CoreArenaEnd)
 	}
 	if result.Root < 0 {
 		return buildFail(result, BuildErrRoot, -1, -1, -1)
 	}
+	arena.Discard(headerStart, headerEnd)
 	return result
 }
 

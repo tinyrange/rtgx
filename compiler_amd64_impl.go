@@ -1425,6 +1425,7 @@ func rtgAmd64EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	if g.appendAddrEmitted {
 		return g.appendAddrLabel
 	}
+	arenaAllocLabel := rtgEnsureArenaAllocHelper(g)
 	g.appendAddrEmitted = true
 	g.appendAddrLabel = rtgAsmNewLabel(a)
 	afterLabel := rtgAsmNewLabel(a)
@@ -1432,8 +1433,6 @@ func rtgAmd64EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	rtgAsmMarkLabel(a, g.appendAddrLabel)
 	noGrowLabel := rtgAsmNewLabel(a)
 	haveCapLabel := rtgAsmNewLabel(a)
-	heapReadyLabel := rtgAsmNewLabel(a)
-	rtgStringHeapOffsets(g)
 	rtgAsmEmit24(a, 0x0e8b48)
 	rtgAsmEmit24(a, 0x018b4d)
 	rtgAsmEmit24(a, 0xc1394c)
@@ -1452,16 +1451,10 @@ func rtgAmd64EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	rtgAsmEmit16(a, 0x5041)
 	rtgAsmEmit24(a, 0xc1894c)
 	rtgAsmEmit24(a, 0xcaaf0f)
-	rtgAsmLoadRaxBss(a, g.stringHeapOff)
-	rtgAsmCmpRaxImm8(a, 0)
-	rtgAsmJnzLabel(a, heapReadyLabel)
-	rtgAsmMovRaxBssAddr(a, g.stringHeapDataOff)
-	rtgAsmStoreRaxBss(a, g.stringHeapOff)
-	rtgAsmMarkLabel(a, heapReadyLabel)
-	rtgAsmLoadRaxBss(a, g.stringHeapOff)
+	rtgAsmPushRcx(a)
+	rtgAsmPopRax(a)
+	rtgAsmCallLabel(a, arenaAllocLabel)
 	rtgAsmPushRax(a)
-	rtgAsmAddRaxRcx(a)
-	rtgAsmStoreRaxBss(a, g.stringHeapOff)
 	rtgAsmEmit5(a, 0x48, 0x8b, 0x4c, 0x24, 16)
 	rtgAsmEmit5(a, 0x48, 0x8b, 0x54, 0x24, 24)
 	rtgAsmEmit24(a, 0xcaaf0f)
@@ -1543,6 +1536,7 @@ func rtgAmd64EnsureAppendBytesHelper(g *rtgLinearGen) int {
 	if g.appendBytesEmitted {
 		return g.appendBytesLabel
 	}
+	arenaAllocLabel := rtgEnsureArenaAllocHelper(g)
 	g.appendBytesEmitted = true
 	g.appendBytesLabel = rtgAsmNewLabel(a)
 	afterLabel := rtgAsmNewLabel(a)
@@ -1552,8 +1546,6 @@ func rtgAmd64EnsureAppendBytesHelper(g *rtgLinearGen) int {
 	capNonZeroLabel := rtgAsmNewLabel(a)
 	capReadyLabel := rtgAsmNewLabel(a)
 	capOKLabel := rtgAsmNewLabel(a)
-	heapReadyLabel := rtgAsmNewLabel(a)
-	rtgStringHeapOffsets(g)
 	rtgAsmEmit24(a, 0x0e8b48)
 	rtgAsmEmit24(a, 0x018b4d)
 	rtgAsmEmit24(a, 0xca8949)
@@ -1582,16 +1574,10 @@ func rtgAmd64EnsureAppendBytesHelper(g *rtgLinearGen) int {
 	rtgAsmMarkLabel(a, capOKLabel)
 	rtgAsmEmit16(a, 0x5041)
 	rtgAsmEmit24(a, 0xc1894c)
-	rtgAsmLoadRaxBss(a, g.stringHeapOff)
-	rtgAsmCmpRaxImm8(a, 0)
-	rtgAsmJnzLabel(a, heapReadyLabel)
-	rtgAsmMovRaxBssAddr(a, g.stringHeapDataOff)
-	rtgAsmStoreRaxBss(a, g.stringHeapOff)
-	rtgAsmMarkLabel(a, heapReadyLabel)
-	rtgAsmLoadRaxBss(a, g.stringHeapOff)
+	rtgAsmPushRcx(a)
+	rtgAsmPopRax(a)
+	rtgAsmCallLabel(a, arenaAllocLabel)
 	rtgAsmPushRax(a)
-	rtgAsmAddRaxRcx(a)
-	rtgAsmStoreRaxBss(a, g.stringHeapOff)
 	rtgAsmEmit5(a, 0x48, 0x8b, 0x7c, 0x24, 64)
 	rtgAsmEmit24(a, 0x378b48)
 	rtgAsmEmit32(a, 0x243c8b48)

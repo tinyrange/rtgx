@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"j5.nz/rtg/rtg/internal/arena"
 	"j5.nz/rtg/rtg/internal/load"
 	"j5.nz/rtg/rtg/internal/pipeline"
 )
@@ -50,12 +51,14 @@ func BuildFromFS(args []string, workDir string, stdRoot string, fs SourceFS) Bui
 	if !options.Ok {
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
 	}
+	sourcesStart := arena.Mark()
 	sources := CollectSourcesForTarget(workDir, stdRoot, options.Package, options.Target, fs)
+	sourcesEnd := arena.Mark()
 	result.Sources = sources
 	if !sources.Ok {
 		return buildFail(result, BuildErrSource, "", sources.ErrorPath, -1, -1, -1, -1)
 	}
-	built := pipeline.BuildUnit(workDir, stdRoot, options.Package, sources.Files)
+	built := pipeline.BuildUnitWithTransientFiles(workDir, stdRoot, options.Package, sources.Files, sourcesStart, sourcesEnd)
 	result.Pipeline = built
 	if !built.Ok {
 		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)

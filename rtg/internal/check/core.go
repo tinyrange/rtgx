@@ -3,11 +3,29 @@
 package check
 
 import (
+	"j5.nz/rtg/rtg/internal/arena"
 	"j5.nz/rtg/rtg/internal/load"
 	"j5.nz/rtg/rtg/internal/syntax"
 )
 
 func CheckGraphCore(graph load.Graph) Program {
+	prog := CheckGraphHeadersCore(graph)
+	if !prog.Ok {
+		return prog
+	}
+	for i := 0; i < len(graph.Packages); i++ {
+		prog = CheckGraphPackageCore(graph, prog, i)
+		if !prog.Ok {
+			return prog
+		}
+	}
+	return prog
+}
+
+// CheckGraphHeadersCore resolves the package surface needed while checking
+// every package body. Keeping this phase separate lets the RTG compiler lower
+// and release one body at a time.
+func CheckGraphHeadersCore(graph load.Graph) Program {
 	prog := Program{
 		Graph:        graph,
 		Ok:           true,
@@ -27,12 +45,23 @@ func CheckGraphCore(graph load.Graph) Program {
 			return checkFail(prog, err, i, file, tok)
 		}
 	}
-	for i := 0; i < len(graph.Packages); i++ {
-		info, ok, err, file, tok := checkPackageBodyCore(graph, i, prog.Packages[i], prog.Packages)
-		prog.Packages[i] = info
-		if !ok {
-			return checkFail(prog, err, i, file, tok)
-		}
+	return prog
+}
+
+// CheckGraphPackageCore checks one package body against the complete set of
+// package headers. The returned arena range becomes dead after that package is
+// lowered.
+func CheckGraphPackageCore(graph load.Graph, prog Program, pkgIndex int) Program {
+	if !prog.Ok || pkgIndex < 0 || pkgIndex >= len(graph.Packages) || pkgIndex >= len(prog.Packages) {
+		return checkFail(prog, CheckErrGraph, pkgIndex, -1, -1)
+	}
+	prog.Packages[pkgIndex].CoreArenaStart = arena.Mark()
+	info, ok, err, file, tok := checkPackageBodyCore(graph, pkgIndex, prog.Packages[pkgIndex], prog.Packages)
+	info.CoreArenaStart = prog.Packages[pkgIndex].CoreArenaStart
+	info.CoreArenaEnd = arena.Mark()
+	prog.Packages[pkgIndex] = info
+	if !ok {
+		return checkFail(prog, err, pkgIndex, file, tok)
 	}
 	return prog
 }
@@ -77,11 +106,10 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			out.Kind = coreFuncKind(fn)
 			out.File = fileIndex
 			out.Func = i
-			out.CoreRefs = make([]CoreNameRef, 0, countExprPackageRefsCore(file, fileIndex, info, scope, bodyStart, bodyEnd))
-			out.CoreSelectors = make([]CoreSelectorRef, 0, countImportSelectorsCore(file, fileIndex, info, checked, scope, bodyStart, bodyEnd))
-			out.CoreRefs = appendExprPackageRefsCore(out.CoreRefs, file, fileIndex, info, scope, bodyStart, bodyEnd)
-			out.CoreSelectors = appendImportSelectorsCore(out.CoreSelectors, file, fileIndex, info, checked, scope, bodyStart, bodyEnd)
-			out.Calls = appendCallsCore(out.Calls, file, fileIndex, info, checked, scope, bodyStart, bodyEnd)
+			refCount, selectorCount := countResolutionRefsCore(file, fileIndex, info, checked, scope, bodyStart, bodyEnd)
+			out.CoreRefs = make([]CoreNameRef, 0, refCount)
+			out.CoreSelectors = make([]CoreSelectorRef, 0, selectorCount)
+			out.CoreRefs, out.CoreSelectors = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, file, fileIndex, info, checked, scope, bodyStart, bodyEnd)
 			locals := buildFuncLocalTypeSpansCore(file, fn)
 			out.CoreTypeRefs = buildFuncTypeRefsCore(file, fileIndex, info, checked, signature, locals, scope)
 			info.Bodies = append(info.Bodies, out)
@@ -144,48 +172,14 @@ func buildDeclInfoCore(file syntax.File, fileIndex int, info PackageInfo, checke
 	if valueStart >= 0 {
 		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, valueStart)
 		out.ValueStart, out.ValueEnd = trimDeclSpan(file, valueStart+1, decl.EndTok)
-		out.CoreRefs = make([]CoreNameRef, 0, countExprPackageRefsCore(file, fileIndex, info, CoreScope{}, out.ValueStart, out.ValueEnd))
-		out.CoreSelectors = make([]CoreSelectorRef, 0, countImportSelectorsCore(file, fileIndex, info, checked, CoreScope{}, out.ValueStart, out.ValueEnd))
-		out.CoreRefs = appendExprPackageRefsCore(out.CoreRefs, file, fileIndex, info, CoreScope{}, out.ValueStart, out.ValueEnd)
-		out.CoreSelectors = appendImportSelectorsCore(out.CoreSelectors, file, fileIndex, info, checked, CoreScope{}, out.ValueStart, out.ValueEnd)
-		out.Calls = appendCallsCore(out.Calls, file, fileIndex, info, checked, CoreScope{}, out.ValueStart, out.ValueEnd)
+		refCount, selectorCount := countResolutionRefsCore(file, fileIndex, info, checked, CoreScope{}, out.ValueStart, out.ValueEnd)
+		out.CoreRefs = make([]CoreNameRef, 0, refCount)
+		out.CoreSelectors = make([]CoreSelectorRef, 0, selectorCount)
+		out.CoreRefs, out.CoreSelectors = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, file, fileIndex, info, checked, CoreScope{}, out.ValueStart, out.ValueEnd)
 	} else {
 		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, decl.EndTok)
 	}
 	return out
-}
-
-func appendCallsCore(calls []CallRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int) []CallRef {
-	for i := start; i < end && i < len(file.Tokens); i++ {
-		if !tokCharIs(file, i, '(') {
-			continue
-		}
-		closeTok := findTypeMatching(file, i, '(', ')')
-		if closeTok <= i || closeTok > end+1 {
-			continue
-		}
-		callee := i - 1
-		if callee < start || file.Tokens[callee].Kind != syntax.TokenIdent {
-			continue
-		}
-		var call CallRef
-		call.Kind = CallUnknown
-		call.CalleeToken = callee
-		call.BaseToken = -1
-		call.DotToken = -1
-		if callee-1 >= start && tokenTextIs(file, callee-1, ".") && callee-2 >= start && file.Tokens[callee-2].Kind == syntax.TokenIdent {
-			selector := resolveImportSelectorCore(fileIndex, info, checked, scope, file, callee-2, callee-1, callee)
-			call.BaseToken = callee - 2
-			call.DotToken = callee - 1
-			if selector.Kind == SelectorImport {
-				call.Kind = CallImportSelector
-				call.Package = selector.Package
-				call.Symbol = selector.Symbol
-			}
-		}
-		calls = append(calls, call)
-	}
-	return calls
 }
 
 type CoreScope struct {
@@ -197,75 +191,48 @@ type CoreScopeName struct {
 	Token int
 }
 
-func countExprPackageRefsCore(file syntax.File, fileIndex int, info PackageInfo, scope CoreScope, start int, end int) int {
-	count := 0
+func countResolutionRefsCore(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int) (int, int) {
+	refCount := 0
+	selectorCount := 0
 	for i := start; i < end && i < len(file.Tokens); i++ {
-		if file.Tokens[i].Kind != syntax.TokenIdent || shouldSkipIdentRef(file, i, end) {
-			continue
+		if file.Tokens[i].Kind == syntax.TokenIdent && !shouldSkipIdentRef(file, i, end) &&
+			!tokenTextIs(file, i, "_") && lookupScopeTokenNameCore(scope, file, i) < 0 &&
+			lookupImportTokenNameCore(info, fileIndex, file, i) < 0 &&
+			lookupPackageSymbolTokenCore(info, file, fileIndex, i) >= 0 {
+			refCount++
 		}
-		if tokenTextIs(file, i, "_") || lookupScopeTokenNameCore(scope, file, i) >= 0 || lookupImportTokenNameCore(info, fileIndex, file, i) >= 0 {
-			continue
-		}
-		if lookupPackageSymbolTokenCore(info, file, fileIndex, i) >= 0 {
-			count++
+		if i > start && i+1 < end && i+1 < len(file.Tokens) && tokenTextIs(file, i, ".") &&
+			file.Tokens[i-1].Kind == syntax.TokenIdent && file.Tokens[i+1].Kind == syntax.TokenIdent &&
+			!tokenTextIs(file, i-1, "_") && !tokenTextIs(file, i+1, "_") {
+			selector := resolveImportSelectorCore(fileIndex, info, checked, scope, file, i-1, i, i+1)
+			if selector.Kind == SelectorImport {
+				selectorCount++
+			}
 		}
 	}
-	return count
+	return refCount, selectorCount
 }
 
-func appendExprPackageRefsCore(refs []CoreNameRef, file syntax.File, fileIndex int, info PackageInfo, scope CoreScope, start int, end int) []CoreNameRef {
+func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int) ([]CoreNameRef, []CoreSelectorRef) {
 	for i := start; i < end && i < len(file.Tokens); i++ {
-		if file.Tokens[i].Kind != syntax.TokenIdent || shouldSkipIdentRef(file, i, end) {
-			continue
+		if file.Tokens[i].Kind == syntax.TokenIdent && !shouldSkipIdentRef(file, i, end) &&
+			!tokenTextIs(file, i, "_") && lookupScopeTokenNameCore(scope, file, i) < 0 &&
+			lookupImportTokenNameCore(info, fileIndex, file, i) < 0 {
+			symbolIndex := lookupPackageSymbolTokenCore(info, file, fileIndex, i)
+			if symbolIndex >= 0 {
+				refs = append(refs, CoreNameRef{Kind: RefPackage, Token: i, Index: symbolIndex, Package: info.Symbols[symbolIndex].Package})
+			}
 		}
-		if tokenTextIs(file, i, "_") || lookupScopeTokenNameCore(scope, file, i) >= 0 || lookupImportTokenNameCore(info, fileIndex, file, i) >= 0 {
-			continue
-		}
-		symbolIndex := lookupPackageSymbolTokenCore(info, file, fileIndex, i)
-		if symbolIndex >= 0 {
-			refs = append(refs, CoreNameRef{Kind: RefPackage, Token: i, Index: symbolIndex, Package: info.Symbols[symbolIndex].Package})
-		}
-	}
-	return refs
-}
-
-func countImportSelectorsCore(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int) int {
-	count := 0
-	for i := start + 1; i+1 < end && i+1 < len(file.Tokens); i++ {
-		if !tokenTextIs(file, i, ".") {
-			continue
-		}
-		if file.Tokens[i-1].Kind != syntax.TokenIdent || file.Tokens[i+1].Kind != syntax.TokenIdent {
-			continue
-		}
-		if tokenTextIs(file, i-1, "_") || tokenTextIs(file, i+1, "_") {
-			continue
-		}
-		selector := resolveImportSelectorCore(fileIndex, info, checked, scope, file, i-1, i, i+1)
-		if selector.Kind == SelectorImport {
-			count++
+		if i > start && i+1 < end && i+1 < len(file.Tokens) && tokenTextIs(file, i, ".") &&
+			file.Tokens[i-1].Kind == syntax.TokenIdent && file.Tokens[i+1].Kind == syntax.TokenIdent &&
+			!tokenTextIs(file, i-1, "_") && !tokenTextIs(file, i+1, "_") {
+			selector := resolveImportSelectorCore(fileIndex, info, checked, scope, file, i-1, i, i+1)
+			if selector.Kind == SelectorImport {
+				selectors = append(selectors, selector)
+			}
 		}
 	}
-	return count
-}
-
-func appendImportSelectorsCore(selectors []CoreSelectorRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int) []CoreSelectorRef {
-	for i := start + 1; i+1 < end && i+1 < len(file.Tokens); i++ {
-		if !tokenTextIs(file, i, ".") {
-			continue
-		}
-		if file.Tokens[i-1].Kind != syntax.TokenIdent || file.Tokens[i+1].Kind != syntax.TokenIdent {
-			continue
-		}
-		if tokenTextIs(file, i-1, "_") || tokenTextIs(file, i+1, "_") {
-			continue
-		}
-		selector := resolveImportSelectorCore(fileIndex, info, checked, scope, file, i-1, i, i+1)
-		if selector.Kind == SelectorImport {
-			selectors = append(selectors, selector)
-		}
-	}
-	return selectors
+	return refs, selectors
 }
 
 func buildPackageTypeRefsCore(pkg load.Package, info PackageInfo, checked []PackageInfo) []CoreTypeRef {
@@ -510,31 +477,8 @@ func lookupImportTokenNameCore(info PackageInfo, fileIndex int, file syntax.File
 }
 
 func lookupPackageSymbolTokenCore(info PackageInfo, file syntax.File, fileIndex int, tok int) int {
-	if tok < 0 || tok >= len(file.Tokens) {
-		return -1
-	}
-	token := file.Tokens[tok]
-	size := token.End - token.Start
-	if size < 0 || token.Start < 0 || token.End > len(file.Src) {
-		return -1
-	}
-	for i := 0; i < len(info.Symbols); i++ {
-		symbol := info.Symbols[i]
-		if symbol.Kind == SymbolMethod || len(symbol.Name) != size {
-			continue
-		}
-		matches := true
-		for j := 0; j < size; j++ {
-			if file.Src[token.Start+j] != symbol.Name[j] {
-				matches = false
-				break
-			}
-		}
-		if matches {
-			return i
-		}
-	}
-	return -1
+	_ = fileIndex
+	return lookupPackageSymbolTextCore(info, file, tok)
 }
 
 func lookupPackageSymbolTextCore(info PackageInfo, file syntax.File, tok int) int {
@@ -546,23 +490,44 @@ func lookupPackageSymbolTextCore(info PackageInfo, file syntax.File, tok int) in
 	if size < 0 || token.Start < 0 || token.End > len(file.Src) {
 		return -1
 	}
-	for i := 0; i < len(info.Symbols); i++ {
-		symbol := info.Symbols[i]
-		if symbol.Kind == SymbolMethod || len(symbol.Name) != size {
-			continue
+	low := 0
+	high := len(info.Symbols)
+	for low < high {
+		mid := low + (high-low)/2
+		if compareTokenSymbolCore(file.Src, token.Start, size, info.Symbols[mid].Name) > 0 {
+			low = mid + 1
+		} else {
+			high = mid
 		}
-		matches := true
-		for j := 0; j < size; j++ {
-			if file.Src[token.Start+j] != symbol.Name[j] {
-				matches = false
-				break
-			}
-		}
-		if matches {
+	}
+	for i := low; i < len(info.Symbols) && compareTokenSymbolCore(file.Src, token.Start, size, info.Symbols[i].Name) == 0; i++ {
+		if info.Symbols[i].Kind != SymbolMethod {
 			return i
 		}
 	}
 	return -1
+}
+
+func compareTokenSymbolCore(src []byte, start int, size int, name string) int {
+	limit := size
+	if len(name) < limit {
+		limit = len(name)
+	}
+	for i := 0; i < limit; i++ {
+		if src[start+i] < name[i] {
+			return -1
+		}
+		if src[start+i] > name[i] {
+			return 1
+		}
+	}
+	if size < len(name) {
+		return -1
+	}
+	if size > len(name) {
+		return 1
+	}
+	return 0
 }
 
 func buildFuncScopeCore(file syntax.File, fn syntax.FuncDecl) (CoreScope, bool, int) {

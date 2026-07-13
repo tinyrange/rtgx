@@ -120,6 +120,8 @@ func unitFrontendTargets(t *testing.T) []compilerTarget {
 		config = targetConfig{os: "linux", arch: "amd64"}
 	case "linux/arm64":
 		config = targetConfig{os: "linux", arch: "aarch64"}
+	case "darwin/arm64":
+		config = targetConfig{os: "darwin", arch: "arm64"}
 	default:
 		t.Skipf("no native RTG unit frontend target supported on %s/%s", runtime.GOOS, runtime.GOARCH)
 		return nil

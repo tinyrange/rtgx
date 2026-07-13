@@ -41,17 +41,19 @@ type Program struct {
 }
 
 type PackageInfo struct {
-	Name         string
-	Symbols      []Symbol
-	Imports      []Import
-	Decls        []DeclInfo
-	DeclOrder    []int
-	InitOrder    []int
-	Types        []TypeInfo
-	TypeRefs     []TypeRef
-	CoreTypeRefs []CoreTypeRef
-	Methods      []MethodInfo
-	Bodies       []FuncBody
+	Name           string
+	Symbols        []Symbol
+	Imports        []Import
+	Decls          []DeclInfo
+	DeclOrder      []int
+	InitOrder      []int
+	Types          []TypeInfo
+	TypeRefs       []TypeRef
+	CoreTypeRefs   []CoreTypeRef
+	CoreArenaStart int
+	CoreArenaEnd   int
+	Methods        []MethodInfo
+	Bodies         []FuncBody
 }
 
 type Symbol struct {
@@ -236,7 +238,7 @@ func LookupFuncBody(info PackageInfo, name string) int {
 
 func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int, int, int) {
 	pkg := graph.Packages[pkgIndex]
-	info := PackageInfo{Name: pkg.Name}
+	info := PackageInfo{Name: cloneCheckString(pkg.Name)}
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Decls); i++ {
@@ -350,7 +352,7 @@ func buildImport(graph load.Graph, pkgIndex int, fileIndex int, file syntax.File
 	if target < 0 {
 		return Import{}, false
 	}
-	name := graph.Packages[target].Name
+	name := cloneCheckString(graph.Packages[target].Name)
 	dot := false
 	blank := false
 	tok := decl.PathTok
@@ -368,6 +370,12 @@ func buildImport(graph load.Graph, pkgIndex int, fileIndex int, file syntax.File
 		}
 	}
 	return Import{Name: name, ImportPath: path, Package: target, File: fileIndex, Token: tok, Dot: dot, Blank: blank}, true
+}
+
+func cloneCheckString(value string) string {
+	data := make([]byte, len(value))
+	copy(data, []byte(value))
+	return string(data)
 }
 
 func findGraphPackage(graph load.Graph, importPath string) int {
