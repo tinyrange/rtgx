@@ -3,7 +3,8 @@
 package driver
 
 func rtgFrontendCanResetArena() bool {
-	// The embedded backend decodes the unit after frontend lowering; keep the
-	// frontend arena live across that in-memory handoff.
-	return false
+	// Run the embedded backend from the compact persistent handoff assembled in
+	// RunRTGCommand. Releasing the frontend's transient pages here prevents the
+	// two compiler phases from accumulating in the same RSS peak.
+	return true
 }

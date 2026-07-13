@@ -1351,6 +1351,7 @@ func rtg386EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	if g.appendAddrEmitted {
 		return g.appendAddrLabel
 	}
+	arenaAllocLabel := rtgEnsureArenaAllocHelper(g)
 	g.appendAddrEmitted = true
 	g.appendAddrLabel = rtgAsmNewLabel(a)
 	afterLabel := rtgAsmNewLabel(a)
@@ -1359,8 +1360,6 @@ func rtg386EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	noGrowLabel := rtgAsmNewLabel(a)
 	capNonZeroLabel := rtgAsmNewLabel(a)
 	capReadyLabel := rtgAsmNewLabel(a)
-	heapReadyLabel := rtgAsmNewLabel(a)
-	rtgStringHeapOffsets(g)
 	rtgAsmEmit16(a, 0x0e8b)
 	rtgAsmEmit3(a, 0x8b, 0x46, 8)
 	rtgAsmEmit16(a, 0xc139)
@@ -1381,16 +1380,10 @@ func rtg386EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	rtgAsmMovRcxRax(a)
 	rtgAsmEmit3(a, 0x0f, 0xaf, 0x4c)
 	rtgAsmEmit2(a, 0x24, 8)
-	rtgAsmLoadRaxBss(a, g.stringHeapOff)
-	rtgAsmCmpRaxImm8(a, 0)
-	rtgAsmJnzLabel(a, heapReadyLabel)
-	rtgAsmMovRaxBssAddr(a, g.stringHeapDataOff)
-	rtgAsmStoreRaxBss(a, g.stringHeapOff)
-	rtgAsmMarkLabel(a, heapReadyLabel)
-	rtgAsmLoadRaxBss(a, g.stringHeapOff)
+	rtgAsmPushRcx(a)
+	rtgAsmPopRax(a)
+	rtgAsmCallLabel(a, arenaAllocLabel)
 	rtgAsmPushRax(a)
-	rtgAsmAddRaxRcx(a)
-	rtgAsmStoreRaxBss(a, g.stringHeapOff)
 	rtgAsmEmit3(a, 0x8b, 0x3c, 0x24)
 	rtgAsmEmit4(a, 0x8b, 0x74, 0x24, 20)
 	rtgAsmEmit16(a, 0x368b)

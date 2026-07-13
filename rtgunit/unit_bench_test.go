@@ -6,23 +6,28 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-var benchmarkCompilerFiles = []string{
-	"../compiler_common_impl.go",
-	"../compiler_main.go",
-	"../compiler_linux_impl.go",
-	"../compiler_amd64_impl.go",
-	"../compiler_386_impl.go",
-	"../compiler_aarch64_impl.go",
-	"../compiler_arm_impl.go",
-	"../compiler_wasm32_impl.go",
-	"../compiler_linux_amd64_impl.go",
-	"../compiler_linux_386_impl.go",
-	"../compiler_linux_aarch64_impl.go",
-	"../compiler_linux_arm_impl.go",
-	"../compiler_wasi_wasm32_impl.go",
+var benchmarkCompilerFiles = benchmarkCompilerSourceManifest()
+
+func benchmarkCompilerSourceManifest() []string {
+	data, err := os.ReadFile("../compiler_sources.txt")
+	if err != nil {
+		panic(err)
+	}
+	var files []string
+	for _, line := range strings.Split(string(data), "\n") {
+		path := strings.TrimSpace(line)
+		if path != "" {
+			files = append(files, "../"+path)
+		}
+	}
+	if len(files) == 0 {
+		panic("compiler source manifest is empty")
+	}
+	return files
 }
 
 func BenchmarkUnitEncodeCompiler(b *testing.B) {

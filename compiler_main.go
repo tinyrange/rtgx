@@ -83,7 +83,29 @@ func rtgPrintIntErr(v int) {
 }
 
 func rtgPrintUsage() {
-	rtgPrintErr("usage: rtg [-s] [-t linux/amd64|linux/386|linux/aarch64|linux/arm|windows/amd64|windows/386|wasi/wasm32|darwin/arm64] -o <output|-> <input.go|->...\n")
+	rtgPrintErr("usage: rtg [-s] [-arena-size bytes] [-t linux/amd64|linux/386|linux/aarch64|linux/arm|windows/amd64|windows/386|wasi/wasm32|darwin/arm64] -o <output|-> <input.go|->...\n")
+}
+
+func rtgParsePositiveDecimal(value string) (int, bool) {
+	if len(value) == 0 {
+		return 0, false
+	}
+	result := 0
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if ch < '0' || ch > '9' {
+			return 0, false
+		}
+		digit := int(ch - '0')
+		if result > (1073741824-digit)/10 {
+			return 0, false
+		}
+		result = result*10 + digit
+	}
+	if result < 256 || result > 1073741824 {
+		return 0, false
+	}
+	return result, true
 }
 
 func rtgPrintUnsupportedTarget(target string) {
@@ -389,7 +411,17 @@ func rtgCompileProgramToOutput(prog *rtgProgram, output int, target int) int {
 		return 1
 	}
 	var result rtgCompileResult
-	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
+	if rtgCompilerFixedTarget == rtgTargetLinux386 || rtgCompilerFixedTarget == rtgTargetWindows386 {
+		result = rtgTryCompileScalarProgram386(prog, &meta)
+	} else if rtgCompilerFixedTarget == rtgTargetLinuxAarch64 || rtgCompilerFixedTarget == rtgTargetDarwinArm64 {
+		result = rtgTryCompileScalarProgramAarch64(prog, &meta)
+	} else if rtgCompilerFixedTarget == rtgTargetLinuxArm {
+		result = rtgTryCompileScalarProgramArm(prog, &meta)
+	} else if rtgCompilerFixedTarget == rtgTargetWasiWasm32 {
+		result = rtgTryCompileScalarProgramWasm32(prog, &meta)
+	} else if rtgCompilerFixedTarget != 0 {
+		result = rtgTryCompileScalarProgramAmd64(prog, &meta)
+	} else if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
 		result = rtgTryCompileScalarProgram386(prog, &meta)
 	} else if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 {
 		result = rtgTryCompileScalarProgramAarch64(prog, &meta)
@@ -452,6 +484,7 @@ func appMain(args []string, env []string) int {
 	inputCount := 0
 	var outputPath string
 	target := rtgCompilerDefaultTarget
+	rtgCompilerArenaSize = 0
 	if len(args) == 0 {
 		rtgPrintErr("rtg: missing output path (-o)\n")
 		rtgPrintUsage()
@@ -490,6 +523,24 @@ func appMain(args []string, env []string) int {
 				rtgPrintUnsupportedTarget(targetArg)
 				return 1
 			}
+			i++
+			continue
+		}
+		if len(arg) == 11 && arg[0] == '-' && arg[1] == 'a' && arg[2] == 'r' && arg[3] == 'e' && arg[4] == 'n' && arg[5] == 'a' && arg[6] == '-' && arg[7] == 's' && arg[8] == 'i' && arg[9] == 'z' && arg[10] == 'e' {
+			i++
+			if i == len(args) {
+				rtgPrintErr("rtg: missing argument for -arena-size\n")
+				rtgPrintUsage()
+				return 1
+			}
+			arenaSize, ok := rtgParsePositiveDecimal(args[i])
+			if !ok {
+				rtgPrintErr("rtg: invalid arena size: ")
+				rtgPrintErr(args[i])
+				rtgPrintErr("\n")
+				return 1
+			}
+			rtgCompilerArenaSize = arenaSize
 			i++
 			continue
 		}
