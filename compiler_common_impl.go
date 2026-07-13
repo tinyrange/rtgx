@@ -10,6 +10,7 @@ const rtgTargetLinuxArm = 4
 const rtgTargetWindowsAmd64 = 5
 const rtgTargetWindows386 = 6
 const rtgTargetWasiWasm32 = 7
+const rtgTargetDarwinArm64 = 8
 
 const rtgArchAmd64 = 1
 const rtgArch386 = 2
@@ -19,13 +20,243 @@ const rtgArchWasm32 = 5
 
 const rtgOSLinux = 1
 const rtgOSWindows = 2
+const rtgOSDarwin = 3
+const rtgOSWasi = 4
+
+const rtgEndianLittle = 1
+const rtgEndianBig = 2
+
+const rtgAddressModelFlat = 1
+const rtgAddressModelHarvard = 2
+const rtgAddressModelSegmented = 3
+const rtgAddressModelBanked = 4
+
+const rtgPointerSpaceData = 1
+const rtgPointerSpaceCode = 2
+const rtgPointerSpaceFunction = 3
+const rtgPointerSpaceGeneric = 4
+
+const rtgRuntimePrint = 1
+const rtgRuntimeOpen = 2
+const rtgRuntimeClose = 4
+const rtgRuntimeRead = 8
+const rtgRuntimeWrite = 16
+const rtgRuntimeChmod = 32
+const rtgRuntimeHosted = 64
+const rtgRuntimeHeap = 128
+const rtgRuntimeVolatileMemory = 256
+const rtgRuntimeInterrupts = 512
+
+const rtgHeapNone = 0
+const rtgHeapBump = 1
+const rtgHeapExternal = 2
+
+const rtgOOMTrap = 1
+const rtgOOMResult = 2
+const rtgOOMPanic = 3
+
+const rtgVolatileWidth8 = 1
+const rtgVolatileWidth16 = 2
+const rtgVolatileWidth32 = 4
+const rtgVolatileWidth64 = 8
+
+const rtgInterruptNone = 0
+const rtgInterruptVector = 1
+
+const rtgFloatScaledInteger = 1
+const rtgFloatIEEEHardware = 2
+const rtgFloatIEEESoft = 3
+
+// The current normalized backend stores scalar values in eight-byte virtual
+// slots even when the target address or language int is narrower. Keep this
+// distinct from the target data model so future C and small-device backends do
+// not mistake an internal lowering detail for a machine ABI requirement.
+const rtgBackendValueSlotSize = 8
+const rtgBackendStringValueSize = rtgBackendValueSlotSize * 2
+const rtgBackendSliceValueSize = rtgBackendValueSlotSize * 3
+
+type rtgTargetProfile struct {
+	target          int
+	os              int
+	arch            int
+	charBits        int
+	intBits         int
+	pointerBits     int
+	codePointerBits int
+	funcPointerBits int
+	endian          int
+	maxAlign        int
+	backendSlotSize int
+	addressModel    int
+	runtimeCaps     int
+	heapModel       int
+	oomModel        int
+	volatileWidths  int
+	interruptModel  int
+	floatModel      int
+}
+
+func rtgProfileForTarget(target int) (rtgTargetProfile, bool) {
+	var p rtgTargetProfile
+	p.target = target
+	p.charBits = 8
+	p.endian = rtgEndianLittle
+	p.backendSlotSize = rtgBackendValueSlotSize
+	p.addressModel = rtgAddressModelFlat
+	p.runtimeCaps = rtgRuntimePrint | rtgRuntimeOpen | rtgRuntimeClose | rtgRuntimeRead | rtgRuntimeWrite | rtgRuntimeChmod | rtgRuntimeHosted
+	p.heapModel = rtgHeapNone
+	p.oomModel = rtgOOMResult
+	p.interruptModel = rtgInterruptNone
+	p.floatModel = rtgFloatScaledInteger
+	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
+		p.arch = rtgArch386
+		p.intBits = 32
+		p.pointerBits = 32
+		p.maxAlign = 4
+	} else if target == rtgTargetLinuxArm {
+		p.arch = rtgArchArm
+		p.intBits = 32
+		p.pointerBits = 32
+		p.maxAlign = 4
+	} else if target == rtgTargetWasiWasm32 {
+		p.arch = rtgArchWasm32
+		p.intBits = 32
+		p.pointerBits = 32
+		p.maxAlign = 8
+	} else if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 {
+		p.arch = rtgArchAarch64
+		p.intBits = 64
+		p.pointerBits = 64
+		p.maxAlign = 8
+	} else if target == rtgTargetLinuxAmd64 || target == rtgTargetWindowsAmd64 {
+		p.arch = rtgArchAmd64
+		p.intBits = 64
+		p.pointerBits = 64
+		p.maxAlign = 8
+	} else {
+		return p, false
+	}
+	p.os = rtgOSLinux
+	if target == rtgTargetWindowsAmd64 || target == rtgTargetWindows386 {
+		p.os = rtgOSWindows
+	}
+	if target == rtgTargetDarwinArm64 {
+		p.os = rtgOSDarwin
+	}
+	if target == rtgTargetWasiWasm32 {
+		p.os = rtgOSWasi
+	}
+	p.codePointerBits = p.pointerBits
+	p.funcPointerBits = p.pointerBits
+	return p, true
+}
+
+func rtgProfileHasRuntime(p rtgTargetProfile, capability int) bool {
+	return p.runtimeCaps&capability == capability
+}
+
+func rtgProfileIsValid(p rtgTargetProfile) bool {
+	if p.charBits < 8 || p.charBits%8 != 0 {
+		return false
+	}
+	if p.intBits != 16 && p.intBits != 32 && p.intBits != 64 {
+		return false
+	}
+	if p.pointerBits != 16 && p.pointerBits != 24 && p.pointerBits != 32 && p.pointerBits != 64 {
+		return false
+	}
+	if p.codePointerBits != 16 && p.codePointerBits != 24 && p.codePointerBits != 32 && p.codePointerBits != 64 {
+		return false
+	}
+	if p.funcPointerBits != 16 && p.funcPointerBits != 24 && p.funcPointerBits != 32 && p.funcPointerBits != 64 {
+		return false
+	}
+	if p.endian != rtgEndianLittle && p.endian != rtgEndianBig {
+		return false
+	}
+	if p.backendSlotSize < 1 || p.maxAlign < 1 {
+		return false
+	}
+	if p.addressModel < rtgAddressModelFlat || p.addressModel > rtgAddressModelBanked {
+		return false
+	}
+	if p.heapModel < rtgHeapNone || p.heapModel > rtgHeapExternal {
+		return false
+	}
+	if p.oomModel < rtgOOMTrap || p.oomModel > rtgOOMPanic {
+		return false
+	}
+	if rtgProfileHasRuntime(p, rtgRuntimeHeap) && p.heapModel == rtgHeapNone {
+		return false
+	}
+	if rtgProfileHasRuntime(p, rtgRuntimeVolatileMemory) && p.volatileWidths == 0 {
+		return false
+	}
+	if rtgProfileHasRuntime(p, rtgRuntimeInterrupts) && p.interruptModel == rtgInterruptNone {
+		return false
+	}
+	if p.floatModel < rtgFloatScaledInteger || p.floatModel > rtgFloatIEEESoft {
+		return false
+	}
+	return true
+}
 
 var rtgTargetArch int = rtgArchAmd64
 var rtgTargetOS int = rtgOSLinux
 var rtgNativeIntSize int = 8
 var rtgCurrentTarget int = rtgTargetLinuxAmd64
+var rtgCompilerArenaSize int
 
 func rtgSetTarget(target int) {
+	if rtgCompilerFixedTarget != 0 {
+		rtgCurrentTarget = rtgCompilerFixedTarget
+		if rtgCompilerFixedTarget == rtgTargetWindows386 {
+			rtgTargetOS = rtgOSWindows
+			rtgTargetArch = rtgArch386
+			rtgNativeIntSize = 4
+			return
+		}
+		if rtgCompilerFixedTarget == rtgTargetWindowsAmd64 {
+			rtgTargetOS = rtgOSWindows
+			rtgTargetArch = rtgArchAmd64
+			rtgNativeIntSize = 8
+			return
+		}
+		if rtgCompilerFixedTarget == rtgTargetDarwinArm64 {
+			rtgTargetOS = rtgOSDarwin
+			rtgTargetArch = rtgArchAarch64
+			rtgNativeIntSize = 8
+			return
+		}
+		if rtgCompilerFixedTarget == rtgTargetWasiWasm32 {
+			rtgTargetOS = rtgOSWasi
+			rtgTargetArch = rtgArchWasm32
+			rtgNativeIntSize = 4
+			return
+		}
+		if rtgCompilerFixedTarget == rtgTargetLinux386 {
+			rtgTargetOS = rtgOSLinux
+			rtgTargetArch = rtgArch386
+			rtgNativeIntSize = 4
+			return
+		}
+		if rtgCompilerFixedTarget == rtgTargetLinuxArm {
+			rtgTargetOS = rtgOSLinux
+			rtgTargetArch = rtgArchArm
+			rtgNativeIntSize = 4
+			return
+		}
+		if rtgCompilerFixedTarget == rtgTargetLinuxAarch64 {
+			rtgTargetOS = rtgOSLinux
+			rtgTargetArch = rtgArchAarch64
+			rtgNativeIntSize = 8
+			return
+		}
+		rtgTargetOS = rtgOSLinux
+		rtgTargetArch = rtgArchAmd64
+		rtgNativeIntSize = 8
+		return
+	}
 	rtgCurrentTarget = target
 	rtgTargetOS = rtgOSLinux
 	if target == rtgTargetLinux386 {
@@ -44,6 +275,12 @@ func rtgSetTarget(target int) {
 		rtgNativeIntSize = 8
 		return
 	}
+	if target == rtgTargetDarwinArm64 {
+		rtgTargetOS = rtgOSDarwin
+		rtgTargetArch = rtgArchAarch64
+		rtgNativeIntSize = 8
+		return
+	}
 	if target == rtgTargetLinuxArm {
 		rtgTargetArch = rtgArchArm
 		rtgNativeIntSize = 4
@@ -56,6 +293,7 @@ func rtgSetTarget(target int) {
 		return
 	}
 	if target == rtgTargetWasiWasm32 {
+		rtgTargetOS = rtgOSWasi
 		rtgTargetArch = rtgArchWasm32
 		rtgNativeIntSize = 4
 		return
@@ -66,6 +304,10 @@ func rtgSetTarget(target int) {
 
 func rtgTargetIsWindows() bool {
 	return rtgTargetOS == rtgOSWindows
+}
+
+func rtgTargetIsDarwin() bool {
+	return rtgTargetOS == rtgOSDarwin
 }
 
 type rtgLabelRef struct {
@@ -91,18 +333,20 @@ type rtgWinStaticImport struct {
 }
 
 type rtgAsm struct {
-	code       []byte
-	labelPos   []int
-	labelSet   []bool
-	relocs     []rtgLabelRef
-	absRelocs  []rtgAbsRef
-	symbols    []rtgAsmSymbol
-	symbolName []byte
-	winImports []rtgWinStaticImport
-	data       []byte
-	bssSize    int
-	codeOffset int
-	dataOffset int
+	code               []byte
+	labelPos           []int
+	labelSet           []bool
+	relocs             []rtgLabelRef
+	absRelocs          []rtgAbsRef
+	symbols            []rtgAsmSymbol
+	symbolName         []byte
+	winImports         []rtgWinStaticImport
+	darwinImportLabels []int
+	darwinImportUsed   []bool
+	data               []byte
+	bssSize            int
+	codeOffset         int
+	dataOffset         int
 }
 
 const rtgWasm32FallbackSliceBackingSize = 4096
@@ -2681,15 +2925,17 @@ func rtgParseExpressionInto(ep *rtgExprParse, p *rtgProgram, start int, end int)
 	ep.prog = p
 	ep.pos = start
 	ep.end = end
-	if rtgCompilerFixedTarget != 0 {
-		ep.exprs = make([]rtgExpr, 0, 16)
-		ep.args = make([]int, 0, 16)
-		ep.fields = make([]rtgCompositeField, 0, 8)
-	} else {
-		ep.exprs = make([]rtgExpr, 0, 512)
-		ep.args = make([]int, 0, 512)
-		ep.fields = make([]rtgCompositeField, 0, 512)
+	// An expression cannot initially need more AST nodes, arguments, or
+	// composite fields than it has tokens. The old fixed capacities reserved
+	// scratch for every small expression; with the bump allocator those
+	// reservations accumulated for the entire compile.
+	capacity := end - start
+	if capacity < 2 {
+		capacity = 2
 	}
+	ep.exprs = make([]rtgExpr, 0, capacity)
+	ep.args = make([]int, 0, capacity)
+	ep.fields = make([]rtgCompositeField, 0, (capacity+1)/2)
 	ep.ok = true
 	rtgParseBinaryExpr(ep, 1)
 	if ep.pos < ep.end {
@@ -3728,7 +3974,7 @@ func rtgInitBuiltinTypes(m *rtgMeta) {
 	rtgAddBuiltinType(m, rtgTypeInt64, 8)
 	rtgAddBuiltinType(m, rtgTypeByte, 1)
 	rtgAddBuiltinType(m, rtgTypeBool, 1)
-	rtgAddBuiltinType(m, rtgTypeString, 16)
+	rtgAddBuiltinType(m, rtgTypeString, rtgBackendStringValueSize)
 	rtgAddBuiltinType(m, rtgTypeFloat64, 8)
 	rtgAddBuiltinType(m, rtgTypeInt16, 2)
 	rtgAddBuiltinType(m, rtgTypeInt32, 4)
@@ -4354,8 +4600,8 @@ func rtgBuildTupleType(m *rtgMeta, p *rtgProgram, parts []int) int {
 		offset = rtgAlignTo8(offset)
 		m.fields = append(m.fields, rtgFieldInfo{typ: typeResult.typ, offset: offset})
 		fieldSize := rtgTypeSize(m, typeResult.typ)
-		if fieldSize < 8 {
-			fieldSize = 8
+		if fieldSize < rtgBackendValueSlotSize {
+			fieldSize = rtgBackendValueSlotSize
 		}
 		offset += fieldSize
 	}
@@ -4450,7 +4696,7 @@ func rtgParseType(m *rtgMeta, p *rtgProgram, start int, end int) rtgTypeResult {
 		if elem.typ == 0 {
 			return rtgTypeResult{next: start}
 		}
-		typ := rtgAddType(m, rtgTypeSlice, elem.typ, 0, 0, 24, 0, 0)
+		typ := rtgAddType(m, rtgTypeSlice, elem.typ, 0, 0, rtgBackendSliceValueSize, 0, 0)
 		return rtgTypeResult{typ: typ, next: elem.next}
 	}
 	if rtgTokCharIs(p, start, '*') {
@@ -4458,7 +4704,7 @@ func rtgParseType(m *rtgMeta, p *rtgProgram, start int, end int) rtgTypeResult {
 		if elem.typ == 0 {
 			return rtgTypeResult{next: start}
 		}
-		typ := rtgAddType(m, rtgTypePointer, elem.typ, 0, 0, 8, 0, 0)
+		typ := rtgAddPointerType(m, elem.typ, rtgPointerSpaceData)
 		return rtgTypeResult{typ: typ, next: elem.next}
 	}
 	if rtgTokIsKind(p, start, rtgTokIdent) && rtgBytesEqualText(p.src, int(rtgTokStart(p, start)), int(rtgTokEnd(p, start)), "map") && rtgTokCharIs(p, start+1, '[') {
@@ -4486,7 +4732,7 @@ func rtgParseType(m *rtgMeta, p *rtgProgram, start int, end int) rtgTypeResult {
 		if elem.typ == 0 {
 			return rtgTypeResult{next: start}
 		}
-		typ := rtgAddType(m, rtgTypeSlice, elem.typ, 0, 0, 24, 0, 0)
+		typ := rtgAddType(m, rtgTypeSlice, elem.typ, 0, 0, rtgBackendSliceValueSize, 0, 0)
 		return rtgTypeResult{typ: typ, next: elem.next}
 	}
 	if rtgTokIsKind(p, start, rtgTokStruct) && rtgTokCharIs(p, start+1, '{') {
@@ -4594,13 +4840,31 @@ func rtgNamedTypeFromToken(m *rtgMeta, p *rtgProgram, tokIndex int) int {
 			return i
 		}
 	}
-	return rtgAddType(m, rtgTypeNamed, 0, 0, 0, 8, start, end)
+	return rtgAddType(m, rtgTypeNamed, 0, 0, 0, rtgBackendValueSlotSize, start, end)
 }
 
 func rtgAddType(m *rtgMeta, kind int, elem int, first int, count int, size int, nameStart int, nameEnd int) int {
 	m.types = append(m.types, rtgTypeInfo{kind: kind, elem: elem, first: first, count: count, size: size, nameStart: nameStart, nameEnd: nameEnd})
 	index := len(m.types) - 1
 	return index
+}
+
+func rtgAddPointerType(m *rtgMeta, elem int, addressSpace int) int {
+	if addressSpace < rtgPointerSpaceData || addressSpace > rtgPointerSpaceGeneric {
+		addressSpace = rtgPointerSpaceData
+	}
+	return rtgAddType(m, rtgTypePointer, elem, addressSpace, 0, rtgBackendValueSlotSize, 0, 0)
+}
+
+func rtgPointerAddressSpace(m *rtgMeta, typ int) int {
+	t := rtgResolveType(m, typ)
+	if t.kind != rtgTypePointer {
+		return 0
+	}
+	if t.first < rtgPointerSpaceData || t.first > rtgPointerSpaceGeneric {
+		return rtgPointerSpaceData
+	}
+	return t.first
 }
 
 func rtgFinalizeTypeLayouts(m *rtgMeta) {
@@ -4619,7 +4883,7 @@ func rtgFinalizeTypeLayouts(m *rtgMeta) {
 			m.fields[fieldIndex].offset = offset
 			fieldSize := rtgTypeLayoutSize(m, m.fields[fieldIndex].typ, nil)
 			if fieldSize < 1 {
-				fieldSize = 8
+				fieldSize = rtgBackendValueSlotSize
 			}
 			offset += fieldSize
 		}
@@ -4629,10 +4893,10 @@ func rtgFinalizeTypeLayouts(m *rtgMeta) {
 
 func rtgTypeLayoutSize(m *rtgMeta, typ int, seen []int) int {
 	if typ < 0 || typ >= len(m.types) {
-		return 8
+		return rtgBackendValueSlotSize
 	}
 	if rtgIntSliceContains(seen, typ) {
-		return 8
+		return rtgBackendValueSlotSize
 	}
 	seen = rtgAppendIntCopy(seen, typ)
 	t := m.types[typ]
@@ -4655,7 +4919,7 @@ func rtgTypeLayoutSize(m *rtgMeta, typ int, seen []int) int {
 			offset = rtgAlignTo8(offset)
 			fieldSize := rtgTypeLayoutSize(m, m.fields[fieldIndex].typ, seen)
 			if fieldSize < 1 {
-				fieldSize = 8
+				fieldSize = rtgBackendValueSlotSize
 			}
 			offset += fieldSize
 		}
@@ -4664,7 +4928,7 @@ func rtgTypeLayoutSize(m *rtgMeta, typ int, seen []int) int {
 	if t.size > 0 {
 		return t.size
 	}
-	return 8
+	return rtgBackendValueSlotSize
 }
 
 func rtgIntSliceContains(values []int, value int) bool {
@@ -4713,7 +4977,7 @@ func rtgTypeSize(m *rtgMeta, typ int) int {
 	if t.size > 0 {
 		return t.size
 	}
-	return 8
+	return rtgBackendValueSlotSize
 }
 
 func rtgResolveType(m *rtgMeta, typ int) rtgTypeInfo {
@@ -4785,7 +5049,7 @@ func rtgScalarKindSize(kind int) int {
 	if kind >= rtgTypeInt16 {
 		return (kind - 6) * 2
 	}
-	return 8
+	return rtgBackendValueSlotSize
 }
 
 func rtgAsmLoadRaxIndexRcxScalarOrPointer(a *rtgAsm, kind int) {
@@ -4817,11 +5081,11 @@ func rtgTypeIsTuple(m *rtgMeta, typ int) bool {
 }
 
 func rtgAlignTo8(v int) int {
-	rem := v % 8
+	rem := v % rtgBackendValueSlotSize
 	if rem == 0 {
 		return v
 	}
-	return v + 8 - rem
+	return v + rtgBackendValueSlotSize - rem
 }
 
 func rtgFindTokenTextInRange(p *rtgProgram, start int, end int, text byte) int {
@@ -5453,6 +5717,8 @@ type rtgLinearGen struct {
 	appendBytesEmitted bool
 	copyWordsLabel     int
 	copyWordsEmitted   bool
+	arenaAllocLabel    int
+	arenaAllocEmitted  bool
 	stringHeapOff      int
 	stringHeapEndOff   int
 	stringHeapDataOff  int
@@ -5461,6 +5727,7 @@ type rtgLinearGen struct {
 	winReadEmitted     bool
 	winWriteLabel      int
 	winWriteEmitted    bool
+	darwinEntryOff     int
 	lastRangeReturns   bool
 	scopeBase          int
 	constEvalIota      int
@@ -5550,14 +5817,17 @@ func rtgEmitLinearRange(g *rtgLinearGen, start int, end int) bool {
 func rtgEmitScopedRange(g *rtgLinearGen, start int, end int) bool {
 	oldLocalCount := g.localCount
 	oldScopeBase := g.scopeBase
+	oldStackUsed := g.stackUsed
 	g.scopeBase = oldLocalCount
 	if !rtgEmitLinearRange(g, start, end) {
 		g.localCount = oldLocalCount
 		g.scopeBase = oldScopeBase
+		g.stackUsed = oldStackUsed
 		return false
 	}
 	g.localCount = oldLocalCount
 	g.scopeBase = oldScopeBase
+	g.stackUsed = oldStackUsed
 	return true
 }
 func rtgEmitLinearStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
@@ -5709,6 +5979,7 @@ func rtgLoadCompilerFixedTarget(g *rtgLinearGen) {
 		}
 	}
 }
+
 func rtgFindCompilerFixedTarget(g *rtgLinearGen) int {
 	rtgLoadCompilerFixedTarget(g)
 	return g.fixedTargetValue
@@ -5739,14 +6010,32 @@ func rtgExprRangeMayUseFixedTarget(p *rtgProgram, start int, end int) bool {
 		if rtgBytesEqualText(p.src, nameStart, nameEnd, "rtgTargetIsWindows") {
 			return true
 		}
+		if rtgBytesEqualText(p.src, nameStart, nameEnd, "rtgTargetIsDarwin") {
+			return true
+		}
 	}
 	return false
 }
 func rtgFixedTargetArch(target int) int {
+	if rtgCompilerFixedTarget != 0 {
+		if rtgCompilerFixedTarget == rtgTargetWindows386 || rtgCompilerFixedTarget == rtgTargetLinux386 {
+			return rtgArch386
+		}
+		if rtgCompilerFixedTarget == rtgTargetLinuxAarch64 || rtgCompilerFixedTarget == rtgTargetDarwinArm64 {
+			return rtgArchAarch64
+		}
+		if rtgCompilerFixedTarget == rtgTargetLinuxArm {
+			return rtgArchArm
+		}
+		if rtgCompilerFixedTarget == rtgTargetWasiWasm32 {
+			return rtgArchWasm32
+		}
+		return rtgArchAmd64
+	}
 	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
 		return rtgArch386
 	}
-	if target == rtgTargetLinuxAarch64 {
+	if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 {
 		return rtgArchAarch64
 	}
 	if target == rtgTargetLinuxArm {
@@ -5761,8 +6050,26 @@ func rtgFixedTargetArch(target int) int {
 	return 0
 }
 func rtgFixedTargetOS(target int) int {
+	if rtgCompilerFixedTarget != 0 {
+		if rtgCompilerFixedTarget == rtgTargetWindowsAmd64 || rtgCompilerFixedTarget == rtgTargetWindows386 {
+			return rtgOSWindows
+		}
+		if rtgCompilerFixedTarget == rtgTargetDarwinArm64 {
+			return rtgOSDarwin
+		}
+		if rtgCompilerFixedTarget == rtgTargetWasiWasm32 {
+			return rtgOSWasi
+		}
+		return rtgOSLinux
+	}
 	if target == rtgTargetWindowsAmd64 || target == rtgTargetWindows386 {
 		return rtgOSWindows
+	}
+	if target == rtgTargetDarwinArm64 {
+		return rtgOSDarwin
+	}
+	if target == rtgTargetWasiWasm32 {
+		return rtgOSWasi
 	}
 	if target != 0 {
 		return rtgOSLinux
@@ -5835,6 +6142,15 @@ func rtgEvalFixedTargetBool(g *rtgLinearGen, ep *rtgExprParse, idx int, fixedTar
 			return -1
 		}
 		if rtgFixedTargetOS(fixedTarget) == rtgOSWindows {
+			return 1
+		}
+		return 0
+	}
+	if e.kind == rtgExprCall && e.argCount == 0 && rtgExprIsIdentText(g.prog, ep, e.left, "rtgTargetIsDarwin") {
+		if fixedTarget == 0 {
+			return -1
+		}
+		if rtgFixedTargetOS(fixedTarget) == rtgOSDarwin {
 			return 1
 		}
 		return 0
@@ -6780,8 +7096,8 @@ func rtgLinearInitGlobals(g *rtgLinearGen) bool {
 		off := g.asm.bssSize
 		g.globals = append(g.globals, rtgGlobalInfo{nameStart: s.nameStart, nameEnd: s.nameEnd, offset: off})
 		size := rtgTypeSize(meta, s.typ)
-		if size < 8 {
-			size = 8
+		if size < rtgBackendValueSlotSize {
+			size = rtgBackendValueSlotSize
 		}
 		g.asm.bssSize += rtgAlignTo8(size)
 		if rtgTypeIsInt(meta, s.typ) && rtgBytesEqualText(g.prog.src, s.nameStart, s.nameEnd, "rtgCompilerDefaultTarget") {
@@ -7438,6 +7754,13 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 		}
 		return rtgEmitIntExpr(g, &ep, rootIndex)
 	}
+	var ep rtgExprParse
+	if assignTok > stmt.startTok {
+		rtgParseExpressionInto(&ep, p, assignTok+1, stmt.endTok)
+		if !ep.ok || len(ep.exprs) == 0 {
+			return false
+		}
+	}
 	declaresLocal := stmt.kind == rtgStmtVar || rtgTokIsKind(p, stmt.startTok, rtgTokVar) || stmt.kind == rtgStmtShort
 	offset := rtgFindLocalOffset(g, nameStart, nameEnd)
 	if declaresLocal {
@@ -7488,7 +7811,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 				}
 			}
 			if stmt.kind == rtgStmtShort {
-				inferredType := rtgInferExprType(g, assignTok+1, stmt.endTok)
+				inferredType := rtgInferParsedExprType(g, &ep, len(ep.exprs)-1)
 				if assignTok+2 < stmt.endTok && rtgTokIsKind(p, assignTok+1, rtgTokIdent) && rtgTokCharIs(p, assignTok+2, '(') {
 					fnIndex := -1
 					for i := 0; i < len(g.meta.funcs); i++ {
@@ -7522,11 +7845,6 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 			}
 		}
 		return true
-	}
-	var ep rtgExprParse
-	rtgParseExpressionInto(&ep, p, assignTok+1, stmt.endTok)
-	if !ep.ok || len(ep.exprs) == 0 {
-		return false
 	}
 	rootIndex := len(ep.exprs) - 1
 	targetType := rtgTypeInt
@@ -7780,8 +8098,8 @@ func rtgEmitTempToTarget(g *rtgLinearGen, kind int, targetStart int, targetEnd i
 	rootIndex := len(ep.exprs) - 1
 	root := &ep.exprs[rootIndex]
 	size := rtgTypeSize(g.meta, tempType)
-	if size < 8 {
-		size = 8
+	if size < rtgBackendValueSlotSize {
+		size = rtgBackendValueSlotSize
 	}
 	if root.kind == rtgExprIdent {
 		if root.nameEnd == root.nameStart+1 && p.src[root.nameStart] == '_' {
@@ -7822,8 +8140,8 @@ func rtgEmitTempToTarget(g *rtgLinearGen, kind int, targetStart int, targetEnd i
 		}
 		targetType := rtgInferParsedExprType(g, &ep, rootIndex)
 		targetSize := rtgTypeSize(g.meta, targetType)
-		if targetSize < 8 {
-			targetSize = 8
+		if targetSize < rtgBackendValueSlotSize {
+			targetSize = rtgBackendValueSlotSize
 		}
 		rtgEmitCopyStackToMemRdx(g, tempOffset, 0, targetSize)
 		return true
@@ -7846,8 +8164,8 @@ func rtgEmitTempToTarget(g *rtgLinearGen, kind int, targetStart int, targetEnd i
 		rtgAsmMovRdxRax(&g.asm)
 		targetType := rtgInferParsedExprType(g, &ep, rootIndex)
 		targetSize := rtgTypeSize(g.meta, targetType)
-		if targetSize < 8 {
-			targetSize = 8
+		if targetSize < rtgBackendValueSlotSize {
+			targetSize = rtgBackendValueSlotSize
 		}
 		rtgEmitCopyStackToMemRdx(g, tempOffset, 0, targetSize)
 		return true
@@ -7859,8 +8177,8 @@ func rtgEmitTempToTarget(g *rtgLinearGen, kind int, targetStart int, targetEnd i
 		rtgAsmMovRdxRax(&g.asm)
 		targetType := rtgInferParsedExprType(g, &ep, rootIndex)
 		targetSize := rtgTypeSize(g.meta, targetType)
-		if targetSize < 8 {
-			targetSize = 8
+		if targetSize < rtgBackendValueSlotSize {
+			targetSize = rtgBackendValueSlotSize
 		}
 		rtgEmitCopyStackToMemRdx(g, tempOffset, 0, targetSize)
 		return true
@@ -7868,8 +8186,8 @@ func rtgEmitTempToTarget(g *rtgLinearGen, kind int, targetStart int, targetEnd i
 	return false
 }
 func rtgEmitCopyStackToBss(g *rtgLinearGen, srcOffset int, bssOffset int, size int) {
-	if size < 8 {
-		size = 8
+	if size < rtgBackendValueSlotSize {
+		size = rtgBackendValueSlotSize
 	}
 	for at := 0; at < size; at += 8 {
 		rtgAsmLoadRaxStack(&g.asm, srcOffset-at)
@@ -8036,8 +8354,8 @@ func rtgEmitTupleReturnField(g *rtgLinearGen, start int, end int, typ int, field
 		return false
 	}
 	size := rtgTypeSize(g.meta, typ)
-	if size < 8 {
-		size = 8
+	if size < rtgBackendValueSlotSize {
+		size = rtgBackendValueSlotSize
 	}
 	rtgAsmLoadRdxStack(&g.asm, g.returnStruct)
 	rtgEmitCopyStackToMemRdx(g, tempOffset, fieldOffset, size)
@@ -8092,7 +8410,7 @@ func rtgInferParsedExprType(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 			return rtgInferParsedExprType(g, ep, ep.args[e.firstArg])
 		}
 		if callee == rtgIdentByteSlice && e.argCount == 1 {
-			return rtgAddType(meta, rtgTypeSlice, rtgTypeByte, 0, 0, 24, 0, 0)
+			return rtgAddType(meta, rtgTypeSlice, rtgTypeByte, 0, 0, rtgBackendSliceValueSize, 0, 0)
 		}
 		if callee == rtgIdentString && e.argCount == 1 {
 			return rtgTypeString
@@ -8172,7 +8490,7 @@ func rtgInferParsedExprType(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 			if elemType == 0 {
 				return 0
 			}
-			return rtgAddType(meta, rtgTypePointer, elemType, 0, 0, 8, 0, 0)
+			return rtgAddPointerType(meta, elemType, rtgPointerSpaceData)
 		}
 		if rtgTokCharIs(p, e.tok, '*') {
 			innerType := rtgInferParsedExprType(g, ep, e.left)
@@ -8360,7 +8678,7 @@ func rtgEmitTypedAssign(g *rtgLinearGen, ep *rtgExprParse, idx int, offset int) 
 		rtgAsmStoreRdxStack(&g.asm, offset-8)
 		return true
 	}
-	if rtgTypeKindIsScalarInt(destResolved.kind) {
+	if rtgTypeKindIsScalarIntOrPointer(destResolved.kind) {
 		if !rtgEmitIntExpr(g, ep, idx) {
 			return false
 		}
@@ -9041,11 +9359,6 @@ func rtgEmitMakeSliceRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rtgAsmImulRcxImm(a, elemSize)
 		rtgAsmPushRcx(a)
 		rtgAsmPopRax(a)
-		if rtgTargetArch == rtgArchWasm32 {
-			rtgAsmPushImm(a, 65536)
-			rtgAsmPopRcx(a)
-			rtgAsmAddRaxRcx(a)
-		}
 		rtgAsmStoreRaxStack(a, sizeOffset)
 		rtgEmitArenaAllocStackRax(g, sizeOffset)
 	}
@@ -9417,7 +9730,50 @@ func rtgEmitRuntimeArenaCall(g *rtgLinearGen, ep *rtgExprParse, idx int, fn *rtg
 	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistBytes") {
 		return rtgEmitRuntimeArenaPersistBytes(g, ep, idx)
 	}
+	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaDiscard") {
+		return rtgEmitRuntimeArenaDiscard(g, ep, idx)
+	}
 	return false
+}
+
+func rtgEmitRuntimeArenaDiscard(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	e := ep.exprs[idx]
+	if e.argCount != 2 {
+		return false
+	}
+	if rtgTargetArch != rtgArchAmd64 || rtgTargetOS != rtgOSLinux {
+		rtgAsmMovRaxImm(&g.asm, 0)
+		return true
+	}
+	a := &g.asm
+	startOff := rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
+	lenOff := rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
+	doneLabel := rtgAsmNewLabel(a)
+	if !rtgEmitIntExpr(g, ep, ep.args[e.firstArg]) {
+		return false
+	}
+	rtgAmd64AsmAddRaxImm32(a, 4095)
+	rtgAmd64AsmAndRaxImm32(a, -4096)
+	rtgAsmStoreRaxStack(a, startOff)
+	if !rtgEmitIntExpr(g, ep, ep.args[e.firstArg+1]) {
+		return false
+	}
+	rtgAmd64AsmAndRaxImm32(a, -4096)
+	rtgAsmLoadRcxStack(a, startOff)
+	rtgAsmSubRaxRcx(a)
+	rtgAsmStoreRaxStack(a, lenOff)
+	rtgAsmCmpRaxImm8(a, 0)
+	rtgAmd64AsmJccLabel(a, 0x8e, doneLabel)
+	rtgAsmLoadRaxStack(a, startOff)
+	rtgAsmMovRdiRax(a)
+	rtgAsmLoadRaxStack(a, lenOff)
+	rtgAsmMovRsiRax(a)
+	rtgAsmMovRdxImm(a, 4)
+	rtgAsmMovRaxImm(a, 28)
+	rtgAsmSyscall(a)
+	rtgAsmMarkLabel(a, doneLabel)
+	rtgAsmMovRaxImm(a, 0)
+	return true
 }
 
 func rtgEmitRuntimeArenaMark(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
@@ -9745,6 +10101,15 @@ func rtgEmitArbitrarySyscall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	if e.argCount < 1 || e.argCount > 7 {
 		return false
 	}
+	if rtgTargetIsDarwin() {
+		if e.argCount != 4 {
+			return false
+		}
+		number := rtgEvalConstExpr(g, ep, ep.args[e.firstArg])
+		if !number.ok || number.value != 217 {
+			return false
+		}
+	}
 	for i := e.argCount - 1; i >= 0; i-- {
 		argIndex := ep.args[e.firstArg+i]
 		if !rtgEmitSyscallArg(g, ep, argIndex) {
@@ -9819,6 +10184,20 @@ func rtgEmitSyscallFromStack(g *rtgLinearGen, wordCount int) bool {
 		return true
 	}
 	if rtgTargetArch == rtgArchAarch64 {
+		if rtgTargetIsDarwin() {
+			if wordCount != 4 {
+				return false
+			}
+			rtgAarch64AsmPopReg(a, 9)
+			rtgAarch64AsmPopReg(a, 0)
+			rtgAarch64AsmPopReg(a, 1)
+			rtgAarch64AsmPopReg(a, 2)
+			baseOff := a.bssSize
+			a.bssSize += 8
+			rtgAarch64AsmMovRegAbs(a, 3, baseOff, rtgAbsBssReloc)
+			rtgDarwinArm64CallImport(a, rtgDarwinImportGetdirentries)
+			return true
+		}
 		rtgAarch64AsmPopReg(a, rtgAarch64RegSys)
 		if wordCount > 1 {
 			rtgAarch64AsmPopReg(a, 0)
@@ -10153,8 +10532,8 @@ func rtgEmitTupleArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, typ int)
 	for i := tuple.count - 1; i >= 0; i-- {
 		field := g.meta.fields[tuple.first+i]
 		size := rtgTypeSize(g.meta, field.typ)
-		if size < 8 {
-			size = 8
+		if size < rtgBackendValueSlotSize {
+			size = rtgBackendValueSlotSize
 		}
 		rtgEmitPushStackWords(g, offset-field.offset, size)
 		wordCount += size / 8
@@ -11699,6 +12078,7 @@ func rtgFindLocalOffset(g *rtgLinearGen, nameStart int, nameEnd int) int {
 	}
 	return g.locals[localIndex].offset
 }
+
 func rtgFindLocalIndex(g *rtgLinearGen, nameStart int, nameEnd int) int {
 	for i := g.localCount - 1; i >= 0; i-- {
 		if rtgBytesEqualRange(g.prog.src, g.locals[i].nameStart, g.locals[i].nameEnd, nameStart, nameEnd) {
@@ -11808,8 +12188,8 @@ func rtgFindSmallConstByName(g *rtgLinearGen, nameStart int, nameEnd int) int {
 }
 func rtgAddTypedLocal(g *rtgLinearGen, nameStart int, nameEnd int, typ int) int {
 	size := rtgTypeSize(g.meta, typ)
-	if size < 8 {
-		size = 8
+	if size < rtgBackendValueSlotSize {
+		size = rtgBackendValueSlotSize
 	}
 	g.stackUsed = rtgAlignTo8(g.stackUsed + size)
 	offset := g.stackUsed
@@ -13012,6 +13392,9 @@ func rtgStringHeapOffsets(g *rtgLinearGen) {
 }
 
 func rtgStringArenaSize() int {
+	if rtgCompilerArenaSize > 0 {
+		return rtgCompilerArenaSize
+	}
 	if rtgTargetArch == rtgArchAmd64 || rtgTargetArch == rtgArch386 || rtgTargetArch == rtgArchWasm32 {
 		return 1073741824
 	}
@@ -13019,28 +13402,31 @@ func rtgStringArenaSize() int {
 }
 
 func rtgEmitArenaAllocRax(g *rtgLinearGen, size int) {
-	a := &g.asm
-	rtgStringHeapOffsets(g)
-	readyLabel := rtgAsmNewLabel(a)
-	rtgAsmLoadRaxBss(a, g.stringHeapOff)
-	rtgAsmCmpRaxImm8(a, 0)
-	rtgAsmJnzLabel(a, readyLabel)
-	rtgAsmMovRaxBssAddr(a, g.stringHeapDataOff)
-	rtgAsmStoreRaxBss(a, g.stringHeapOff)
-	rtgAsmMarkLabel(a, readyLabel)
-	rtgAsmLoadRaxBss(a, g.stringHeapOff)
-	rtgAsmPushRax(a)
-	rtgAsmPushImm(a, size)
-	rtgAsmPopRcx(a)
-	rtgAsmAddRaxRcx(a)
-	rtgAsmStoreRaxBss(a, g.stringHeapOff)
-	rtgAsmPopRax(a)
+	label := rtgEnsureArenaAllocHelper(g)
+	rtgAsmMovRaxImm(&g.asm, size)
+	rtgAsmCallLabel(&g.asm, label)
 }
 
 func rtgEmitArenaAllocStackRax(g *rtgLinearGen, sizeOff int) {
+	label := rtgEnsureArenaAllocHelper(g)
+	rtgAsmLoadRaxStack(&g.asm, sizeOff)
+	rtgAsmCallLabel(&g.asm, label)
+}
+
+func rtgEnsureArenaAllocHelper(g *rtgLinearGen) int {
 	a := &g.asm
-	rtgStringHeapOffsets(g)
+	if g.arenaAllocEmitted {
+		return g.arenaAllocLabel
+	}
+	g.arenaAllocEmitted = true
+	g.arenaAllocLabel = rtgAsmNewLabel(a)
+	afterLabel := rtgAsmNewLabel(a)
 	readyLabel := rtgAsmNewLabel(a)
+	oomLabel := rtgAsmNewLabel(a)
+	rtgAsmJmpLabel(a, afterLabel)
+	rtgAsmMarkLabel(a, g.arenaAllocLabel)
+	rtgStringHeapOffsets(g)
+	rtgAsmMovRcxRax(a)
 	rtgAsmLoadRaxBss(a, g.stringHeapOff)
 	rtgAsmCmpRaxImm8(a, 0)
 	rtgAsmJnzLabel(a, readyLabel)
@@ -13049,10 +13435,31 @@ func rtgEmitArenaAllocStackRax(g *rtgLinearGen, sizeOff int) {
 	rtgAsmMarkLabel(a, readyLabel)
 	rtgAsmLoadRaxBss(a, g.stringHeapOff)
 	rtgAsmPushRax(a)
-	rtgAsmLoadRcxStack(a, sizeOff)
+	rtgAsmPushRax(a)
 	rtgAsmAddRaxRcx(a)
+	rtgAsmPushRax(a)
+	rtgAsmPopRcx(a)
+	rtgAsmPopRax(a)
+	rtgAsmCmpRcxRaxSet(a, 0x9d)
+	rtgAsmCmpRaxImm8(a, 0)
+	rtgAsmJzLabel(a, oomLabel)
+	rtgAsmPushRcx(a)
+	rtgAsmMovRaxBssAddr(a, g.stringHeapDataOff+rtgStringArenaSize())
+	rtgAsmPopRcx(a)
+	rtgAsmCmpRcxRaxSet(a, 0x9e)
+	rtgAsmCmpRaxImm8(a, 0)
+	rtgAsmJzLabel(a, oomLabel)
+	rtgAsmPushRcx(a)
+	rtgAsmPopRax(a)
 	rtgAsmStoreRaxBss(a, g.stringHeapOff)
 	rtgAsmPopRax(a)
+	rtgAsmRet(a)
+	rtgAsmMarkLabel(a, oomLabel)
+	rtgAsmPopRax(a)
+	rtgAsmMovRaxImm(a, 0)
+	rtgAsmRet(a)
+	rtgAsmMarkLabel(a, afterLabel)
+	return g.arenaAllocLabel
 }
 
 func rtgAmd64SliceBackingSize(elemSize int) int {
@@ -13184,7 +13591,7 @@ func rtgEmitByteSliceStringCopyValueRegs(g *rtgLinearGen, ep *rtgExprParse, argI
 
 func rtgEmitStringConcatValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	a := &g.asm
-	byteSliceType := rtgAddType(g.meta, rtgTypeSlice, rtgTypeByte, 0, 0, 24, 0, 0)
+	byteSliceType := rtgAddType(g.meta, rtgTypeSlice, rtgTypeByte, 0, 0, rtgBackendSliceValueSize, 0, 0)
 	offset := rtgAddTypedLocal(g, 0, 0, byteSliceType)
 	rtgZeroLocalAtOffset(g, offset)
 	loc := rtgSliceLocation{offset: offset, typ: byteSliceType, ok: true}

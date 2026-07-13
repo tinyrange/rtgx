@@ -41,8 +41,8 @@ func EmitCheckedPackageFast(pkg load.Package, info check.PackageInfo) Result {
 		return emitFail(result, EmitErrCheck, -1, -1)
 	}
 	var builder unitBuilder
-	builder.program.Package = pkg.Name
-	builder.program.ImportPath = pkg.Ref.ImportPath
+	builder.program.Package = cloneCoreString(pkg.Name)
+	builder.program.ImportPath = cloneCoreString(pkg.Ref.ImportPath)
 	builder.finalEOF = countPackageTokens(pkg)
 	builder.reserveCheckedPackage(pkg, info)
 	files := make([]fileTokens, len(pkg.Files))
@@ -119,14 +119,12 @@ func (b *unitBuilder) reserveCheckedPackage(pkg load.Package, info check.Package
 	selectorCap := 0
 	for i := 0; i < len(info.Decls); i++ {
 		decl := info.Decls[i]
-		callCap += len(decl.Calls)
 		refCap += len(decl.CoreRefs)
 		selectorCap += len(decl.CoreSelectors)
 	}
 	for i := 0; i < len(info.Bodies); i++ {
 		body := info.Bodies[i]
 		typeRefCap += len(body.CoreTypeRefs)
-		callCap += len(body.Calls)
 		refCap += len(body.CoreRefs)
 		selectorCap += len(body.CoreSelectors)
 	}
@@ -384,7 +382,7 @@ func (b *unitBuilder) addCheckedSymbols(info check.PackageInfo, files []fileToke
 			return false
 		}
 		var out unit.Symbol
-		out.Name = symbols[i].Name
+		out.Name = cloneCoreString(symbols[i].Name)
 		out.Package = symbols[i].Package
 		out.Token = token
 		b.program.Symbols = append(b.program.Symbols, out)
@@ -392,15 +390,13 @@ func (b *unitBuilder) addCheckedSymbols(info check.PackageInfo, files []fileToke
 	return true
 }
 
+func cloneCoreString(value string) string {
+	data := make([]byte, len(value))
+	copy(data, []byte(value))
+	return string(data)
+}
+
 func (b *unitBuilder) addDeclCalls(decl check.DeclInfo, mapping tokenMap, ownerIndex int) bool {
-	for i := 0; i < len(decl.Calls); i++ {
-		call, ok := mapCallRef(decl.Calls[i], mapping, b.finalEOF)
-		if !ok || ownerIndex < 0 {
-			b.setErr(EmitErrCheck, decl.File, decl.Token)
-			return false
-		}
-		b.program.Calls = append(b.program.Calls, call)
-	}
 	return true
 }
 
@@ -445,14 +441,6 @@ func (b *unitBuilder) addBodyResolution(body check.FuncBody, mapping tokenMap, o
 }
 
 func (b *unitBuilder) addBodyCalls(body check.FuncBody, mapping tokenMap, ownerIndex int) bool {
-	for i := 0; i < len(body.Calls); i++ {
-		call, ok := mapCallRef(body.Calls[i], mapping, b.finalEOF)
-		if !ok || ownerIndex < 0 {
-			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
-			return false
-		}
-		b.program.Calls = append(b.program.Calls, call)
-	}
 	return true
 }
 

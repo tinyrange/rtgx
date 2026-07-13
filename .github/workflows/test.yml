@@ -75,6 +75,61 @@ jobs:
           tests="$(go test -list '^Test' . | grep '^Test' | grep -v '^TestCompilerPerformance$' | grep -v '^TestCompilerResourceGates$' | grep -v '^TestFrontendCompilerPerformance$' | paste -sd'|' -)"
           go test -count=1 -timeout 30m -run "^(${tests})$" .
 
+  backend-darwin-arm64:
+    name: Backend compiler tests (darwin-arm64)
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build frontend backend
+        run: |
+          go build -o "$RUNNER_TEMP/rtg-backend" .
+          echo "RTG_BACKEND=$RUNNER_TEMP/rtg-backend" >> "$GITHUB_ENV"
+
+      - name: Run backend tests
+        run: |
+          tests="$(go test -list '^Test' . | grep '^Test' | grep -v '^TestCompilerPerformance$' | grep -v '^TestCompilerResourceGates$' | grep -v '^TestFrontendCompilerPerformance$' | paste -sd'|' -)"
+          go test -count=1 -timeout 30m -run "^(${tests})$" .
+
+      - name: Run Darwin frontend corpus
+        env:
+          RTG_FRONTEND_EXTENDED_TESTS: "1"
+          RTG_FRONTEND_SELFHOST_TESTS: "1"
+        run: go test -count=1 -timeout 30m ./rtg_tests
+
+  package-tests:
+    name: Package tests (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-latest
+          - macos-14
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Run tracked package suites
+        run: go test -count=1 ./rtg/internal/... ./rtg/std/... ./rtg/cmd/... ./rtgunit ./cmd/...
+
   frontend-corpus:
     name: Frontend corpus tests
     runs-on: ubuntu-latest

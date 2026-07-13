@@ -50,30 +50,26 @@ const frontendPerformanceMaxRSSKB = 32 * 1024
 const frontendPerformanceMaxBinarySize = 1024 * 1024
 
 func getCompilerFiles(config targetConfig) ([]string, error) {
-	var files []string
-
 	switch config.os + "/" + config.arch {
-	case "linux/amd64", "linux/386", "linux/aarch64", "linux/arm", "wasi/wasm32":
+	case "linux/amd64", "linux/386", "linux/aarch64", "linux/arm", "wasi/wasm32", "darwin/arm64":
 	default:
 		return nil, fmt.Errorf("unsupported OS/architecture combination: %s/%s", config.os, config.arch)
 	}
 
-	files = append(files,
-		"compiler_common_impl.go",
-		"compiler_main.go",
-		"compiler_linux_impl.go",
-		"compiler_amd64_impl.go",
-		"compiler_386_impl.go",
-		"compiler_aarch64_impl.go",
-		"compiler_arm_impl.go",
-		"compiler_wasm32_impl.go",
-		"compiler_linux_amd64_impl.go",
-		"compiler_linux_386_impl.go",
-		"compiler_linux_aarch64_impl.go",
-		"compiler_linux_arm_impl.go",
-		"compiler_wasi_wasm32_impl.go",
-	)
-
+	data, err := os.ReadFile("compiler_sources.txt")
+	if err != nil {
+		return nil, fmt.Errorf("read compiler source manifest: %w", err)
+	}
+	var files []string
+	for _, line := range strings.Split(string(data), "\n") {
+		path := strings.TrimSpace(line)
+		if path != "" {
+			files = append(files, path)
+		}
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("compiler source manifest is empty")
+	}
 	return files, nil
 }
 
@@ -430,6 +426,10 @@ func supportedCompilerTargets(t *testing.T) []compilerTarget {
 		configs = []targetConfig{
 			{os: "linux", arch: "aarch64"},
 		}
+	case "darwin/arm64":
+		configs = []targetConfig{
+			{os: "darwin", arch: "arm64"},
+		}
 	default:
 		t.Skipf("no RTG compiler targets supported on %s/%s", runtime.GOOS, runtime.GOARCH)
 		return nil
@@ -526,7 +526,9 @@ func compile(inputFiles []string, outputFile string) error {
 	}
 
 	err := 1
-	if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		err = compileDarwinArm64(input, outputFd)
+	} else if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
 		err = compileLinuxAarch64(input, outputFd)
 	} else {
 		err = compileLinuxAmd64(input, outputFd)
@@ -765,12 +767,22 @@ func TestCompilerTargetDiagnostics(t *testing.T) {
 	checkFailure(
 		"unsupported target",
 		[]string{"-t", "linux/arm64", "-o", outputFile, "tests/print_pass_smoke.go"},
-		[]string{"rtg: unsupported target: linux/arm64", "linux/amd64", "linux/386", "linux/aarch64", "linux/arm", "windows/amd64", "windows/386", "wasi/wasm32"},
+		[]string{"rtg: unsupported target: linux/arm64", "linux/amd64", "linux/386", "linux/aarch64", "linux/arm", "windows/amd64", "windows/386", "wasi/wasm32", "darwin/arm64"},
 	)
 	checkFailure(
 		"missing target argument",
 		[]string{"-t"},
 		[]string{"rtg: missing argument for -t", "usage: rtg"},
+	)
+	checkFailure(
+		"missing arena size",
+		[]string{"-arena-size"},
+		[]string{"rtg: missing argument for -arena-size", "usage: rtg"},
+	)
+	checkFailure(
+		"invalid arena size",
+		[]string{"-arena-size", "128", "-o", outputFile, "tests/print_pass_smoke.go"},
+		[]string{"rtg: invalid arena size: 128"},
 	)
 }
 
@@ -929,6 +941,36 @@ func TestCompileTests(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestConfiguredArenaExhaustionCannotEscapeBSS(t *testing.T) {
+	targets := supportedCompilerTargets(t)
+	if len(targets) == 0 {
+		t.Fatal("no native compiler target")
+	}
+	target := targets[0]
+	skipIfTargetRunnerMissing(t, target)
+	outDir := t.TempDir()
+	stage2 := buildStage2Compiler(t, target, outDir)
+	outputFile := filepath.Join(outDir, "arena-exhaustion")
+	result, err := runTargetCommand(t, target, stage2,
+		"-t", target.name,
+		"-arena-size", "256",
+		"-o", outputFile,
+		"tests/arena_bounded_allocation.go")
+	if err != nil {
+		t.Fatalf("compiler execution failed: %v", err)
+	}
+	if result.exitCode != 0 {
+		t.Fatalf("compilation failed with exit code %d\nstdout: %sstderr: %s", result.exitCode, result.stdout, result.stderr)
+	}
+	actual, err := runTargetCommand(t, target, outputFile)
+	if err != nil {
+		t.Fatalf("bounded output execution failed: %v", err)
+	}
+	if actual.exitCode == 0 {
+		t.Fatalf("arena exhaustion unexpectedly succeeded: stdout=%q stderr=%q", actual.stdout, actual.stderr)
 	}
 }
 

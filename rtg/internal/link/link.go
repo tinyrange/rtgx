@@ -3,6 +3,7 @@
 package link
 
 import (
+	"j5.nz/rtg/rtg/internal/arena"
 	"j5.nz/rtg/rtg/internal/build"
 	"j5.nz/rtg/rtg/internal/unit"
 )
@@ -23,6 +24,14 @@ type Result struct {
 }
 
 func LinkBuildCore(result build.Result) Result {
+	return linkBuildCore(result, false)
+}
+
+func LinkBuildCoreTransient(result build.Result) Result {
+	return linkBuildCore(result, true)
+}
+
+func linkBuildCore(result build.Result, transient bool) Result {
 	out := Result{Ok: true, Error: LinkOK, ErrorPackage: -1}
 	if !result.Ok {
 		out.Ok = false
@@ -49,6 +58,11 @@ func LinkBuildCore(result build.Result) Result {
 	}
 	out.Program = program
 	out.Data = data
+	if transient {
+		for i := 0; i < len(result.Units); i++ {
+			arena.Discard(result.Units[i].ArenaStart, result.Units[i].ArenaEnd)
+		}
+	}
 	return out
 }
 
@@ -74,24 +88,51 @@ func LinkProgramsCore(programs []unit.Program, root int, rootName string) (unit.
 		return empty, false
 	}
 	ensureCoreProgramSymbols(programs)
-	program := unit.Program{Package: rootName, ImportPath: programs[root].ImportPath}
-	reserveCoreLinkedProgram(&program, programs)
 	symbolOffsets := packageSymbolOffsets(programs)
 	aliases := packageSymbolAliases(programs, root, symbolOffsets)
 	plusReplacement := len(aliases)
 	aliases = append(aliases, "+")
-	actions, actionOffsets, aliases := linkedProgramActions(programs, aliases, symbolOffsets, plusReplacement)
-	finalEOF := countCoreLinkedEOF(programs, actions, actionOffsets)
+	actionsOK := true
+	for i := 0; i < len(programs); i++ {
+		actionStart := arena.Mark()
+		actions := make([]int, len(programs[i].Tokens))
+		actionEnd := arena.Mark()
+		if !linkedTokenActions(programs[i], &aliases, symbolOffsets, actions, plusReplacement) {
+			actionsOK = false
+			arena.Discard(actionStart, actionEnd)
+			break
+		}
+		for j := 0; j < len(actions); j++ {
+			programs[i].Tokens[j].Line = actions[j]
+		}
+		arena.Discard(actionStart, actionEnd)
+	}
+	if !actionsOK {
+		for i := 0; i < len(programs); i++ {
+			restoreCoreTokenLines(programs[i].Text, programs[i].Tokens)
+		}
+		return empty, false
+	}
+	finalEOF := countCoreLinkedEOF(programs)
 	if finalEOF < 0 {
 		return empty, false
 	}
+	program := unit.Program{Package: cloneCoreLinkString(rootName), ImportPath: cloneCoreLinkString(programs[root].ImportPath)}
+	reserveCoreLinkedProgram(&program, programs)
 	lineOffset := 0
+	appendOK := true
 	for i := 0; i < len(programs); i++ {
-		ok := appendProgramCore(&program, programs[i], finalEOF, lineOffset, actions, actionOffsets[i], aliases, i+1 < len(programs))
-		if !ok {
-			return empty, false
+		if !appendProgramCore(&program, programs[i], finalEOF, lineOffset, aliases, i+1 < len(programs)) {
+			appendOK = false
+			break
 		}
 		lineOffset = nextLineOffset(lineOffset, programs[i].Text, i+1 < len(programs))
+	}
+	for i := 0; i < len(programs); i++ {
+		restoreCoreTokenLines(programs[i].Text, programs[i].Tokens)
+	}
+	if !appendOK {
+		return empty, false
 	}
 	program.Tokens = append(program.Tokens, unit.Token{
 		Kind:  unit.TokenEOF,
@@ -100,6 +141,26 @@ func LinkProgramsCore(programs []unit.Program, root int, rootName string) (unit.
 		Line:  countNewlines(program.Text) + 1,
 	})
 	return program, true
+}
+
+func cloneCoreLinkString(value string) string {
+	data := make([]byte, len(value))
+	copy(data, []byte(value))
+	return string(data)
+}
+
+func restoreCoreTokenLines(text []byte, tokens []unit.Token) {
+	line := 1
+	position := 0
+	for i := 0; i < len(tokens); i++ {
+		start := tokens[i].Start
+		if start < position || start > len(text) {
+			return
+		}
+		line += countNewlines(text[position:start])
+		tokens[i].Line = line
+		position = start
+	}
 }
 
 func ensureCoreProgramSymbols(programs []unit.Program) {
@@ -222,21 +283,17 @@ func addRootEntrypointCore(src unit.Program, packageIndex int) (unit.Program, bo
 	return src, true
 }
 
-func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOffset int, actions []int, actionStart int, aliases []string, hasNext bool) bool {
+func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOffset int, aliases []string, hasNext bool) bool {
 	if src.Package == "" || len(src.Text) == 0 || len(src.Tokens) == 0 {
 		return false
 	}
 	line := countNewlines(dst.Text) + 1
-	if actionStart < 0 || actionStart+len(src.Tokens) > len(actions) {
-		return false
-	}
 	prevEnd := 0
 	for i := 0; i < len(src.Tokens); i++ {
-		actionIndex := actionStart + i
-		action := actions[actionStart+i]
+		action := src.Tokens[i].Line
 		tok := src.Tokens[i]
 		if tok.Kind == unit.TokenEOF {
-			actions[actionIndex] = finalEOF
+			src.Tokens[i].Line = finalEOF
 			continue
 		}
 		tokStart := tok.Start
@@ -251,7 +308,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 				prevEnd = tokEnd
 			}
 			if tokenActionRedirect(action) < 0 {
-				actions[actionIndex] = finalEOF
+				src.Tokens[i].Line = finalEOF
 			}
 			continue
 		}
@@ -278,7 +335,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 				dot.Size = 1
 				dst.Tokens = append(dst.Tokens, dot)
 			}
-			actions[actionIndex] = mappedToken
+			src.Tokens[i].Line = mappedToken
 			prevEnd = tokEnd
 			continue
 		} else {
@@ -287,7 +344,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 			line += countNewlines(part)
 		}
 		dst.Tokens = append(dst.Tokens, tok)
-		actions[actionIndex] = mappedToken
+		src.Tokens[i].Line = mappedToken
 		prevEnd = tokEnd
 	}
 	if prevEnd < len(src.Text) {
@@ -296,17 +353,16 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 		line += countNewlines(part)
 	}
 	for i := 0; i < len(src.Tokens); i++ {
-		actionIndex := actionStart + i
-		target := tokenActionRedirect(actions[actionIndex])
+		target := tokenActionRedirect(src.Tokens[i].Line)
 		if target >= 0 {
-			actions[actionIndex] = mapLinkedToken(actions, actionStart, len(src.Tokens), target, finalEOF)
+			src.Tokens[i].Line = mapLinkedToken(src.Tokens, target, finalEOF)
 		}
 	}
 	for i := 0; i < len(src.Decls); i++ {
 		decl := src.Decls[i]
-		decl.StartTok = mapLinkedToken(actions, actionStart, len(src.Tokens), decl.StartTok, finalEOF)
-		decl.EndTok = mapLinkedToken(actions, actionStart, len(src.Tokens), decl.EndTok, finalEOF)
-		nameStart, nameEnd, ok := mapTextSpanByToken(src, dst, actions, actionStart, finalEOF, decl.NameStart, decl.NameEnd)
+		decl.StartTok = mapLinkedToken(src.Tokens, decl.StartTok, finalEOF)
+		decl.EndTok = mapLinkedToken(src.Tokens, decl.EndTok, finalEOF)
+		nameStart, nameEnd, ok := mapTextSpanByToken(src, dst, finalEOF, decl.NameStart, decl.NameEnd)
 		if !ok {
 			return false
 		}
@@ -316,20 +372,20 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 	}
 	for i := 0; i < len(src.Funcs); i++ {
 		fn := src.Funcs[i]
-		fn.StartTok = mapLinkedToken(actions, actionStart, len(src.Tokens), fn.StartTok, finalEOF)
-		fn.NameTok = mapLinkedToken(actions, actionStart, len(src.Tokens), fn.NameTok, finalEOF)
+		fn.StartTok = mapLinkedToken(src.Tokens, fn.StartTok, finalEOF)
+		fn.NameTok = mapLinkedToken(src.Tokens, fn.NameTok, finalEOF)
 		nameStart, nameEnd, ok := mappedTokenTextSpan(dst, fn.NameTok)
 		if !ok {
 			return false
 		}
 		fn.NameStart = nameStart
 		fn.NameEnd = nameEnd
-		fn.ReceiverStart = mapLinkedToken(actions, actionStart, len(src.Tokens), fn.ReceiverStart, finalEOF)
-		fn.ReceiverEnd = mapLinkedToken(actions, actionStart, len(src.Tokens), fn.ReceiverEnd, finalEOF)
+		fn.ReceiverStart = mapLinkedToken(src.Tokens, fn.ReceiverStart, finalEOF)
+		fn.ReceiverEnd = mapLinkedToken(src.Tokens, fn.ReceiverEnd, finalEOF)
 		normalizeLinkedReceiver(&fn, finalEOF)
-		fn.BodyStart = mapLinkedToken(actions, actionStart, len(src.Tokens), fn.BodyStart, finalEOF)
-		fn.BodyEnd = mapLinkedToken(actions, actionStart, len(src.Tokens), fn.BodyEnd, finalEOF)
-		fn.EndTok = mapLinkedFuncEndToken(actions, actionStart, len(src.Tokens), fn.EndTok, fn.BodyEnd, finalEOF)
+		fn.BodyStart = mapLinkedToken(src.Tokens, fn.BodyStart, finalEOF)
+		fn.BodyEnd = mapLinkedToken(src.Tokens, fn.BodyEnd, finalEOF)
+		fn.EndTok = mapLinkedFuncEndToken(src.Tokens, fn.EndTok, fn.BodyEnd, finalEOF)
 		dst.Funcs = append(dst.Funcs, fn)
 	}
 	if hasNext && (len(src.Text) == 0 || src.Text[len(src.Text)-1] != '\n') {
@@ -362,15 +418,8 @@ func linkedTokenActions(program unit.Program, aliases *[]string, symbolOffsets [
 			markRedirectToken(actions, ref.DotTok, ref.Token)
 		}
 	}
-	for i := 0; i < len(program.Calls); i++ {
-		call := program.Calls[i]
-		if call.Kind == unit.CallImportSelector {
-			markRedirectToken(actions, call.BaseTok, call.CalleeTok)
-			markRedirectToken(actions, call.DotTok, call.CalleeTok)
-			markUnsafePointerCallTokens(program, actions, call)
-		}
-	}
 	if programImportsUnsafe(program) {
+		markUnsafePointerCallTokens(program, actions)
 		markUnsafePointerConversionTokens(program, actions)
 	}
 	markEndianSelectorTokens(program, actions)
@@ -410,23 +459,6 @@ func linkedTokenActions(program unit.Program, aliases *[]string, symbolOffsets [
 		}
 	}
 	return true
-}
-
-func linkedProgramActions(programs []unit.Program, aliases []string, symbolOffsets []int, plusReplacement int) ([]int, []int, []string) {
-	offsets := make([]int, len(programs)+1)
-	total := 0
-	for i := 0; i < len(programs); i++ {
-		offsets[i] = total
-		total += len(programs[i].Tokens)
-	}
-	offsets[len(programs)] = total
-	actions := make([]int, total)
-	for i := 0; i < len(programs); i++ {
-		if !linkedTokenActions(programs[i], &aliases, symbolOffsets, actions[offsets[i]:offsets[i+1]], plusReplacement) {
-			return nil, nil, nil
-		}
-	}
-	return actions, offsets, aliases
 }
 
 func markImportDeclTokens(program unit.Program, actions []int, imp unit.Import) {
@@ -471,18 +503,24 @@ func markSkipToken(actions []int, tok int) {
 	actions[tok] = -1
 }
 
-func markUnsafePointerCallTokens(program unit.Program, actions []int, call unit.Call) {
-	if !tokenTextEquals(program, call.BaseTok, "unsafe") || !tokenTextEquals(program, call.CalleeTok, "Pointer") {
-		return
+func markUnsafePointerCallTokens(program unit.Program, actions []int) {
+	for i := 0; i < len(program.Selectors); i++ {
+		selector := program.Selectors[i]
+		if selector.BaseKind != unit.RefImport || !tokenTextEquals(program, selector.BaseTok, "unsafe") || !tokenTextEquals(program, selector.NameTok, "Pointer") {
+			continue
+		}
+		open := selector.NameTok + 1
+		if !tokenTextEquals(program, open, "(") {
+			continue
+		}
+		close := findMatchingParen(program, open)
+		if close < 0 {
+			continue
+		}
+		markSkipToken(actions, selector.NameTok)
+		markSkipToken(actions, open)
+		markSkipToken(actions, close)
 	}
-	open := call.CalleeTok + 1
-	close := findMatchingParen(program, open)
-	if close < 0 {
-		return
-	}
-	markSkipToken(actions, call.CalleeTok)
-	markSkipToken(actions, open)
-	markSkipToken(actions, close)
 }
 
 func markUnsafePointerConversionTokens(program unit.Program, actions []int) {
@@ -537,12 +575,11 @@ func markSimpleClosureTokens(program unit.Program, actions []int, plusReplacemen
 		markSkipRange(actions, factories[i].suffixSkipStart, factories[i].suffixSkipEnd)
 	}
 	locals := findSimpleClosureLocals(program, factories)
-	for i := 0; i < len(program.Calls); i++ {
-		call := program.Calls[i]
-		if !nameInList(locals, tokenText(program, call.CalleeTok)) {
+	for i := 0; i+1 < len(program.Tokens); i++ {
+		if !nameInList(locals, tokenText(program, i)) || !tokenTextEquals(program, i+1, "(") {
 			continue
 		}
-		open := call.CalleeTok + 1
+		open := i + 1
 		close := findMatchingParen(program, open)
 		if close < 0 {
 			continue
@@ -1427,12 +1464,21 @@ func linkedProgramText(program unit.Program, start int, end int) string {
 	return string(program.Text[start:end])
 }
 
-func mapTextSpanByToken(src unit.Program, dst *unit.Program, tokenMap []int, tokenStart int, eof int, start int, end int) (int, int, bool) {
-	for i := 0; i < len(src.Tokens); i++ {
-		tok := src.Tokens[i]
+func mapTextSpanByToken(src unit.Program, dst *unit.Program, eof int, start int, end int) (int, int, bool) {
+	low := 0
+	high := len(src.Tokens)
+	for low < high {
+		mid := low + (high-low)/2
+		if src.Tokens[mid].Start < start {
+			low = mid + 1
+		} else {
+			high = mid
+		}
+	}
+	if low < len(src.Tokens) {
+		tok := src.Tokens[low]
 		if tok.Start == start && tok.Start+tok.Size == end {
-			mapped := mapLinkedToken(tokenMap, tokenStart, len(src.Tokens), i, eof)
-			return mappedTokenTextSpan(dst, mapped)
+			return mappedTokenTextSpan(dst, mapLinkedToken(src.Tokens, low, eof))
 		}
 	}
 	return 0, 0, false
@@ -1449,44 +1495,33 @@ func mappedTokenTextSpan(program *unit.Program, tok int) (int, int, bool) {
 	return token.Start, token.Start + token.Size, true
 }
 
-func mapLinkedToken(tokenMap []int, tokenStart int, tokenCount int, tok int, eof int) int {
+func mapLinkedToken(tokens []unit.Token, tok int, eof int) int {
 	if tok < 0 {
 		return eof
 	}
-	if tok >= tokenCount || tokenStart < 0 || tokenStart+tok >= len(tokenMap) {
+	if tok >= len(tokens) {
 		return -1
 	}
-	mapped := tokenMap[tokenStart+tok]
+	mapped := tokens[tok].Line
 	if mapped < 0 {
 		return -1
 	}
 	return mapped
 }
 
-func mapLinkedFuncEndToken(tokenMap []int, tokenStart int, tokenCount int, tok int, bodyEnd int, eof int) int {
-	mapped := mapLinkedToken(tokenMap, tokenStart, tokenCount, tok, eof)
+func mapLinkedFuncEndToken(tokens []unit.Token, tok int, bodyEnd int, eof int) int {
+	mapped := mapLinkedToken(tokens, tok, eof)
 	if mapped == eof && bodyEnd >= 0 && bodyEnd+1 <= eof {
 		return bodyEnd + 1
 	}
 	return mapped
 }
 
-func normalizeLinkedReceiver(fn *unit.Func, eof int) {
-	_ = eof
-	if fn.ReceiverStart == fn.ReceiverEnd {
-		fn.ReceiverStart = 0
-		fn.ReceiverEnd = 0
-	}
-}
-
-func countCoreLinkedEOF(programs []unit.Program, actions []int, actionOffsets []int) int {
+func countCoreLinkedEOF(programs []unit.Program) int {
 	total := 0
 	for i := 0; i < len(programs); i++ {
-		if i+1 >= len(actionOffsets) || actionOffsets[i] < 0 || actionOffsets[i+1] > len(actions) || actionOffsets[i+1]-actionOffsets[i] != len(programs[i].Tokens) {
-			return -1
-		}
 		for j := 0; j < len(programs[i].Tokens); j++ {
-			if programs[i].Tokens[j].Kind != unit.TokenEOF && !tokenActionSkips(actions[actionOffsets[i]+j]) {
+			if programs[i].Tokens[j].Kind != unit.TokenEOF && !tokenActionSkips(programs[i].Tokens[j].Line) {
 				total += linkedTokenOutputCount(programs[i], programs[i].Tokens[j])
 			}
 		}
@@ -1499,6 +1534,14 @@ func linkedTokenOutputCount(program unit.Program, tok unit.Token) int {
 		return 3
 	}
 	return 1
+}
+
+func normalizeLinkedReceiver(fn *unit.Func, eof int) {
+	_ = eof
+	if fn.ReceiverStart == fn.ReceiverEnd {
+		fn.ReceiverStart = 0
+		fn.ReceiverEnd = 0
+	}
 }
 
 func packageSymbolOffsets(programs []unit.Program) []int {
