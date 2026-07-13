@@ -24,6 +24,9 @@ func RunRTGCommand(args []string, env []string) int {
 	}
 	built := buildFromFSCompact(commandArgs, rtgWorkDir(env), rtgStdRoot(args, env), RTGFS{})
 	if !built.Ok {
+		if resetArena {
+			arena.Reset(mark)
+		}
 		printRTGBuildError(built)
 		return 1
 	}
@@ -31,13 +34,24 @@ func RunRTGCommand(args []string, env []string) int {
 	target := built.Options.Target
 	output := built.Options.Output
 	strip := built.Options.Strip
+	persistMark := 0
 	if resetArena {
+		persistMark = arena.PersistMark()
 		unit = arena.PersistBytes(unit)
 		target = arena.PersistString(target)
 		output = arena.PersistString(output)
-		arena.Reset(mark)
+		backendMark := mark
+		remainder := backendMark % 4096
+		if remainder != 0 {
+			backendMark = backendMark + 4096 - remainder
+		}
+		arena.Reset(backendMark)
 	}
-	if !backendbridge.CompileUnitToOutputStripEnv(unit, target, output, strip, args, env) {
+	ok := backendbridge.CompileUnitToOutputStripEnv(unit, target, output, strip, args, env)
+	if resetArena {
+		arena.PersistReset(persistMark)
+	}
+	if !ok {
 		print("rtg: backend compilation failed\n")
 		return 1
 	}

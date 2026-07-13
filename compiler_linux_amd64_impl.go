@@ -82,8 +82,7 @@ func rtgTryCompileScalarProgramAmd64(p *rtgProgram, meta *rtgMeta) rtgCompileRes
 		label := rtgAsmNewLabel(a)
 		g.funcLabels = append(g.funcLabels, label)
 	}
-	g.funcReachable = make([]bool, len(meta.funcs), len(meta.funcs))
-	g.funcQueue = make([]int, 0, len(meta.funcs))
+	rtgInitFuncQueue(&g, len(meta.funcs))
 	rtgLinearMarkFunc(&g, appIndex)
 	if !rtgLinearInitGlobals(&g) {
 		var result rtgCompileResult

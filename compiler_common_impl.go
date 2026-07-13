@@ -13534,6 +13534,15 @@ func rtgLinearMarkFunc(g *rtgLinearGen, fnIndex int) {
 	nameEnd := g.meta.funcs[fnIndex].nameEnd
 	rtgAsmAddFuncSymbol(&g.asm, src, nameStart, nameEnd, g.funcLabels[fnIndex])
 }
+
+func rtgInitFuncQueue(g *rtgLinearGen, count int) {
+	g.funcReachable = make([]bool, count, count)
+	for i := 0; i < count; i++ {
+		g.funcReachable[i] = false
+	}
+	g.funcQueue = make([]int, 0, count)
+}
+
 func rtgEmitCallWithWordCount(g *rtgLinearGen, fnIndex int, wordCount int) {
 	rtgLinearMarkFunc(g, fnIndex)
 	if rtgTargetArch == rtgArchWasm32 {

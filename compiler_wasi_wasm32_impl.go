@@ -49,8 +49,7 @@ func rtgTryCompileScalarProgramWasm32(p *rtgProgram, meta *rtgMeta) rtgCompileRe
 		label := rtgAsmNewLabel(a)
 		g.funcLabels = append(g.funcLabels, label)
 	}
-	g.funcReachable = make([]bool, len(meta.funcs), 1280)
-	g.funcQueue = make([]int, 0, 1280)
+	rtgInitFuncQueue(&g, len(meta.funcs))
 	rtgWasm32MarkFunc(&g, appIndex)
 	if !rtgLinearInitGlobals(&g) {
 		var result rtgCompileResult

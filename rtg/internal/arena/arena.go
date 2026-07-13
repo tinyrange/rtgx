@@ -4,6 +4,10 @@ func rtg_runtime_ArenaMark() int { return 0 }
 
 func rtg_runtime_ArenaReset(mark int) {}
 
+func rtg_runtime_ArenaPersistMark() int { return 0 }
+
+func rtg_runtime_ArenaPersistReset(mark int) {}
+
 func rtg_runtime_ArenaPersistString(value string) string { return value }
 
 func rtg_runtime_ArenaPersistBytes(value []byte) []byte { return value }
@@ -13,6 +17,10 @@ func rtg_runtime_ArenaDiscard(start int, end int) {}
 func Mark() int { return rtg_runtime_ArenaMark() }
 
 func Reset(mark int) { rtg_runtime_ArenaReset(mark) }
+
+func PersistMark() int { return rtg_runtime_ArenaPersistMark() }
+
+func PersistReset(mark int) { rtg_runtime_ArenaPersistReset(mark) }
 
 func PersistString(value string) string { return rtg_runtime_ArenaPersistString(value) }
 

@@ -92,30 +92,8 @@ func RtgCompileSourceToBytesStrip(source []byte, targetName string, stripSymbols
 	rtgSetTarget(target)
 	var prog rtgProgram
 	prog = rtgParseProgram(source)
-	progOK := prog.ok
-	if progOK == false {
-		return nil, false
-	}
-	var meta rtgMeta
-	rtgBuildMetaInto(&prog, &meta)
-	metaOK := meta.ok
-	if metaOK == false {
-		return nil, false
-	}
-	var result rtgCompileResult
-	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
-		result = rtgTryCompileScalarProgram386(&prog, &meta)
-	} else if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 {
-		result = rtgTryCompileScalarProgramAarch64(&prog, &meta)
-	} else if target == rtgTargetLinuxArm {
-		result = rtgTryCompileScalarProgramArm(&prog, &meta)
-	} else if target == rtgTargetWasiWasm32 {
-		result = rtgTryCompileScalarProgramWasm32(&prog, &meta)
-	} else {
-		result = rtgTryCompileScalarProgramAmd64(&prog, &meta)
-	}
-	resultOK := result.ok
-	if resultOK == false {
+	result := rtgCompileParsedProgram(&prog, target)
+	if !result.ok {
 		return nil, false
 	}
 	return result.data, true
@@ -130,14 +108,8 @@ func RtgCompileSourceToOutputStrip(source []byte, targetName string, outputPath 
 	rtgSetTarget(target)
 	var prog rtgProgram
 	prog = rtgParseProgram(source)
-	progOK := prog.ok
-	if progOK == false {
-		return false
-	}
-	var meta rtgMeta
-	rtgBuildMetaInto(&prog, &meta)
-	metaOK := meta.ok
-	if metaOK == false {
+	result := rtgCompileParsedProgram(&prog, target)
+	if !result.ok {
 		return false
 	}
 	output := 1
@@ -147,24 +119,10 @@ func RtgCompileSourceToOutputStrip(source []byte, targetName string, outputPath 
 			return false
 		}
 	}
-	var result rtgCompileResult
-	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
-		result = rtgTryCompileScalarProgram386(&prog, &meta)
-	} else if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 {
-		result = rtgTryCompileScalarProgramAarch64(&prog, &meta)
-	} else if target == rtgTargetLinuxArm {
-		result = rtgTryCompileScalarProgramArm(&prog, &meta)
-	} else if target == rtgTargetWasiWasm32 {
-		result = rtgTryCompileScalarProgramWasm32(&prog, &meta)
-	} else {
-		result = rtgTryCompileScalarProgramAmd64(&prog, &meta)
-	}
-	if !result.ok {
-		return false
-	}
 	write(output, result.data, -1)
 	if outputPath != "-" {
 		chmod(output, 493)
+		close(output)
 	}
 	return true
 }
@@ -180,6 +138,10 @@ func RtgCompileUnitToOutputStrip(unit []byte, targetName string, outputPath stri
 	if !isUnit || !ok {
 		return false
 	}
+	result := rtgCompileParsedProgram(&prog, target)
+	if !result.ok {
+		return false
+	}
 	output := 1
 	if outputPath != "-" {
 		output = open(rtgCString(outputPath), O_RDWR|O_CREATE|O_TRUNC)
@@ -187,12 +149,37 @@ func RtgCompileUnitToOutputStrip(unit []byte, targetName string, outputPath stri
 			return false
 		}
 	}
-	result := rtgCompileProgramToOutput(&prog, output, target)
+	write(output, result.data, -1)
 	if outputPath != "-" {
 		chmod(output, 493)
 		close(output)
 	}
-	return result == 0
+	return true
+}
+
+func rtgCompileParsedProgram(prog *rtgProgram, target int) rtgCompileResult {
+	var result rtgCompileResult
+	if !prog.ok {
+		return result
+	}
+	var meta rtgMeta
+	rtgBuildMetaInto(prog, &meta)
+	if !meta.ok {
+		return result
+	}
+	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
+		return rtgTryCompileScalarProgram386(prog, &meta)
+	}
+	if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 {
+		return rtgTryCompileScalarProgramAarch64(prog, &meta)
+	}
+	if target == rtgTargetLinuxArm {
+		return rtgTryCompileScalarProgramArm(prog, &meta)
+	}
+	if target == rtgTargetWasiWasm32 {
+		return rtgTryCompileScalarProgramWasm32(prog, &meta)
+	}
+	return rtgTryCompileScalarProgramAmd64(prog, &meta)
 }
 
 func rtgSetStripSymbols(stripSymbols bool) {
