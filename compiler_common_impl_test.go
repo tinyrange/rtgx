@@ -137,7 +137,7 @@ func appMain(args []string, env []string) int {
 	reclen := int(dirbuf[4]) | int(dirbuf[5])<<8
 	if reclen < 12 || reclen > n { return 11 }
 	if dirbuf[6] != 4 || dirbuf[8] != '.' { return 12 }
-	print(string(buf))
+print(string(buf))
 	return 0
 }
 `)
@@ -158,6 +158,21 @@ func appMain(args []string, env []string) int {
 	}
 	if string(got) != "PASS\n" {
 		t.Fatalf("compiled Darwin output = %q, want PASS", string(got))
+	}
+}
+
+func TestDarwinArm64RejectsUnsupportedArbitrarySyscall(t *testing.T) {
+	src := []byte(`package main
+
+func syscall(num int, fd int, buf []byte, size int) int { return 0 }
+
+func appMain(args []string, env []string) int {
+	buf := make([]byte, 8)
+	return syscall(1, 1, buf, len(buf))
+}
+`)
+	if _, ok := RtgCompileSourceToBytes(src, "darwin/arm64"); ok {
+		t.Fatal("unsupported Darwin syscall compiled successfully")
 	}
 }
 

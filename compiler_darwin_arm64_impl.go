@@ -3,6 +3,8 @@ package main
 const rtgDarwinArm64CodeOffset = 0x1000
 const rtgDarwinArm64ImageBase = 0x100000000
 const rtgDarwinArm64PageSize = 0x4000
+const rtgDarwinArgEnvDescriptorSize = 32768
+const rtgDarwinArgEnvDescriptorCount = rtgDarwinArgEnvDescriptorSize / 16
 
 const rtgDarwinImportExit = 1
 const rtgDarwinImportOpen = 2
@@ -115,9 +117,9 @@ func rtgEmitProgramEntryArgsDarwinArm64(g *rtgLinearGen, appIndex int) bool {
 		}
 	}
 	argsOff := g.asm.bssSize
-	g.asm.bssSize += 32768
+	g.asm.bssSize += rtgDarwinArgEnvDescriptorSize
 	envOff := g.asm.bssSize
-	g.asm.bssSize += 32768
+	g.asm.bssSize += rtgDarwinArgEnvDescriptorSize
 	rtgAsmBuildDarwinArgvEnvSlicesArm64(&g.asm, g.darwinEntryOff, argsOff, envOff)
 	return true
 }
@@ -141,6 +143,8 @@ func rtgAsmBuildDarwinArgvEnvSlicesArm64(a *rtgAsm, entryOff int, argsOff int, e
 	rtgAarch64AsmMovRegAbs(a, 10, argsOff, rtgAbsBssReloc)
 	rtgAarch64AsmMovRegImm(a, 11, 0)
 	rtgAsmMarkLabel(a, argLoop)
+	rtgAarch64AsmCmpRegImm(a, 11, rtgDarwinArgEnvDescriptorCount)
+	rtgAarch64AsmBCondLabel(a, argsDone, 10)
 	rtgAarch64AsmCmpRegReg(a, 11, 13)
 	rtgAarch64AsmBCondLabel(a, argsDone, 0)
 	rtgAarch64AsmAddRegRegShift(a, 12, 14, 11, 3)
@@ -160,10 +164,13 @@ func rtgAsmBuildDarwinArgvEnvSlicesArm64(a *rtgAsm, entryOff int, argsOff int, e
 	rtgAarch64AsmAddRegImm(a, 11, 11, 1)
 	rtgAarch64AsmJmpLabel(a, argLoop)
 	rtgAsmMarkLabel(a, argsDone)
+	rtgAarch64AsmMovRegReg(a, 13, 11)
 
 	rtgAarch64AsmMovRegAbs(a, 10, envOff, rtgAbsBssReloc)
 	rtgAarch64AsmMovRegImm(a, 11, 0)
 	rtgAsmMarkLabel(a, envLoop)
+	rtgAarch64AsmCmpRegImm(a, 11, rtgDarwinArgEnvDescriptorCount)
+	rtgAarch64AsmBCondLabel(a, envDone, 10)
 	rtgAarch64AsmLoadRegMem(a, 12, 15, 0, 8)
 	rtgAarch64AsmCmpRegImm(a, 12, 0)
 	rtgAarch64AsmBCondLabel(a, envDone, 0)

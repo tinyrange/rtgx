@@ -9360,6 +9360,15 @@ func rtgEmitArbitrarySyscall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	if e.argCount < 1 || e.argCount > 7 {
 		return false
 	}
+	if rtgTargetIsDarwin() {
+		if e.argCount != 4 {
+			return false
+		}
+		number := rtgEvalConstExpr(g, ep, ep.args[e.firstArg])
+		if !number.ok || number.value != 217 {
+			return false
+		}
+	}
 	for i := e.argCount - 1; i >= 0; i-- {
 		argIndex := ep.args[e.firstArg+i]
 		if !rtgEmitSyscallArg(g, ep, argIndex) {
