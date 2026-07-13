@@ -41,14 +41,15 @@ func rtgTryCompileScalarProgramWasm32(p *rtgProgram, meta *rtgMeta) rtgCompileRe
 	var g rtgLinearGen
 	g.prog = p
 	g.meta = meta
+	g.fixedTargetState = 1
+	g.fixedTargetValue = rtgTargetWasiWasm32
 	a := &g.asm
 	rtgAsmInit(a)
 	for i := 0; i < len(meta.funcs); i++ {
 		label := rtgAsmNewLabel(a)
 		g.funcLabels = append(g.funcLabels, label)
 	}
-	g.funcReachable = make([]bool, len(meta.funcs), 1280)
-	g.funcQueue = make([]int, 0, 1280)
+	rtgInitFuncQueue(&g, len(meta.funcs))
 	rtgWasm32MarkFunc(&g, appIndex)
 	if !rtgLinearInitGlobals(&g) {
 		var result rtgCompileResult

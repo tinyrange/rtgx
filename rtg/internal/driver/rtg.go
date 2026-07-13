@@ -2,7 +2,10 @@
 
 package driver
 
-import "j5.nz/rtg/rtg/internal/backendbridge"
+import (
+	"j5.nz/rtg/rtg/internal/arena"
+	"j5.nz/rtg/rtg/internal/backendbridge"
+)
 
 const rtgGetdents64LinuxAmd64 = 217
 const rtgGetdents64LinuxAarch64 = 61
@@ -12,23 +15,18 @@ type RTGFS struct{}
 
 func syscall(num int, fd int, buf []byte, size int) int { return 0 }
 
-func rtg_runtime_ArenaMark() int { return 0 }
-
-func rtg_runtime_ArenaReset(mark int) {}
-
-func rtg_runtime_ArenaPersistString(value string) string { return value }
-
-func rtg_runtime_ArenaPersistBytes(value []byte) []byte { return value }
-
 func RunRTGCommand(args []string, env []string) int {
 	commandArgs := dropProgramArg(args)
 	resetArena := rtgFrontendCanResetArena()
 	mark := 0
 	if resetArena {
-		mark = rtg_runtime_ArenaMark()
+		mark = arena.Mark()
 	}
-	built := BuildFromFS(commandArgs, rtgWorkDir(env), rtgStdRoot(args, env), RTGFS{})
+	built := buildFromFSCompact(commandArgs, rtgWorkDir(env), rtgStdRoot(args, env), RTGFS{})
 	if !built.Ok {
+		if resetArena {
+			arena.Reset(mark)
+		}
 		printRTGBuildError(built)
 		return 1
 	}
@@ -36,13 +34,24 @@ func RunRTGCommand(args []string, env []string) int {
 	target := built.Options.Target
 	output := built.Options.Output
 	strip := built.Options.Strip
+	persistMark := 0
 	if resetArena {
-		unit = rtg_runtime_ArenaPersistBytes(unit)
-		target = rtg_runtime_ArenaPersistString(target)
-		output = rtg_runtime_ArenaPersistString(output)
-		rtg_runtime_ArenaReset(mark)
+		persistMark = arena.PersistMark()
+		unit = arena.PersistBytes(unit)
+		target = arena.PersistString(target)
+		output = arena.PersistString(output)
+		backendMark := mark
+		remainder := backendMark % 4096
+		if remainder != 0 {
+			backendMark = backendMark + 4096 - remainder
+		}
+		arena.Reset(backendMark)
 	}
-	if !backendbridge.CompileUnitToOutputStripEnv(unit, target, output, strip, args, env) {
+	ok := backendbridge.CompileUnitToOutputStripEnv(unit, target, output, strip, args, env)
+	if resetArena {
+		arena.PersistReset(persistMark)
+	}
+	if !ok {
 		print("rtg: backend compilation failed\n")
 		return 1
 	}
@@ -154,8 +163,8 @@ func (fs RTGFS) ReadFile(path string) ([]byte, bool) {
 	if fd < 0 {
 		return nil, false
 	}
-	out := make([]byte, 0, 524288)
 	buf := make([]byte, 4096)
+	out := make([]byte, 0, len(buf))
 	for {
 		n := read(fd, buf, -1)
 		if n < 0 {
@@ -196,19 +205,21 @@ func (fs RTGFS) ReadDir(path string) ([]DirEntry, bool) {
 			break
 		}
 		pos := 0
-		for pos+19 <= n {
-			reclen := int(buf[pos+16]) | int(buf[pos+17])<<8
-			if reclen <= 19 || pos+reclen > n {
+		minimum := rtgDirentMinimum()
+		for pos+minimum <= n {
+			reclen := rtgDirentRecordLength(buf, pos)
+			if reclen <= minimum || pos+reclen > n {
 				close(fd)
 				return nil, false
 			}
-			nameStart := pos + 19
+			nameStart := rtgDirentNameStart(pos)
+			typeAt := rtgDirentTypeOffset(pos)
 			nameEnd := nameStart
 			for nameEnd < pos+reclen && buf[nameEnd] != 0 {
 				nameEnd++
 			}
 			if nameEnd > nameStart && !rtgDirNameIsDot(buf, nameStart, nameEnd) {
-				out = append(out, DirEntry{Name: string(buf[nameStart:nameEnd]), IsDir: buf[pos+18] == 4})
+				out = append(out, DirEntry{Name: string(buf[nameStart:nameEnd]), IsDir: buf[typeAt] == 4})
 			}
 			pos += reclen
 		}

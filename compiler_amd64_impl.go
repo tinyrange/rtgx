@@ -943,6 +943,13 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			}
 			return true
 		}
+		if e.argCount == 1 && (callee == rtgIdentCap || callee == rtgIdentLen) {
+			count := rtgArrayBuiltinCount(g, ep, e)
+			if count >= 0 {
+				rtgAsmMovRaxImm(a, count)
+				return true
+			}
+		}
 		if e.argCount == 1 && callee == rtgIdentCap {
 			if !rtgEmitSlicePtrCap(g, ep, ep.args[e.firstArg]) {
 				return false
@@ -1018,6 +1025,24 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			if e.argCount != 2 {
 				return false
 			}
+			if rtgTargetIsDarwin() {
+				if !rtgEmitIntExpr(g, ep, ep.args[e.firstArg+1]) {
+					return false
+				}
+				rtgAsmPushRax(a)
+				if !rtgEmitStringPtrExpr(g, ep, ep.args[e.firstArg]) {
+					return false
+				}
+				rtgAsmMovRdiRax(a)
+				rtgAsmPopRsi(a)
+				rtgAsmMovRdxImm(a, 493)
+				// mode is the first variadic argument to open. Darwin's arm64
+				// ABI passes variadic arguments on the stack.
+				rtgAarch64AsmPushReg(a, rtgAarch64RegRdx)
+				rtgDarwinArm64CallVirtualArgs(a, rtgDarwinImportOpen, 2)
+				rtgAarch64AsmAddRegImm(a, 31, 31, 16)
+				return true
+			}
 			if rtgTargetArch == rtgArchAarch64 {
 				if !rtgEmitIntExpr(g, ep, ep.args[e.firstArg+1]) {
 					return false
@@ -1073,6 +1098,10 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				return false
 			}
 			rtgAsmMovRdiRax(a)
+			if rtgTargetIsDarwin() {
+				rtgDarwinArm64CallVirtualArgs(a, rtgDarwinImportClose, 1)
+				return true
+			}
 			rtgAsmMovRaxImm(a, rtgLinuxSysClose())
 			rtgAsmSyscall(a)
 			return true
@@ -1093,6 +1122,10 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			}
 			rtgAsmMovRsiRax(a)
 			rtgAsmPopRdi(a)
+			if rtgTargetIsDarwin() {
+				rtgDarwinArm64CallVirtualArgs(a, rtgDarwinImportFchmod, 2)
+				return true
+			}
 			rtgAsmMovRaxImm(a, rtgLinuxSysFchmod())
 			rtgAsmSyscall(a)
 			return true
@@ -1101,11 +1134,17 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			if rtgTargetIsWindows() {
 				return rtgEmitWindowsReadWrite(g, ep, idx, false)
 			}
+			if rtgTargetIsDarwin() {
+				return rtgEmitBuiltinReadWrite(g, ep, idx, rtgDarwinImportRead, rtgDarwinImportPread)
+			}
 			return rtgEmitBuiltinReadWrite(g, ep, idx, rtgLinuxSysReadSeq(), rtgLinuxSysReadAt())
 		}
 		if callee == rtgIdentWrite {
 			if rtgTargetIsWindows() {
 				return rtgEmitWindowsReadWrite(g, ep, idx, true)
+			}
+			if rtgTargetIsDarwin() {
+				return rtgEmitBuiltinReadWrite(g, ep, idx, rtgDarwinImportWrite, rtgDarwinImportPwrite)
 			}
 			return rtgEmitBuiltinReadWrite(g, ep, idx, rtgLinuxSysWriteSeq(), rtgLinuxSysWriteAt())
 		}
@@ -1393,6 +1432,7 @@ func rtgAmd64EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	if g.appendAddrEmitted {
 		return g.appendAddrLabel
 	}
+	arenaAllocLabel := rtgEnsureArenaAllocHelper(g)
 	g.appendAddrEmitted = true
 	g.appendAddrLabel = rtgAsmNewLabel(a)
 	afterLabel := rtgAsmNewLabel(a)
@@ -1400,8 +1440,6 @@ func rtgAmd64EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	rtgAsmMarkLabel(a, g.appendAddrLabel)
 	noGrowLabel := rtgAsmNewLabel(a)
 	haveCapLabel := rtgAsmNewLabel(a)
-	heapReadyLabel := rtgAsmNewLabel(a)
-	rtgStringHeapOffsets(g)
 	rtgAsmEmit24(a, 0x0e8b48)
 	rtgAsmEmit24(a, 0x018b4d)
 	rtgAsmEmit24(a, 0xc1394c)
@@ -1420,16 +1458,10 @@ func rtgAmd64EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	rtgAsmEmit16(a, 0x5041)
 	rtgAsmEmit24(a, 0xc1894c)
 	rtgAsmEmit24(a, 0xcaaf0f)
-	rtgAsmLoadRaxBss(a, g.stringHeapOff)
-	rtgAsmCmpRaxImm8(a, 0)
-	rtgAsmJnzLabel(a, heapReadyLabel)
-	rtgAsmMovRaxBssAddr(a, g.stringHeapDataOff)
-	rtgAsmStoreRaxBss(a, g.stringHeapOff)
-	rtgAsmMarkLabel(a, heapReadyLabel)
-	rtgAsmLoadRaxBss(a, g.stringHeapOff)
+	rtgAsmPushRcx(a)
+	rtgAsmPopRax(a)
+	rtgAsmCallLabel(a, arenaAllocLabel)
 	rtgAsmPushRax(a)
-	rtgAsmAddRaxRcx(a)
-	rtgAsmStoreRaxBss(a, g.stringHeapOff)
 	rtgAsmEmit5(a, 0x48, 0x8b, 0x4c, 0x24, 16)
 	rtgAsmEmit5(a, 0x48, 0x8b, 0x54, 0x24, 24)
 	rtgAsmEmit24(a, 0xcaaf0f)
@@ -1511,6 +1543,7 @@ func rtgAmd64EnsureAppendBytesHelper(g *rtgLinearGen) int {
 	if g.appendBytesEmitted {
 		return g.appendBytesLabel
 	}
+	arenaAllocLabel := rtgEnsureArenaAllocHelper(g)
 	g.appendBytesEmitted = true
 	g.appendBytesLabel = rtgAsmNewLabel(a)
 	afterLabel := rtgAsmNewLabel(a)
@@ -1520,8 +1553,6 @@ func rtgAmd64EnsureAppendBytesHelper(g *rtgLinearGen) int {
 	capNonZeroLabel := rtgAsmNewLabel(a)
 	capReadyLabel := rtgAsmNewLabel(a)
 	capOKLabel := rtgAsmNewLabel(a)
-	heapReadyLabel := rtgAsmNewLabel(a)
-	rtgStringHeapOffsets(g)
 	rtgAsmEmit24(a, 0x0e8b48)
 	rtgAsmEmit24(a, 0x018b4d)
 	rtgAsmEmit24(a, 0xca8949)
@@ -1550,16 +1581,10 @@ func rtgAmd64EnsureAppendBytesHelper(g *rtgLinearGen) int {
 	rtgAsmMarkLabel(a, capOKLabel)
 	rtgAsmEmit16(a, 0x5041)
 	rtgAsmEmit24(a, 0xc1894c)
-	rtgAsmLoadRaxBss(a, g.stringHeapOff)
-	rtgAsmCmpRaxImm8(a, 0)
-	rtgAsmJnzLabel(a, heapReadyLabel)
-	rtgAsmMovRaxBssAddr(a, g.stringHeapDataOff)
-	rtgAsmStoreRaxBss(a, g.stringHeapOff)
-	rtgAsmMarkLabel(a, heapReadyLabel)
-	rtgAsmLoadRaxBss(a, g.stringHeapOff)
+	rtgAsmPushRcx(a)
+	rtgAsmPopRax(a)
+	rtgAsmCallLabel(a, arenaAllocLabel)
 	rtgAsmPushRax(a)
-	rtgAsmAddRaxRcx(a)
-	rtgAsmStoreRaxBss(a, g.stringHeapOff)
 	rtgAsmEmit5(a, 0x48, 0x8b, 0x7c, 0x24, 64)
 	rtgAsmEmit24(a, 0x378b48)
 	rtgAsmEmit32(a, 0x243c8b48)

@@ -1,6 +1,9 @@
 package load
 
-import "j5.nz/rtg/rtg/internal/syntax"
+import (
+	"j5.nz/rtg/rtg/internal/arena"
+	"j5.nz/rtg/rtg/internal/syntax"
+)
 
 const (
 	PackageOK = iota
@@ -30,14 +33,16 @@ type ParsedFile struct {
 }
 
 type Package struct {
-	Ref         PackageRef
-	Name        string
-	Files       []ParsedFile
-	Imports     []PackageRef
-	Ok          bool
-	Error       int
-	ErrorFile   int
-	ErrorImport int
+	Ref            PackageRef
+	Name           string
+	Files          []ParsedFile
+	Imports        []PackageRef
+	Ok             bool
+	Error          int
+	ErrorFile      int
+	ErrorImport    int
+	CoreArenaStart int
+	CoreArenaEnd   int
 }
 
 type Graph struct {
@@ -144,7 +149,10 @@ func (b *graphBuilder) load(ref PackageRef) int {
 		return -1
 	}
 	b.loading = append(b.loading, ref.ImportPath)
+	packageStart := arena.Mark()
 	pkg := LoadPackage(b.module, b.stdRoot, ref, b.files)
+	pkg.CoreArenaStart = packageStart
+	pkg.CoreArenaEnd = arena.Mark()
 	if !pkg.Ok {
 		b.graph.Packages = append(b.graph.Packages, pkg)
 		b.graph = graphFail(b.graph, GraphErrPackage, len(b.graph.Packages)-1)
