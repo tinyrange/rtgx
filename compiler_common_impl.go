@@ -7565,7 +7565,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 				sliceType := rtgResolveType(meta, leftType)
 				elemType := rtgResolveType(meta, sliceType.elem)
 				mapIndex := sliceType.kind == rtgTypeMap && rtgTypeKindIsScalarIntOrPointer(elemType.kind)
-				arrayIndex := sliceType.kind == rtgTypeArray && rtgTypeKindIsScalarValue(elemType.kind)
+				arrayIndex := sliceType.kind == rtgTypeArray && (rtgTypeKindIsScalarValue(elemType.kind) || elemType.kind == rtgTypePointer)
 				if mapIndex || arrayIndex {
 					if mapIndex {
 						if !rtgEmitMapEntryAddress(g, &lhs, lhsIndex, true) {
@@ -7600,7 +7600,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 				if sliceType.kind != rtgTypeSlice {
 					return false
 				}
-				scalarElem := rtgTypeKindIsScalarValue(elemType.kind)
+				scalarElem := rtgTypeKindIsScalarValue(elemType.kind) || elemType.kind == rtgTypePointer
 				indexOffset := 0
 				if scalarElem {
 					indexOffset = rtgAddUnnamedLocal(g, rtgTypeInt)
