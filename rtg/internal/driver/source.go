@@ -158,14 +158,18 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 		return
 	}
 	c.loading = append(c.loading, ref.ImportPath)
-	owner, ownerOK := c.ownerModule(ref.ImportPath)
-	if ref.Kind != load.PackageStandard && !ownerOK {
-		c.fail(SourceErrDependencyAmbiguous, ref.ImportPath)
-		return
-	}
-	if ref.Kind != load.PackageStandard && c.crossesNestedModule(owner, ref.Dir) {
-		c.fail(SourceErrDependencyAmbiguous, ref.ImportPath)
-		return
+	owner := c.module
+	if ref.Kind != load.PackageStandard {
+		var ownerOK bool
+		owner, ownerOK = c.ownerModule(ref.ImportPath)
+		if !ownerOK {
+			c.fail(SourceErrDependencyAmbiguous, ref.ImportPath)
+			return
+		}
+		if c.crossesNestedModule(owner, ref.Dir) {
+			c.fail(SourceErrDependencyAmbiguous, ref.ImportPath)
+			return
+		}
 	}
 	entries, ok := c.fs.ReadDir(ref.Dir)
 	if !ok {

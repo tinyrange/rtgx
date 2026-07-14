@@ -297,6 +297,23 @@ func TestCollectSourcesResolvesLocalReplacementGraph(t *testing.T) {
 	}
 }
 
+func TestCollectSourcesResolvesImportsWithinStandardLibrary(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/app/go.mod", Src: []byte("module example.com/app\n")},
+		{Path: "/repo/app/main.go", Src: []byte("package main\nimport \"strings\"\nfunc appMain() int { return strings.Count() }\n")},
+		{Path: "/std/strings/strings.go", Src: []byte("package strings\nimport \"unsafe\"\nfunc Count() int { return unsafe.Size() }\n")},
+		{Path: "/std/unsafe/unsafe.go", Src: []byte("package unsafe\nfunc Size() int { return 1 }\n")},
+	}}
+	result := CollectSources("/repo/app", "/std", ".", fs)
+	if !result.Ok {
+		t.Fatalf("standard dependency graph failed: %#v", result)
+	}
+	assertSourcePaths(t, result.Files, []string{
+		"/repo/app/go.mod", "/repo/app/main.go",
+		"/std/strings/strings.go", "/std/unsafe/unsafe.go",
+	})
+}
+
 func TestCollectSourcesRestartsAfterTransitiveVersionUpgrade(t *testing.T) {
 	fs := memorySourceFS{files: []load.SourceFile{
 		{Path: "/repo/app/go.mod", Src: []byte("module example.com/app\nrequire (\nexample.com/a v1.0.0\nexample.com/b v1.0.0\n)\nreplace example.com/a => ../a\nreplace example.com/b => ../b\n")},
