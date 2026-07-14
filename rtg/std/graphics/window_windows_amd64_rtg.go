@@ -40,7 +40,7 @@ func windowsReadMemory(destination *byte, source int, size int) {}
 func windowsRegisterClassRaw(value *byte) int { return 0 }
 
 // rtg:linkstatic user32.dll,CreateWindowExW
-func windowsCreateWindow(exStyle int, className, title *byte, style, x, y, width, height, parent, menu, instance, param int) int {
+func windowsCreateWindow(exStyle, className, title, style, x, y, width, height, parent, menu, instance, param int) int {
 	return 0
 }
 
@@ -283,6 +283,7 @@ const (
 
 var windowsClassName []byte
 var windowsClassReady bool
+var windowsClassAtom int
 var windowsClassInstance int
 var windowsWindows []*Window
 
@@ -504,6 +505,20 @@ func windowsUTF16(text string) []byte {
 	return append(out, 0)
 }
 
+func windowsNativeBytes(data []byte) (int, int) {
+	memory := windowsGlobalAlloc(0, len(data))
+	if memory == 0 {
+		return 0, 0
+	}
+	address := windowsGlobalLock(memory)
+	if address == 0 {
+		windowsGlobalFree(memory)
+		return 0, 0
+	}
+	windowsMoveMemory(address, &data[0], len(data))
+	return memory, address
+}
+
 func windowsAppendUTF8(out []byte, value int) []byte {
 	if value < 0 || value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff) {
 		value = 0xfffd
@@ -579,19 +594,11 @@ func windowsRegisterGraphicsClass() bool {
 		setLastWindowError("DefWindowProcW lookup failed", windowsGetLastError())
 		return false
 	}
-	classNameMemory := windowsGlobalAlloc(0, len(windowsClassName))
+	classNameMemory, classNameAddress := windowsNativeBytes(windowsClassName)
 	if classNameMemory == 0 {
 		setLastWindowError("window class name allocation failed", windowsGetLastError())
 		return false
 	}
-	classNameAddress := windowsGlobalLock(classNameMemory)
-	if classNameAddress == 0 {
-		code := windowsGetLastError()
-		windowsGlobalFree(classNameMemory)
-		setLastWindowError("window class name lock failed", code)
-		return false
-	}
-	windowsMoveMemory(classNameAddress, &windowsClassName[0], len(windowsClassName))
 	registered := windowsRegisterClass(windowsClassOwnDC|windowsClassHRedraw|windowsClassVRedraw, windowProc, instance, windowsLoadCursor(0, windowsCursorArrow), classNameAddress)
 	if registered == 0 {
 		code := windowsGetLastError()
@@ -602,6 +609,7 @@ func windowsRegisterGraphicsClass() bool {
 	}
 	windowsGlobalUnlock(classNameMemory)
 	windowsGlobalFree(classNameMemory)
+	windowsClassAtom = registered
 	windowsClassInstance = instance
 	windowsClassReady = true
 	return true
@@ -657,8 +665,15 @@ func NewWindow(options WindowOptions) *Window {
 		w.Close()
 		return nil
 	}
-	title := windowsUTF16(options.Title)
-	w.native = windowsCreateWindow(0, &windowsClassName[0], &title[0], style, windowsUseDefault, windowsUseDefault, int(rect.Right-rect.Left), int(rect.Bottom-rect.Top), 0, 0, w.instance, 0)
+	titleMemory, titleAddress := windowsNativeBytes(windowsUTF16(options.Title))
+	if titleMemory == 0 {
+		setLastWindowError("window title allocation failed", windowsGetLastError())
+		w.Close()
+		return nil
+	}
+	w.native = windowsCreateWindow(0, windowsClassAtom, titleAddress, style, windowsUseDefault, windowsUseDefault, int(rect.Right-rect.Left), int(rect.Bottom-rect.Top), 0, 0, w.instance, 0)
+	windowsGlobalUnlock(titleMemory)
+	windowsGlobalFree(titleMemory)
 	if w.native == 0 {
 		setLastWindowError("CreateWindowExW failed", windowsGetLastError())
 		w.Close()
