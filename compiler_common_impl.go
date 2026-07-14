@@ -11237,12 +11237,12 @@ func rtgBinaryUsesFloat(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr) bool {
 	if rtgTok2Is(p, e.tok, '|', '|') {
 		return false
 	}
-	left := rtgInferParsedExprType(g, ep, e.left)
-	if left == rtgTypeFloat64 {
+	left := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, e.left))
+	if left.kind == rtgTypeFloat64 {
 		return true
 	}
-	right := rtgInferParsedExprType(g, ep, e.right)
-	if right == rtgTypeFloat64 {
+	right := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, e.right))
+	if right.kind == rtgTypeFloat64 {
 		return true
 	}
 	if !ep.hasFloat {
