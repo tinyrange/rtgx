@@ -7315,9 +7315,13 @@ func rtgEmitGlobalStructInit(g *rtgLinearGen, ep *rtgExprParse, rootIndex int, t
 			}
 			rtgAsmStoreSliceBss(&g.asm, off+fieldOffset)
 		} else {
-			if !rtgEmitScalarExprForKind(g, ep, field.expr, fieldResolved.kind) {
+			constResult := rtgEvalConstExpr(g, ep, field.expr)
+			if !constResult.ok {
 				return false
 			}
+			source := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, field.expr))
+			value := rtgConvertConstScalar(constResult.value, source.kind, fieldResolved.kind)
+			rtgAsmPrimaryImm(&g.asm, value)
 			rtgAsmStorePrimaryBss(&g.asm, off+fieldOffset)
 		}
 	}
