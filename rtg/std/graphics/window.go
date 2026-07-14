@@ -92,10 +92,14 @@ type Window struct {
 	native       int
 	view         int
 	context      int
+	device       int
+	instance     int
 	pool         int
 	eventMode    int
 	backingScale int
 	bottomUp     []byte
+	tracking     bool
+	pendingUTF16 int
 }
 
 func (w *Window) Surface() *Surface { return w.surface }
