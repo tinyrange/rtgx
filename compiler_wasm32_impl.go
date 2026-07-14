@@ -2144,6 +2144,9 @@ func rtgWasm32EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	if !rtgBindFunctionParams(g, fnInfoIndex) {
 		return false
 	}
+	if !rtgBindNamedResults(g, fnInfoIndex) {
+		return false
+	}
 	if !rtgEmitLinearRange(g, fn.bodyStart+1, fn.bodyEnd) {
 		return false
 	}
