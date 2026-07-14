@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "source_digest": "159f9fd3171366bd93e791154ebb88bfaade94aab5ff7435f031ac2a4ba0d229",
+  "source_digest": "4beab8effebe35d01e42610fc01d49bc53d1f57c65e00ac7a1d345876d9f2363",
   "runs": [
     {
       "stage": "host",
       "target": "linux/amd64",
-      "commit": "16db0c5ee5478cdbc5d1eb6463c601a2631e60f8",
-      "captured_at": "2026-07-14T21:02:50Z",
+      "commit": "e732f7bb77e5bc2810215b81cc8bd5eff3772774",
+      "captured_at": "2026-07-14T21:14:56Z",
       "observations": [
         {
           "id": 1,
@@ -305,8 +305,8 @@
         },
         {
           "id": 60,
-          "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: panic(\"x\")\nrtg: compilation failed"
+          "status": "accepted",
+          "message": "compiled successfully"
         },
         {
           "id": 61,
@@ -583,8 +583,8 @@
     {
       "stage": "stage3",
       "target": "linux/amd64",
-      "commit": "16db0c5ee5478cdbc5d1eb6463c601a2631e60f8",
-      "captured_at": "2026-07-14T21:02:50Z",
+      "commit": "e732f7bb77e5bc2810215b81cc8bd5eff3772774",
+      "captured_at": "2026-07-14T21:14:56Z",
       "observations": [
         {
           "id": 1,
@@ -883,8 +883,8 @@
         },
         {
           "id": 60,
-          "status": "backend-failure",
-          "message": "rtg: failed to emit statement: panic(\"x\")\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "status": "accepted",
+          "message": "compiled successfully"
         },
         {
           "id": 61,

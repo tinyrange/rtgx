@@ -1754,6 +1754,7 @@ const rtgIdentInt32 = 16
 const rtgIdentSyscall = 17
 const rtgIdentString = 18
 const rtgIdentCap = 19
+const rtgIdentPanic = 20
 
 const rtgDiagParseMissingPackage = 1
 const rtgDiagParseMissingPackageName = 2
@@ -2377,6 +2378,9 @@ func rtgExprIdentCode(p *rtgProgram, ep *rtgExprParse, idx int) int {
 		}
 	}
 	if n == 5 {
+		if src[start] == 'p' && src[start+1] == 'a' && src[start+2] == 'n' && src[start+3] == 'i' && src[start+4] == 'c' {
+			return rtgIdentPanic
+		}
 		if src[start] == 'u' && src[start+1] == 'i' && src[start+2] == 'n' && src[start+3] == 't' && src[start+4] == '8' {
 			return rtgIdentInt
 		}
@@ -10024,6 +10028,10 @@ func rtgEmitRuntimeExit(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	if e.argCount != 1 || !rtgEmitIntExpr(g, ep, ep.args[e.firstArg]) {
 		return false
 	}
+	return rtgEmitExitStatus(g)
+}
+
+func rtgEmitExitStatus(g *rtgLinearGen) bool {
 	a := &g.asm
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmExit(a)
@@ -10069,6 +10077,51 @@ func rtgEmitRuntimeExit(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rtgAsmSyscall(a)
 	}
 	return true
+}
+
+func rtgEmitStaticWrite(g *rtgLinearGen, text string, fd int) bool {
+	var data []byte
+	for i := 0; i < len(text); i++ {
+		data = append(data, text[i])
+	}
+	offset := rtgAddStringData(g, data)
+	rtgAsmPrimaryDataAddr(&g.asm, offset)
+	rtgAsmSecondaryImm(&g.asm, len(data))
+	return rtgEmitWriteValueRegs(g, fd)
+}
+
+func rtgEmitBuiltinPanic(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	e := ep.exprs[idx]
+	if e.argCount != 1 {
+		return false
+	}
+	argIndex := ep.args[e.firstArg]
+	argType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, argIndex))
+	if argType.kind == rtgTypeString {
+		if !rtgEmitStringValueRegs(g, ep, argIndex) {
+			return false
+		}
+		rtgAsmPushStringRegs(&g.asm)
+	} else if !rtgEmitIntExpr(g, ep, argIndex) {
+		return false
+	}
+	if !rtgEmitStaticWrite(g, "panic: ", 2) {
+		return false
+	}
+	if argType.kind == rtgTypeString {
+		rtgAsmPopPrimary(&g.asm)
+		rtgAsmPopSecondary(&g.asm)
+		if !rtgEmitWriteValueRegs(g, 2) {
+			return false
+		}
+	} else if !rtgEmitStaticWrite(g, "value", 2) {
+		return false
+	}
+	if !rtgEmitStaticWrite(g, "\n", 2) {
+		return false
+	}
+	rtgAsmPrimaryImm(&g.asm, 2)
+	return rtgEmitExitStatus(g)
 }
 
 func rtgEmitRuntimeArenaDiscard(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
