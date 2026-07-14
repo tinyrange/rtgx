@@ -2307,11 +2307,11 @@ func rtgWasm32EmitFloatBinaryExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bo
 		rtgAsmDivLeftTertiaryRightPrimary(a, false)
 		return true
 	}
-	if !rtgEmitIntExpr(g, ep, e.left) {
+	if !rtgEmitScalarExprForKind(g, ep, e.left, rtgTypeFloat64) {
 		return false
 	}
 	rtgAsmPushPrimary(a)
-	if !rtgEmitIntExpr(g, ep, e.right) {
+	if !rtgEmitScalarExprForKind(g, ep, e.right, rtgTypeFloat64) {
 		return false
 	}
 	rtgAsmPopTertiary(a)
