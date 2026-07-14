@@ -1173,8 +1173,17 @@ func (w *Window) ReadPixels() *Image {
 		return nil
 	}
 	bottomUp := make([]byte, w.width*w.height*4)
+	glViewport(0, 0, w.width, w.height)
+	glMatrixMode(glProjection)
+	glLoadIdentity()
+	glMatrixMode(glModelView)
+	glLoadIdentity()
+	glDrawBuffer(glBack)
+	glRasterPos2i(-1, -1)
+	glPixelStorei(glUnpackAlignment, 1)
+	glDrawPixels(w.width, w.height, glRGBA, glUnsignedByte, w.bottomUp)
 	glFinish()
-	glReadBuffer(glFront)
+	glReadBuffer(glBack)
 	glPixelStorei(glPackAlignment, 1)
 	glReadPixels(0, 0, w.width, w.height, glRGBA, glUnsignedByte, bottomUp)
 	image := NewImage(w.width, w.height, nil)
