@@ -9625,6 +9625,12 @@ func rtgEmitPushStackWords(g *rtgLinearGen, offset int, size int, wordSize int) 
 		rtgAsmPushPrimary(&g.asm)
 	}
 }
+func rtgEmitPushBssWords(g *rtgLinearGen, offset int, size int, wordSize int) {
+	for at := size - wordSize; at >= 0; at -= wordSize {
+		rtgAsmLoadPrimaryBss(&g.asm, offset+at)
+		rtgAsmPushPrimary(&g.asm)
+	}
+}
 func rtgEmitPushMemSecondaryWords(g *rtgLinearGen, size int, wordSize int) {
 	for at := size - wordSize; at >= 0; at -= wordSize {
 		rtgAsmLoadPrimaryMemSecondaryDisp(&g.asm, at)
@@ -10767,10 +10773,19 @@ func rtgEmitStructArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, typ int
 	}
 	if e.kind == rtgExprIdent {
 		localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
-		if localIndex < 0 || rtgTypeSize(meta, g.locals[localIndex].typ) != size {
+		if localIndex >= 0 {
+			if rtgTypeSize(meta, g.locals[localIndex].typ) != size {
+				return -1
+			}
+			rtgEmitPushStackWords(g, g.locals[localIndex].offset, size, wordSize)
+			return size / wordSize
+		}
+		globalOffset := rtgFindGlobalOffset(g, e.nameStart, e.nameEnd)
+		globalType := rtgFindGlobalType(g, e.nameStart, e.nameEnd)
+		if globalOffset < 0 || rtgTypeSize(meta, globalType) != size {
 			return -1
 		}
-		rtgEmitPushStackWords(g, g.locals[localIndex].offset, size, wordSize)
+		rtgEmitPushBssWords(g, globalOffset, size, wordSize)
 		return size / wordSize
 	}
 	if e.kind == rtgExprIndex {
