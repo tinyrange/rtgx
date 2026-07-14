@@ -67,6 +67,22 @@ const rtgFloatScaledInteger = 1
 const rtgFloatIEEEHardware = 2
 const rtgFloatIEEESoft = 3
 
+const rtgABI386SysV = 1
+const rtgABI386Windows = 2
+const rtgABIAmd64SysV = 3
+const rtgABIAmd64Windows = 4
+const rtgABIAarch64Linux = 5
+const rtgABIAarch64Darwin = 6
+const rtgABIArmLinux = 7
+const rtgABIWasi = 8
+
+const rtgImageELF32 = 1
+const rtgImageELF64 = 2
+const rtgImagePE32 = 3
+const rtgImagePE64 = 4
+const rtgImageMachO64 = 5
+const rtgImageWasm = 6
+
 // The current normalized backend stores scalar values in eight-byte virtual
 // slots even when the target address or language int is narrower. Keep this
 // distinct from the target data model so future C and small-device backends do
@@ -98,6 +114,8 @@ type rtgTargetProfile struct {
 	volatileWidths  int
 	interruptModel  int
 	floatModel      int
+	abi             int
+	imageFormat     int
 }
 
 func rtgProfileForTarget(target int) (rtgTargetProfile, bool) {
@@ -152,6 +170,35 @@ func rtgProfileForTarget(target int) (rtgTargetProfile, bool) {
 	}
 	p.codePointerBits = p.pointerBits
 	p.funcPointerBits = p.pointerBits
+	if p.os == rtgOSLinux {
+		if p.arch == rtgArch386 {
+			p.abi = rtgABI386SysV
+			p.imageFormat = rtgImageELF32
+		} else if p.arch == rtgArchAmd64 {
+			p.abi = rtgABIAmd64SysV
+			p.imageFormat = rtgImageELF64
+		} else if p.arch == rtgArchAarch64 {
+			p.abi = rtgABIAarch64Linux
+			p.imageFormat = rtgImageELF64
+		} else if p.arch == rtgArchArm {
+			p.abi = rtgABIArmLinux
+			p.imageFormat = rtgImageELF32
+		}
+	} else if p.os == rtgOSWindows {
+		if p.arch == rtgArch386 {
+			p.abi = rtgABI386Windows
+			p.imageFormat = rtgImagePE32
+		} else {
+			p.abi = rtgABIAmd64Windows
+			p.imageFormat = rtgImagePE64
+		}
+	} else if p.os == rtgOSDarwin {
+		p.abi = rtgABIAarch64Darwin
+		p.imageFormat = rtgImageMachO64
+	} else if p.os == rtgOSWasi {
+		p.abi = rtgABIWasi
+		p.imageFormat = rtgImageWasm
+	}
 	return p, true
 }
 
@@ -202,6 +249,12 @@ func rtgProfileIsValid(p rtgTargetProfile) bool {
 	if p.floatModel < rtgFloatScaledInteger || p.floatModel > rtgFloatIEEESoft {
 		return false
 	}
+	if p.abi < rtgABI386SysV || p.abi > rtgABIWasi {
+		return false
+	}
+	if p.imageFormat < rtgImageELF32 || p.imageFormat > rtgImageWasm {
+		return false
+	}
 	return true
 }
 
@@ -219,95 +272,19 @@ func rtg_runtime_ArenaReset(mark int) {}
 
 func rtgSetTarget(target int) {
 	if rtgCompilerFixedTarget != 0 {
-		rtgCurrentTarget = rtgCompilerFixedTarget
-		if rtgCompilerFixedTarget == rtgTargetWindows386 {
-			rtgTargetOS = rtgOSWindows
-			rtgTargetArch = rtgArch386
-			rtgNativeIntSize = 4
-			return
-		}
-		if rtgCompilerFixedTarget == rtgTargetWindowsAmd64 {
-			rtgTargetOS = rtgOSWindows
-			rtgTargetArch = rtgArchAmd64
-			rtgNativeIntSize = 8
-			return
-		}
-		if rtgCompilerFixedTarget == rtgTargetDarwinArm64 {
-			rtgTargetOS = rtgOSDarwin
-			rtgTargetArch = rtgArchAarch64
-			rtgNativeIntSize = 8
-			return
-		}
-		if rtgCompilerFixedTarget == rtgTargetWasiWasm32 {
-			rtgTargetOS = rtgOSWasi
-			rtgTargetArch = rtgArchWasm32
-			rtgNativeIntSize = 4
-			return
-		}
-		if rtgCompilerFixedTarget == rtgTargetLinux386 {
-			rtgTargetOS = rtgOSLinux
-			rtgTargetArch = rtgArch386
-			rtgNativeIntSize = 4
-			return
-		}
-		if rtgCompilerFixedTarget == rtgTargetLinuxArm {
-			rtgTargetOS = rtgOSLinux
-			rtgTargetArch = rtgArchArm
-			rtgNativeIntSize = 4
-			return
-		}
-		if rtgCompilerFixedTarget == rtgTargetLinuxAarch64 {
-			rtgTargetOS = rtgOSLinux
-			rtgTargetArch = rtgArchAarch64
-			rtgNativeIntSize = 8
-			return
-		}
-		rtgTargetOS = rtgOSLinux
-		rtgTargetArch = rtgArchAmd64
-		rtgNativeIntSize = 8
-		return
+		target = rtgCompilerFixedTarget
 	}
 	rtgCurrentTarget = target
+	profile, ok := rtgProfileForTarget(target)
+	if ok {
+		rtgTargetOS = profile.os
+		rtgTargetArch = profile.arch
+		rtgNativeIntSize = profile.intBits / 8
+		return
+	}
+	// Preserve the historical fallback for internal callers that pass an
+	// invalid target. Public entry points reject it before reaching this code.
 	rtgTargetOS = rtgOSLinux
-	if target == rtgTargetLinux386 {
-		rtgTargetArch = rtgArch386
-		rtgNativeIntSize = 4
-		return
-	}
-	if target == rtgTargetWindows386 {
-		rtgTargetOS = rtgOSWindows
-		rtgTargetArch = rtgArch386
-		rtgNativeIntSize = 4
-		return
-	}
-	if target == rtgTargetLinuxAarch64 {
-		rtgTargetArch = rtgArchAarch64
-		rtgNativeIntSize = 8
-		return
-	}
-	if target == rtgTargetDarwinArm64 {
-		rtgTargetOS = rtgOSDarwin
-		rtgTargetArch = rtgArchAarch64
-		rtgNativeIntSize = 8
-		return
-	}
-	if target == rtgTargetLinuxArm {
-		rtgTargetArch = rtgArchArm
-		rtgNativeIntSize = 4
-		return
-	}
-	if target == rtgTargetWindowsAmd64 {
-		rtgTargetOS = rtgOSWindows
-		rtgTargetArch = rtgArchAmd64
-		rtgNativeIntSize = 8
-		return
-	}
-	if target == rtgTargetWasiWasm32 {
-		rtgTargetOS = rtgOSWasi
-		rtgTargetArch = rtgArchWasm32
-		rtgNativeIntSize = 4
-		return
-	}
 	rtgTargetArch = rtgArchAmd64
 	rtgNativeIntSize = 8
 }
