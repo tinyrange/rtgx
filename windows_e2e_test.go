@@ -163,11 +163,23 @@ func runWindowsCommand(t *testing.T, dir string, path string, args ...string) (c
 	}
 	gdbArgs := []string{
 		"--batch",
-		"-ex=set pagination off",
 		"-ex=run",
-		"-ex=info all-registers",
+		"-ex=p/x$rax",
+		"-ex=p/x$rsp",
+		"-ex=p/x$rcx",
+		"-ex=p/x$rdx",
+		"-ex=p/x$r8",
+		"-ex=p/x$r9",
+		"-ex=p/x$rip",
+		"-ex=p/x$eax",
+		"-ex=p/x$esp",
+		"-ex=p/x$esi",
+		"-ex=p/x$eip",
+		"-ex=x/8gx$rsp",
+		"-ex=x/s$rcx",
+		"-ex=x/s$esi",
 		"-ex=bt",
-		"-ex=x/16i $pc-32",
+		"-ex=x/16i$pc-32",
 		"--args", path,
 	}
 	gdbArgs = append(gdbArgs, args...)
