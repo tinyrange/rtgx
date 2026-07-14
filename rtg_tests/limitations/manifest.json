@@ -478,8 +478,8 @@
       "id": 60,
       "area": "builtins",
       "title": "panic builtin",
-      "expected": "backend-failure",
-      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "expected": "accepted",
+      "commentary_html": "The predeclared panic builtin is emitted as a terminal runtime failure. Deferred recovery semantics remain tracked separately.",
       "fixture": "rtg_tests/limitations/case_060"
     },
     {
