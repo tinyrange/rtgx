@@ -5854,8 +5854,8 @@ type rtgLinearGen struct {
 	copyWordsEmitted   bool
 	arenaAllocLabel    int
 	arenaAllocEmitted  bool
-	arenaClearLabel    int
-	arenaClearEmitted  bool
+	makeZeroLabel      int
+	makeZeroEmitted    bool
 	stringHeapOff      int
 	stringHeapEndOff   int
 	stringHeapDataOff  int
@@ -9391,35 +9391,32 @@ func rtgEmitMakeSliceRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rtgAsmPopPrimary(a)
 		rtgAsmStorePrimaryStack(a, sizeOffset)
 		rtgEmitArenaAllocStackPrimary(g, sizeOffset)
+		rtgEmitZeroDynamicMakeSlice(g, lenOffset, elemSize)
 	}
 	rtgAsmLoadSecondaryStack(a, lenOffset)
 	rtgAsmLoadTertiaryStack(a, capOffset)
 	return true
 }
 
-func rtgEnsureArenaClearHelper(g *rtgLinearGen) int {
+func rtgEmitZeroDynamicMakeSlice(g *rtgLinearGen, lenOffset int, elemSize int) {
 	a := &g.asm
-	if g.arenaClearEmitted {
-		return g.arenaClearLabel
+	rtgAsmLoadTertiaryStack(a, lenOffset)
+	rtgAsmMulTertiaryImm(a, elemSize)
+	rtgAsmCallLabel(a, rtgEnsureMakeZeroHelper(g))
+}
+
+func rtgEnsureMakeZeroHelper(g *rtgLinearGen) int {
+	a := &g.asm
+	if g.makeZeroEmitted {
+		return g.makeZeroLabel
 	}
-	g.arenaClearEmitted = true
-	g.arenaClearLabel = rtgAsmNewLabel(a)
+	g.makeZeroEmitted = true
+	g.makeZeroLabel = rtgAsmNewLabel(a)
 	afterLabel := rtgAsmNewLabel(a)
 	loopLabel := rtgAsmNewLabel(a)
 	doneLabel := rtgAsmNewLabel(a)
 	rtgAsmJmpLabel(a, afterLabel)
-	rtgAsmMarkLabel(a, g.arenaClearLabel)
-	if rtgTargetArch == rtgArchAmd64 || rtgTargetArch == rtgArch386 {
-		rtgAsmPushPrimary(a)
-		rtgAsmCopyPrimaryToCallWord0(a)
-		rtgAsmPrimaryImm(a, 0)
-		rtgAsmEmit8(a, 0xfc)
-		rtgAsmEmit16(a, 0xaaf3)
-		rtgAsmPopPrimary(a)
-		rtgAsmRet(a)
-		rtgAsmMarkLabel(a, afterLabel)
-		return g.arenaClearLabel
-	}
+	rtgAsmMarkLabel(a, g.makeZeroLabel)
 	rtgAsmCopyPrimaryToSecondary(a)
 	rtgAsmPushPrimary(a)
 	rtgAsmMarkLabel(a, loopLabel)
@@ -9441,7 +9438,7 @@ func rtgEnsureArenaClearHelper(g *rtgLinearGen) int {
 	rtgAsmPopPrimary(a)
 	rtgAsmRet(a)
 	rtgAsmMarkLabel(a, afterLabel)
-	return g.arenaClearLabel
+	return g.makeZeroLabel
 }
 
 func rtgMakeStaticRingSlotCount(backingSize int) int {
@@ -9930,29 +9927,8 @@ func rtgEmitRuntimeArenaReset(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rtgEmitRuntimeArenaResetMadvise(g)
 		return true
 	}
-	markOff := rtgAddUnnamedLocal(g, rtgTypeInt)
-	oldOff := rtgAddUnnamedLocal(g, rtgTypeInt)
-	rtgAsmStorePrimaryStack(a, markOff)
-	rtgAsmLoadPrimaryBss(a, g.stringHeapOff)
-	rtgAsmStorePrimaryStack(a, oldOff)
-	rtgEmitArenaClearRange(g, markOff, oldOff)
-	rtgAsmLoadPrimaryStack(a, markOff)
 	rtgAsmStorePrimaryBss(a, g.stringHeapOff)
 	return true
-}
-
-func rtgEmitArenaClearRange(g *rtgLinearGen, startOff int, endOff int) {
-	a := &g.asm
-	doneLabel := rtgAsmNewLabel(a)
-	rtgAsmJgeStackStack(a, startOff, endOff, doneLabel)
-	rtgAsmLoadPrimaryStack(a, endOff)
-	rtgAsmLoadTertiaryStack(a, startOff)
-	rtgAsmSubPrimaryTertiary(a)
-	rtgAsmPushPrimary(a)
-	rtgAsmLoadPrimaryStack(a, startOff)
-	rtgAsmPopTertiary(a)
-	rtgAsmCallLabel(a, rtgEnsureArenaClearHelper(g))
-	rtgAsmMarkLabel(a, doneLabel)
 }
 
 func rtgEmitRuntimeArenaResetMadvise(g *rtgLinearGen) {
@@ -9966,7 +9942,6 @@ func rtgEmitRuntimeArenaResetMadvise(g *rtgLinearGen) {
 	rtgAsmLoadPrimaryBss(a, g.stringHeapOff)
 	rtgAsmStorePrimaryStack(a, oldOff)
 	rtgEmitRuntimeArenaClampOldToPersistent(g, oldOff)
-	rtgEmitArenaClearRange(g, markOff, oldOff)
 	rtgAsmLoadPrimaryStack(a, markOff)
 	rtgAsmStorePrimaryBss(a, g.stringHeapOff)
 	rtgAsmLoadPrimaryStack(a, markOff)
@@ -10030,13 +10005,6 @@ func rtgEmitRuntimeArenaPersistReset(g *rtgLinearGen, ep *rtgExprParse, idx int)
 		rtgEmitRuntimeArenaPersistResetMadvise(g)
 		return true
 	}
-	markOff := rtgAddUnnamedLocal(g, rtgTypeInt)
-	oldOff := rtgAddUnnamedLocal(g, rtgTypeInt)
-	rtgAsmStorePrimaryStack(a, markOff)
-	rtgAsmLoadPrimaryBss(a, g.stringHeapEndOff)
-	rtgAsmStorePrimaryStack(a, oldOff)
-	rtgEmitArenaClearRange(g, oldOff, markOff)
-	rtgAsmLoadPrimaryStack(a, markOff)
 	rtgAsmStorePrimaryBss(a, g.stringHeapEndOff)
 	return true
 }
@@ -10051,7 +10019,6 @@ func rtgEmitRuntimeArenaPersistResetMadvise(g *rtgLinearGen) {
 	rtgAsmStorePrimaryStack(a, markOff)
 	rtgAsmLoadPrimaryBss(a, g.stringHeapEndOff)
 	rtgAsmStorePrimaryStack(a, oldOff)
-	rtgEmitArenaClearRange(g, oldOff, markOff)
 	rtgAsmLoadPrimaryStack(a, markOff)
 	rtgAsmStorePrimaryBss(a, g.stringHeapEndOff)
 	rtgAsmLoadPrimaryStack(a, oldOff)
@@ -10133,12 +10100,19 @@ func rtgEmitRuntimeArenaPersistBytes(g *rtgLinearGen, ep *rtgExprParse, idx int)
 func rtgEmitCopyBytesToPersistent(g *rtgLinearGen, srcOff int, lenOff int, destOff int) {
 	a := &g.asm
 	if rtgTargetArch == rtgArchAmd64 {
+		rtgAsmEmit8(a, 0x57)
+		rtgAsmEmit8(a, 0x56)
+		rtgAsmEmit8(a, 0x51)
 		rtgAsmLoadPrimaryStack(a, destOff)
 		rtgAsmCopyPrimaryToCallWord0(a)
 		rtgAsmLoadPrimaryStack(a, srcOff)
 		rtgAsmCopyPrimaryToCallWord1(a)
 		rtgAsmLoadTertiaryStack(a, lenOff)
+		rtgAsmEmit8(a, 0xfc)
 		rtgAsmEmit16(a, 0xa4f3)
+		rtgAsmEmit8(a, 0x59)
+		rtgAsmEmit8(a, 0x5e)
+		rtgAsmEmit8(a, 0x5f)
 		return
 	}
 	indexOff := rtgAddUnnamedLocal(g, rtgTypeInt)
