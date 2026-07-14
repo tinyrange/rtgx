@@ -76,7 +76,7 @@ func main() {
 	}
 	center := (12*capture.Stride + 16*4)
 	if capture.Pixels[center] != 231 || capture.Pixels[center+1] != 47 || capture.Pixels[center+2] != 93 || capture.Pixels[center+3] != 255 {
-		fail("pixels")
+		fail("pixels " + decimal(int(capture.Pixels[center])) + "," + decimal(int(capture.Pixels[center+1])) + "," + decimal(int(capture.Pixels[center+2])) + "," + decimal(int(capture.Pixels[center+3])))
 		w.Close()
 		return
 	}
