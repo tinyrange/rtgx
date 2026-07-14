@@ -92,8 +92,17 @@ func glPixelZoom(x, y int) {}
 // rtg:linkstatic /System/Library/Frameworks/OpenGL.framework/OpenGL,glDrawPixels
 func glDrawPixels(width, height, format, typ int, pixels []byte) {}
 
+// rtg:linkstatic /System/Library/Frameworks/OpenGL.framework/OpenGL,glReadBuffer
+func glReadBuffer(mode int) {}
+
+// rtg:linkstatic /System/Library/Frameworks/OpenGL.framework/OpenGL,glReadPixels
+func glReadPixels(x, y, width, height, format, typ int, pixels []byte) {}
+
 // rtg:linkstatic /System/Library/Frameworks/OpenGL.framework/OpenGL,glFlush
 func glFlush() {}
+
+// rtg:linkstatic /System/Library/Frameworks/OpenGL.framework/OpenGL,glFinish
+func glFinish() {}
 
 const (
 	nsApplicationActivationPolicyRegular = 0
@@ -113,6 +122,8 @@ const (
 	glUnsignedByte                       = 0x1401
 	glUnpackAlignment                    = 0x0cf5
 	glUnpackRowLength                    = 0x0cf2
+	glPackAlignment                      = 0x0d05
+	glFront                              = 0x0404
 	glFrontAndBack                       = 0x0408
 	nsUTF8StringEncoding                 = 4
 	nsModifierShift                      = 1 << 17
@@ -619,6 +630,35 @@ func (w *Window) Present() bool {
 	objcMsg0(w.context, selector("flushBuffer"))
 	w.surface.ResetDirty()
 	return true
+}
+
+// ReadPixels captures the displayed OpenGL front buffer. On high-DPI displays
+// the returned image uses physical framebuffer pixels rather than logical
+// window coordinates.
+func (w *Window) ReadPixels() *Image {
+	if w == nil || w.closed || w.context == 0 {
+		return nil
+	}
+	w.refreshBackingScale()
+	width := w.width * w.backingScale
+	height := w.height * w.backingScale
+	if width <= 0 || height <= 0 {
+		return nil
+	}
+	bottomUp := make([]byte, width*height*4)
+	objcMsg0(w.context, selector("makeCurrentContext"))
+	glFinish()
+	glReadBuffer(glFront)
+	glPixelStorei(glPackAlignment, 1)
+	glReadPixels(0, 0, width, height, glRGBA, glUnsignedByte, bottomUp)
+	image := NewImage(width, height, nil)
+	row := width * 4
+	for y := 0; y < height; y++ {
+		source := (height - y - 1) * row
+		destination := y * row
+		copy(image.Pixels[destination:destination+row], bottomUp[source:source+row])
+	}
+	return image
 }
 
 func (w *Window) Close() {

@@ -38,17 +38,25 @@ can be drawn as an image. Implemented operations include:
 - sub-image updates and explicit image destruction;
 - dirty-region tracking for partial native presentation.
 
-`NewBuiltinFont` supplies a compact ASCII UI font with deterministic metrics.
+`NewTrueTypeFont` parses dependency-free TrueType `glyf` outlines from a byte
+slice at a requested logical pixel height. Glyphs are rasterized lazily into
+cached antialiased A8 masks, with Unicode cmap lookup, horizontal metrics,
+legacy kern-table kerning, simple quadratic contours, and transformed compound
+glyphs. The caller remains responsible for obtaining and licensing font data.
+
+`NewBuiltinFont` remains available as a compact deterministic ASCII fallback.
 Text input and measurement use UTF-8; unsupported built-in glyphs render a
-replacement character. `DrawGlyphRun` accepts positioned A8 masks so a font
-rasterizer or shaping layer can provide arbitrary Unicode glyphs without
-changing the renderer.
+replacement character. `DrawGlyphRun` accepts positioned A8 masks for shaped
+or externally rasterized glyph runs.
 
 ## Windowing
 
 The Darwin backend implements:
 
 - create, close, show, hide, title, client size, repaint requests and present;
+- top-down RGBA8 window capture, using `glReadPixels` from the displayed front
+  buffer on Darwin (physical pixels on high-DPI displays);
+- dependency-free binary PPM export through `Image.EncodePPM`;
 - multiple simultaneous windows;
 - poll and blocking wait event loops;
 - close, resize, focus and expose events;

@@ -26,7 +26,10 @@ func TestDarwinGraphicsHeadlessPixels(t *testing.T) {
 	}
 	source := `package main
 
-import "graphics"
+import (
+	"graphics"
+	"os"
+)
 
 func alphaAt(surface *graphics.Surface, x, y int) byte {
 	return surface.Pixels[y*surface.Stride+x*4+3]
@@ -241,6 +244,49 @@ func main() {
 	}
 	if textPixels != 18 {
 		print("FAIL text pixels\n")
+		return
+	}
+	fontData, readError := os.ReadFile("/System/Library/Fonts/SFNSMono.ttf")
+	if readError != nil {
+		print("FAIL read TrueType\n")
+		return
+	}
+	smoothFont, fontError := graphics.NewTrueTypeFont(fontData, 20)
+	if fontError != nil {
+		print("FAIL parse TrueType\n")
+		return
+	}
+	smoothMetrics := graphics.MeasureText(smoothFont, "Smooth AV")
+	if smoothMetrics.Width < 80 || smoothMetrics.Height != 20 {
+		print("FAIL TrueType metrics ")
+		print(int(smoothMetrics.Width))
+		print(" ")
+		print(int(smoothMetrics.Height))
+		print("\n")
+		return
+	}
+	surface.Clear(graphics.Transparent)
+	surface.DrawText(smoothFont, graphics.Point{X: 2, Y: 24}, "Smooth", graphics.White)
+	smoothPixels := 0
+	partialPixels := 0
+	for y := 0; y < 64; y++ {
+		for x := 0; x < 64; x++ {
+			alpha := alphaAt(surface, x, y)
+			if alpha != 0 {
+				smoothPixels++
+			}
+			if alpha > 0 && alpha < 255 {
+				partialPixels++
+			}
+		}
+	}
+	if smoothPixels == 0 || partialPixels == 0 {
+		print("FAIL TrueType antialiasing\n")
+		return
+	}
+	ppm := surface.EncodePPM()
+	if len(ppm) != 12301 || ppm[0] != 'P' || ppm[1] != '6' || ppm[12] != '\n' {
+		print("FAIL PPM export\n")
 		return
 	}
 	surface.Clear(graphics.RGBA(0, 0, 0, 0))

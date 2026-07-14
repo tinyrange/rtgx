@@ -204,3 +204,197 @@ func TestTextMetricsUTF8AndGlyphDrawing(t *testing.T) {
 		t.Fatal("glyph mask rendering failed")
 	}
 }
+
+func putTestU16(data []byte, at int, value int) {
+	data[at] = byte(value >> 8)
+	data[at+1] = byte(value)
+}
+
+func putTestU32(data []byte, at int, value int) {
+	data[at] = byte(value >> 24)
+	data[at+1] = byte(value >> 16)
+	data[at+2] = byte(value >> 8)
+	data[at+3] = byte(value)
+}
+
+func appendTestU16(data []byte, value int) []byte {
+	return append(data, byte(value>>8), byte(value))
+}
+
+func testTrueTypeData() []byte {
+	cmap := make([]byte, 44)
+	putTestU16(cmap, 2, 1)
+	putTestU16(cmap, 4, 3)
+	putTestU16(cmap, 6, 1)
+	putTestU32(cmap, 8, 12)
+	putTestU16(cmap, 12, 4)
+	putTestU16(cmap, 14, 32)
+	putTestU16(cmap, 18, 4)
+	putTestU16(cmap, 20, 4)
+	putTestU16(cmap, 22, 1)
+	putTestU16(cmap, 26, 'B')
+	putTestU16(cmap, 28, 0xffff)
+	putTestU16(cmap, 32, 'A')
+	putTestU16(cmap, 34, 0xffff)
+	putTestU16(cmap, 36, 0xffc0)
+	putTestU16(cmap, 38, 1)
+
+	head := make([]byte, 54)
+	putTestU32(head, 0, 0x00010000)
+	putTestU16(head, 18, 1000)
+	putTestU16(head, 36, 0xffce)
+	putTestU16(head, 40, 600)
+	putTestU16(head, 42, 700)
+
+	hhea := make([]byte, 36)
+	putTestU32(hhea, 0, 0x00010000)
+	putTestU16(hhea, 4, 800)
+	putTestU16(hhea, 6, 0xff38)
+	putTestU16(hhea, 8, 100)
+	putTestU16(hhea, 34, 3)
+
+	hmtx := make([]byte, 12)
+	putTestU16(hmtx, 0, 500)
+	putTestU16(hmtx, 4, 700)
+	putTestU16(hmtx, 8, 700)
+
+	maxp := make([]byte, 6)
+	putTestU32(maxp, 0, 0x00010000)
+	putTestU16(maxp, 4, 3)
+
+	glyf := make([]byte, 0, 48)
+	glyf = appendTestU16(glyf, 1)
+	glyf = appendTestU16(glyf, 0)
+	glyf = appendTestU16(glyf, 0)
+	glyf = appendTestU16(glyf, 600)
+	glyf = appendTestU16(glyf, 700)
+	glyf = appendTestU16(glyf, 2)
+	glyf = appendTestU16(glyf, 0)
+	glyf = append(glyf, 1, 1, 1)
+	glyf = appendTestU16(glyf, 0)
+	glyf = appendTestU16(glyf, 300)
+	glyf = appendTestU16(glyf, 300)
+	glyf = appendTestU16(glyf, 0)
+	glyf = appendTestU16(glyf, 700)
+	glyf = appendTestU16(glyf, -700)
+	glyf = append(glyf, 0)
+	glyf = appendTestU16(glyf, -1)
+	glyf = appendTestU16(glyf, -50)
+	glyf = appendTestU16(glyf, 0)
+	glyf = appendTestU16(glyf, 550)
+	glyf = appendTestU16(glyf, 700)
+	glyf = appendTestU16(glyf, 3)
+	glyf = appendTestU16(glyf, 1)
+	glyf = appendTestU16(glyf, -50)
+	glyf = appendTestU16(glyf, 0)
+
+	loca := make([]byte, 8)
+	putTestU16(loca, 0, 0)
+	putTestU16(loca, 2, 0)
+	putTestU16(loca, 4, 15)
+	putTestU16(loca, 6, 24)
+
+	names := []string{"cmap", "glyf", "head", "hhea", "hmtx", "loca", "maxp"}
+	tables := [][]byte{cmap, glyf, head, hhea, hmtx, loca, maxp}
+	header := 12 + len(names)*16
+	total := header
+	for i := 0; i < len(tables); i++ {
+		total += (len(tables[i]) + 3) & ^3
+	}
+	font := make([]byte, total)
+	putTestU32(font, 0, 0x00010000)
+	putTestU16(font, 4, len(names))
+	offset := header
+	for i := 0; i < len(names); i++ {
+		record := 12 + i*16
+		copy(font[record:record+4], []byte(names[i]))
+		putTestU32(font, record+8, offset)
+		putTestU32(font, record+12, len(tables[i]))
+		copy(font[offset:], tables[i])
+		offset += (len(tables[i]) + 3) & ^3
+	}
+	return font
+}
+
+func TestTrueTypeFontAntialiasingMetricsAndCache(t *testing.T) {
+	if _, err := NewTrueTypeFont([]byte{0, 1, 2}, 20); err == nil {
+		t.Fatal("short TrueType data was accepted")
+	}
+	font, err := NewTrueTypeFont(testTrueTypeData(), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if font.Metrics.Ascent != 16 || font.Metrics.Descent != 4 || font.Metrics.LineGap != 2 {
+		t.Fatalf("font metrics = %#v", font.Metrics)
+	}
+	metrics := MeasureText(font, "AB")
+	if metrics.Width != 28 || metrics.Height != 22 {
+		t.Fatalf("text metrics = %#v", metrics)
+	}
+	surface := NewSurface(48, 28)
+	surface.DrawText(font, Point{X: 4, Y: 20}, "AB", White)
+	partial := 0
+	covered := 0
+	for y := 0; y < surface.Height; y++ {
+		for x := 0; x < surface.Width; x++ {
+			alpha := pixel(surface, x, y).A
+			if alpha != 0 {
+				covered++
+			}
+			if alpha > 0 && alpha < 255 {
+				partial++
+			}
+		}
+	}
+	if covered == 0 || partial == 0 {
+		t.Fatalf("TrueType coverage: covered=%d partial=%d", covered, partial)
+	}
+	if len(font.glyphs) != 2 {
+		t.Fatalf("glyph cache size = %d", len(font.glyphs))
+	}
+	surface.DrawText(font, Point{X: 4, Y: 20}, "BA", White)
+	if len(font.glyphs) != 2 {
+		t.Fatalf("glyph cache grew after reuse: %d", len(font.glyphs))
+	}
+}
+
+func TestWindowReadPixelsReturnsIndependentTopDownImage(t *testing.T) {
+	window := NewWindow(WindowOptions{Width: 3, Height: 2, Hidden: true})
+	if window == nil {
+		t.Fatal("window was not created")
+	}
+	window.Surface().Clear(Black)
+	window.Surface().FillRect(R(1, 0, 1, 1), RGBA(255, 0, 0, 255))
+	capture := window.ReadPixels()
+	if capture == nil || capture.Width != 3 || capture.Height != 2 {
+		t.Fatalf("capture = %#v", capture)
+	}
+	if pixel(capture, 1, 0).R != 255 || pixel(capture, 1, 1).R != 0 {
+		t.Fatal("capture is not top-down")
+	}
+	window.Surface().Clear(White)
+	if pixel(capture, 0, 0) != Black {
+		t.Fatal("capture aliases the window surface")
+	}
+	window.Close()
+	if window.ReadPixels() != nil {
+		t.Fatal("closed window produced a capture")
+	}
+}
+
+func TestEncodePPM(t *testing.T) {
+	image := NewImage(2, 1, []byte{255, 1, 2, 255, 3, 254, 4, 255})
+	got := image.EncodePPM()
+	want := []byte{'P', '6', '\n', '2', ' ', '1', '\n', '2', '5', '5', '\n', 255, 1, 2, 3, 254, 4}
+	if len(got) != len(want) {
+		t.Fatalf("PPM length = %d, want %d", len(got), len(want))
+	}
+	for i := 0; i < len(want); i++ {
+		if got[i] != want[i] {
+			t.Fatalf("PPM byte %d = %d, want %d", i, got[i], want[i])
+		}
+	}
+	if NewMask(1, 1, []byte{255}).EncodePPM() != nil {
+		t.Fatal("A8 image encoded as PPM")
+	}
+}

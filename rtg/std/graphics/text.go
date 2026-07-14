@@ -9,6 +9,10 @@ type FontMetrics struct {
 type Font struct {
 	Scale   int
 	Metrics FontMetrics
+
+	trueType    *trueTypeInfo
+	pixelHeight Scalar
+	glyphs      []fontGlyph
 }
 
 type TextMetrics struct {
@@ -24,11 +28,104 @@ type Glyph struct {
 	Advance Scalar
 }
 
+type fontGlyph struct {
+	codepoint int
+	index     int
+	mask      *Image
+	xOffset   Scalar
+	yOffset   Scalar
+	advance   Scalar
+}
+
 func NewBuiltinFont(scale int) *Font {
 	if scale < 1 {
 		scale = 1
 	}
 	return &Font{Scale: scale, Metrics: FontMetrics{Ascent: Scalar(7 * scale), Descent: Scalar(2 * scale), LineGap: Scalar(scale)}}
+}
+
+// NewTrueTypeFont parses a TrueType font and prepares it for antialiased
+// rendering at pixelHeight logical pixels. The font data is copied, so callers
+// may reuse or release their input buffer after this function returns.
+func NewTrueTypeFont(data []byte, pixelHeight Scalar) (*Font, *Error) {
+	if pixelHeight <= 0 {
+		return nil, &Error{Message: "graphics: TrueType pixel height must be positive"}
+	}
+	owned := make([]byte, len(data))
+	copy(owned, data)
+	info, err := initTrueType(owned, 0)
+	if err != nil {
+		return nil, err
+	}
+	ascent, descent, lineGap := info.GetFontVMetrics()
+	units := ascent - descent
+	if units <= 0 {
+		return nil, &Error{Message: "graphics: invalid TrueType vertical metrics"}
+	}
+	ascentMetric := Scalar(ascent) * pixelHeight / Scalar(units)
+	descentMetric := Scalar(-descent) * pixelHeight / Scalar(units)
+	lineHeight := pixelHeight + Scalar(lineGap)*pixelHeight/Scalar(units)
+	gap := lineHeight - ascentMetric - descentMetric
+	if gap < 0 {
+		gap = 0
+	}
+	return &Font{
+		Metrics: FontMetrics{
+			Ascent:  ascentMetric,
+			Descent: descentMetric,
+			LineGap: gap,
+		},
+		trueType:    info,
+		pixelHeight: pixelHeight,
+	}, nil
+}
+
+func (font *Font) trueTypeScale() Scalar {
+	if font == nil || font.trueType == nil {
+		return 0
+	}
+	ascent, descent, _ := font.trueType.GetFontVMetrics()
+	units := ascent - descent
+	if units <= 0 {
+		return 0
+	}
+	return font.pixelHeight * ttScaleUnit / Scalar(units)
+}
+
+func (font *Font) cachedGlyph(codepoint int) *fontGlyph {
+	for i := 0; i < len(font.glyphs); i++ {
+		if font.glyphs[i].codepoint == codepoint {
+			return &font.glyphs[i]
+		}
+	}
+	info := font.trueType
+	scale := font.trueTypeScale()
+	index := info.FindGlyphIndex(codepoint)
+	advance, _ := info.GetGlyphHMetrics(index)
+	x0, y0, x1, y1 := info.GetGlyphBitmapBox(index, scale, scale)
+	width, height := x1-x0, y1-y0
+	var mask *Image
+	if width > 0 && height > 0 {
+		pixels := make([]byte, width*height)
+		info.MakeGlyphBitmap(pixels, width, height, width, scale, scale, index)
+		mask = NewMask(width, height, pixels)
+	}
+	font.glyphs = append(font.glyphs, fontGlyph{
+		codepoint: codepoint,
+		index:     index,
+		mask:      mask,
+		xOffset:   Scalar(x0),
+		yOffset:   Scalar(y0),
+		advance:   Scalar(advance) * scale / ttScaleUnit,
+	})
+	return &font.glyphs[len(font.glyphs)-1]
+}
+
+func (font *Font) kern(left, right int) Scalar {
+	if font == nil || font.trueType == nil || left < 0 || right < 0 {
+		return 0
+	}
+	return Scalar(font.trueType.GetGlyphKernAdvance(left, right)) * font.trueTypeScale() / ttScaleUnit
 }
 
 func nextUTF8(text string, at int) (int, int) {
@@ -55,9 +152,9 @@ func MeasureText(font *Font, text string) TextMetrics {
 	if font == nil {
 		return TextMetrics{}
 	}
-	advance := Scalar(6 * font.Scale)
 	lineHeight := font.Metrics.Ascent + font.Metrics.Descent + font.Metrics.LineGap
 	x, width, height := Scalar(0), Scalar(0), lineHeight
+	previous := -1
 	for at := 0; at < len(text); {
 		r, size := nextUTF8(text, at)
 		at += size
@@ -67,10 +164,23 @@ func MeasureText(font *Font, text string) TextMetrics {
 			}
 			x = 0
 			height += lineHeight
+			previous = -1
 		} else if r == 9 {
-			x += advance * 4
+			if font.trueType != nil {
+				space := font.cachedGlyph(' ')
+				x += space.advance * 4
+			} else {
+				x += Scalar(6*font.Scale) * 4
+			}
+			previous = -1
 		} else {
-			x += advance
+			if font.trueType != nil {
+				glyph := font.cachedGlyph(r)
+				x += font.kern(previous, glyph.index) + glyph.advance
+				previous = glyph.index
+			} else {
+				x += Scalar(6 * font.Scale)
+			}
 		}
 	}
 	if x > width {
@@ -210,24 +320,43 @@ func (s *Surface) DrawText(font *Font, baseline Point, text string, color Color)
 	if font == nil {
 		return
 	}
-	advance := Scalar(6 * font.Scale)
 	lineHeight := font.Metrics.Ascent + font.Metrics.Descent + font.Metrics.LineGap
 	originX := baseline.X
-	x, y := baseline.X, baseline.Y-font.Metrics.Ascent
+	x, y := baseline.X, baseline.Y
+	previous := -1
 	for at := 0; at < len(text); {
 		r, size := nextUTF8(text, at)
 		at += size
 		if r == 10 {
 			x = originX
 			y += lineHeight
+			previous = -1
 			continue
 		}
 		if r == 9 {
-			x += advance * 4
+			if font.trueType != nil {
+				space := font.cachedGlyph(' ')
+				x += space.advance * 4
+			} else {
+				x += Scalar(6*font.Scale) * 4
+			}
+			previous = -1
 			continue
 		}
-		s.drawBuiltinGlyph(font, Point{X: x, Y: y}, r, color)
-		x += advance
+		if font.trueType != nil {
+			glyph := font.cachedGlyph(r)
+			x += font.kern(previous, glyph.index)
+			if glyph.mask != nil {
+				width := Scalar(glyph.mask.Width)
+				height := Scalar(glyph.mask.Height)
+				s.DrawImage(glyph.mask, R(0, 0, width, height), R(x+glyph.xOffset, y+glyph.yOffset, width, height), SamplingNearest, color)
+			}
+			x += glyph.advance
+			previous = glyph.index
+		} else {
+			s.drawBuiltinGlyph(font, Point{X: x, Y: y - font.Metrics.Ascent}, r, color)
+			x += Scalar(6 * font.Scale)
+		}
 	}
 }
 

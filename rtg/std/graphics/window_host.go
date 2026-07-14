@@ -26,6 +26,15 @@ func (w *Window) Present() bool {
 	w.surface.ResetDirty()
 	return true
 }
+
+// ReadPixels captures the current window contents as a top-down RGBA8 image.
+// The headless host backend copies its software surface.
+func (w *Window) ReadPixels() *Image {
+	if w == nil || w.closed || w.surface == nil {
+		return nil
+	}
+	return NewImage(w.surface.Width, w.surface.Height, w.surface.Pixels)
+}
 func (w *Window) SetTitle(title string) bool { return w != nil && !w.closed }
 func (w *Window) Show() bool {
 	if w == nil || w.closed {
