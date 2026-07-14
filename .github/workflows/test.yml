@@ -155,6 +155,9 @@ jobs:
 
       - name: Run tracked package suites
         run: |
+          # Do not replace these patterns with ./...: tests/ and the generated
+          # corpus contain independent programs with intentionally conflicting
+          # package-level declarations, while sandbox/ contains local scratch.
           go test -count=1 ./rtg/internal/... ./rtg/std/... ./rtg/cmd/... ./rtgunit ./cmd/...
           go test -count=1 -tags rtg_bundle ./rtg/internal/driver ./rtg/cmd/rtg
 
