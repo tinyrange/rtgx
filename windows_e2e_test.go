@@ -154,7 +154,22 @@ func compileAndRunWindowsInput(t *testing.T, target string, compiler string, inp
 
 func runWindowsCommand(t *testing.T, dir string, path string, args ...string) (commandResult, error) {
 	t.Helper()
-	return runCommandInDir(t, dir, path, args...)
+	result, err := runCommandInDir(t, dir, path, args...)
+	if runtime.GOOS != "windows" || result.exitCode == 0 || os.Getenv("RTG_WINDOWS_GDB") == "" {
+		return result, err
+	}
+	gdbArgs := []string{
+		"--batch",
+		"-ex", "set pagination off",
+		"-ex", "run",
+		"-ex", "info registers",
+		"-ex", "x/16i $pc-32",
+		"--args", path,
+	}
+	gdbArgs = append(gdbArgs, args...)
+	diagnostic, diagnosticErr := runCommandInDir(t, dir, "gdb", gdbArgs...)
+	t.Logf("native Windows crash diagnostics: err=%v exit=%d\nstdout:\n%s\nstderr:\n%s", diagnosticErr, diagnostic.exitCode, diagnostic.stdout, diagnostic.stderr)
+	return result, err
 }
 
 func windowsRunnerRequired(t *testing.T) {
