@@ -375,6 +375,10 @@ func rtgEmitLinearPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 }
 
 func rtgEmitPrintValueRegs(g *rtgLinearGen) bool {
+	return rtgEmitWriteValueRegs(g, 1)
+}
+
+func rtgEmitWriteValueRegs(g *rtgLinearGen, fd int) bool {
 	a := &g.asm
 	if rtgTargetIsWindows() {
 		if rtgTargetArch == rtgArch386 {
@@ -382,14 +386,14 @@ func rtgEmitPrintValueRegs(g *rtgLinearGen) bool {
 			rtgAsmEmit16(a, 0xc689)
 			rtgAsmPrimaryImm(a, -1)
 			rtgAsmCopyPrimaryToTertiary(a)
-			rtgAsmPrimaryImm(a, 1)
+			rtgAsmPrimaryImm(a, fd)
 			rtgAsmCopyPrimaryToCallWord0(a)
 			rtgAsmCallLabel(a, label)
 			return true
 		}
 		label := rtgWinAmd64EmitReadWriteHelper(g, true)
 		rtgAsmCopyPrimaryToCallWord1(a)
-		rtgAsmPrimaryImm(a, 1)
+		rtgAsmPrimaryImm(a, fd)
 		rtgAsmCopyPrimaryToCallWord0(a)
 		rtgAsmPrimaryImm(a, -1)
 		rtgAsmCopyPrimaryToTertiary(a)
@@ -399,11 +403,11 @@ func rtgEmitPrintValueRegs(g *rtgLinearGen) bool {
 	if rtgTargetIsDarwin() {
 		rtgAarch64AsmMovRegReg(a, 2, rtgAarch64RegRdx)
 		rtgAarch64AsmMovRegReg(a, 1, rtgAarch64RegRax)
-		rtgAarch64AsmMovRegImm(a, 0, 1)
+		rtgAarch64AsmMovRegImm(a, 0, fd)
 		rtgDarwinArm64CallImport(a, rtgDarwinImportWrite)
 		return true
 	}
-	rtgAsmPushImm(a, 1)
+	rtgAsmPushImm(a, fd)
 	rtgAsmPopCallWord0(a)
 	rtgAsmCopyPrimaryToCallWord1(a)
 	rtgAsmPrimaryImm(a, rtgLinuxSysWriteSeq())

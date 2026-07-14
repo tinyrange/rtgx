@@ -949,6 +949,9 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	}
 	if e.kind == rtgExprCall {
 		callee := rtgExprIdentCode(p, ep, e.left)
+		if callee == rtgIdentPanic {
+			return rtgEmitBuiltinPanic(g, ep, idx)
+		}
 		if callee == rtgIdentSyscall {
 			return rtgEmitArbitrarySyscall(g, ep, idx)
 		}
