@@ -36,8 +36,11 @@ func windowsMoveMemory(destination int, source *byte, size int) {}
 // rtg:linkstatic ntdll.dll,RtlMoveMemory
 func windowsReadMemory(destination *byte, source int, size int) {}
 
+// rtg:linkstatic ntdll.dll,RtlMoveMemory
+func windowsStorePointer(destination *byte, source **byte, size int) {}
+
 // rtg:linkstatic user32.dll,RegisterClassW
-func windowsRegisterClass(value *windowsWindowClass) int { return 0 }
+func windowsRegisterClassRaw(value *byte) int { return 0 }
 
 // rtg:linkstatic user32.dll,CreateWindowExW
 func windowsCreateWindow(exStyle int, className, title *byte, style, x, y, width, height, parent, menu, instance, param int) int {
@@ -60,40 +63,40 @@ func windowsUpdateWindow(window int) int { return 0 }
 func windowsSetWindowText(window int, text *byte) int { return 0 }
 
 // rtg:linkstatic user32.dll,AdjustWindowRectEx
-func windowsAdjustWindowRect(rect *windowsRect, style, menu, exStyle int) int { return 0 }
+func windowsAdjustWindowRectRaw(rect *byte, style, menu, exStyle int) int { return 0 }
 
 // rtg:linkstatic user32.dll,SetWindowPos
 func windowsSetWindowPos(window, after, x, y, width, height, flags int) int { return 0 }
 
 // rtg:linkstatic user32.dll,InvalidateRect
-func windowsInvalidateRect(window int, rect *windowsRect, erase int) int { return 0 }
+func windowsInvalidateRectRaw(window int, rect *byte, erase int) int { return 0 }
 
 // rtg:linkstatic user32.dll,GetUpdateRect
-func windowsGetUpdateRect(window int, rect *windowsRect, erase int) int { return 0 }
+func windowsGetUpdateRectRaw(window int, rect *byte, erase int) int { return 0 }
 
 // rtg:linkstatic user32.dll,ValidateRect
-func windowsValidateRect(window int, rect *windowsRect) int { return 0 }
+func windowsValidateRectRaw(window int, rect *byte) int { return 0 }
 
 // rtg:linkstatic user32.dll,PeekMessageW
-func windowsPeekMessage(message *windowsMessage, window, first, last, remove int) int { return 0 }
+func windowsPeekMessageRaw(message *byte, window, first, last, remove int) int { return 0 }
 
 // rtg:linkstatic user32.dll,GetMessageW
-func windowsGetMessage(message *windowsMessage, window, first, last int) int { return 0 }
+func windowsGetMessageRaw(message *byte, window, first, last int) int { return 0 }
 
 // rtg:linkstatic user32.dll,TranslateMessage
-func windowsTranslateMessage(message *windowsMessage) int { return 0 }
+func windowsTranslateMessageRaw(message *byte) int { return 0 }
 
 // rtg:linkstatic user32.dll,DispatchMessageW
-func windowsDispatchMessage(message *windowsMessage) int { return 0 }
+func windowsDispatchMessageRaw(message *byte) int { return 0 }
 
 // rtg:linkstatic user32.dll,GetKeyState
 func windowsGetKeyState(key int) int { return 0 }
 
 // rtg:linkstatic user32.dll,TrackMouseEvent
-func windowsBeginTrackMouseEvent(event *windowsTrackMouseEvent) int { return 0 }
+func windowsBeginTrackMouseEventRaw(event *byte) int { return 0 }
 
 // rtg:linkstatic user32.dll,ScreenToClient
-func windowsScreenToClient(window int, point *windowsPoint) int { return 0 }
+func windowsScreenToClientRaw(window int, point *byte) int { return 0 }
 
 // rtg:linkstatic user32.dll,SetCapture
 func windowsSetCapture(window int) int { return 0 }
@@ -135,10 +138,10 @@ func windowsGetDC(window int) int { return 0 }
 func windowsReleaseDC(window, device int) int { return 0 }
 
 // rtg:linkstatic gdi32.dll,ChoosePixelFormat
-func windowsChoosePixelFormat(device int, format *windowsPixelFormatDescriptor) int { return 0 }
+func windowsChoosePixelFormat(device int, format *byte) int { return 0 }
 
 // rtg:linkstatic gdi32.dll,SetPixelFormat
-func windowsSetPixelFormat(device, index int, format *windowsPixelFormatDescriptor) int { return 0 }
+func windowsSetPixelFormat(device, index int, format *byte) int { return 0 }
 
 // rtg:linkstatic gdi32.dll,SwapBuffers
 func windowsSwapBuffers(device int) int { return 0 }
@@ -181,48 +184,6 @@ func glReadPixels(x, y, width, height, format, typ int, pixels []byte) {}
 
 // rtg:linkstatic opengl32.dll,glFinish
 func glFinish() {}
-
-type windowsWindowClass struct {
-	Style       uint32
-	WindowProc  int
-	ClassExtra  int32
-	WindowExtra int32
-	Instance    int
-	Icon        int
-	Cursor      int
-	Background  int
-	MenuName    *byte
-	ClassName   *byte
-}
-
-type windowsPixelFormatDescriptor struct {
-	Size           uint16
-	Version        uint16
-	Flags          uint32
-	PixelType      byte
-	ColorBits      byte
-	RedBits        byte
-	RedShift       byte
-	GreenBits      byte
-	GreenShift     byte
-	BlueBits       byte
-	BlueShift      byte
-	AlphaBits      byte
-	AlphaShift     byte
-	AccumBits      byte
-	AccumRedBits   byte
-	AccumGreenBits byte
-	AccumBlueBits  byte
-	AccumAlphaBits byte
-	DepthBits      byte
-	StencilBits    byte
-	AuxBuffers     byte
-	LayerType      byte
-	Reserved       byte
-	LayerMask      uint32
-	VisibleMask    uint32
-	DamageMask     uint32
-}
 
 type windowsRect struct {
 	Left   int32
@@ -333,6 +294,170 @@ func windowsASCII(text string) []byte {
 		bytes[i] = text[i]
 	}
 	return bytes
+}
+
+func windowsPut16(data []byte, offset, value int) {
+	data[offset] = byte(value)
+	data[offset+1] = byte(value >> 8)
+}
+
+func windowsPut32(data []byte, offset, value int) {
+	data[offset] = byte(value)
+	data[offset+1] = byte(value >> 8)
+	data[offset+2] = byte(value >> 16)
+	data[offset+3] = byte(value >> 24)
+}
+
+func windowsPut64(data []byte, offset, value int) {
+	windowsPut32(data, offset, value)
+	windowsPut32(data, offset+4, value>>32)
+}
+
+func windowsGet32(data []byte, offset int) int {
+	return int(data[offset]) | int(data[offset+1])<<8 | int(data[offset+2])<<16 | int(data[offset+3])<<24
+}
+
+func windowsGetSigned32(data []byte, offset int) int {
+	value := windowsGet32(data, offset)
+	if value >= 0x80000000 {
+		value -= 0x100000000
+	}
+	return value
+}
+
+func windowsGet64(data []byte, offset int) int {
+	return windowsGet32(data, offset) | windowsGet32(data, offset+4)<<32
+}
+
+func windowsRegisterClass(style, windowProc, instance, cursor int, className *byte) int {
+	data := make([]byte, 72)
+	windowsPut32(data, 0, style)
+	windowsPut64(data, 8, windowProc)
+	windowsPut64(data, 24, instance)
+	windowsPut64(data, 40, cursor)
+	windowsStorePointer(&data[64], &className, 8)
+	return windowsRegisterClassRaw(&data[0])
+}
+
+func windowsRectData(rect *windowsRect) []byte {
+	data := make([]byte, 16)
+	if rect != nil {
+		windowsPut32(data, 0, int(rect.Left))
+		windowsPut32(data, 4, int(rect.Top))
+		windowsPut32(data, 8, int(rect.Right))
+		windowsPut32(data, 12, int(rect.Bottom))
+	}
+	return data
+}
+
+func windowsReadRect(data []byte, rect *windowsRect) {
+	if rect == nil {
+		return
+	}
+	rect.Left = int32(windowsGetSigned32(data, 0))
+	rect.Top = int32(windowsGetSigned32(data, 4))
+	rect.Right = int32(windowsGetSigned32(data, 8))
+	rect.Bottom = int32(windowsGetSigned32(data, 12))
+}
+
+func windowsAdjustWindowRect(rect *windowsRect, style, menu, exStyle int) int {
+	data := windowsRectData(rect)
+	result := windowsAdjustWindowRectRaw(&data[0], style, menu, exStyle)
+	windowsReadRect(data, rect)
+	return result
+}
+
+func windowsInvalidateRect(window int, rect *windowsRect, erase int) int {
+	if rect == nil {
+		return windowsInvalidateRectRaw(window, nil, erase)
+	}
+	data := windowsRectData(rect)
+	return windowsInvalidateRectRaw(window, &data[0], erase)
+}
+
+func windowsGetUpdateRect(window int, rect *windowsRect, erase int) int {
+	if rect == nil {
+		return windowsGetUpdateRectRaw(window, nil, erase)
+	}
+	data := windowsRectData(rect)
+	result := windowsGetUpdateRectRaw(window, &data[0], erase)
+	windowsReadRect(data, rect)
+	return result
+}
+
+func windowsValidateRect(window int, rect *windowsRect) int {
+	if rect == nil {
+		return windowsValidateRectRaw(window, nil)
+	}
+	data := windowsRectData(rect)
+	return windowsValidateRectRaw(window, &data[0])
+}
+
+func windowsMessageData(message *windowsMessage) []byte {
+	data := make([]byte, 48)
+	windowsPut64(data, 0, message.Window)
+	windowsPut32(data, 8, int(message.Message))
+	windowsPut64(data, 16, message.WParam)
+	windowsPut64(data, 24, message.LParam)
+	windowsPut32(data, 32, int(message.Time))
+	windowsPut32(data, 36, int(message.Point.X))
+	windowsPut32(data, 40, int(message.Point.Y))
+	windowsPut32(data, 44, int(message.Private))
+	return data
+}
+
+func windowsReadMessage(data []byte, message *windowsMessage) {
+	message.Window = windowsGet64(data, 0)
+	message.Message = uint32(windowsGet32(data, 8))
+	message.WParam = windowsGet64(data, 16)
+	message.LParam = windowsGet64(data, 24)
+	message.Time = uint32(windowsGet32(data, 32))
+	message.Point.X = int32(windowsGetSigned32(data, 36))
+	message.Point.Y = int32(windowsGetSigned32(data, 40))
+	message.Private = uint32(windowsGet32(data, 44))
+}
+
+func windowsPeekMessage(message *windowsMessage, window, first, last, remove int) int {
+	data := windowsMessageData(message)
+	result := windowsPeekMessageRaw(&data[0], window, first, last, remove)
+	windowsReadMessage(data, message)
+	return result
+}
+
+func windowsGetMessage(message *windowsMessage, window, first, last int) int {
+	data := windowsMessageData(message)
+	result := windowsGetMessageRaw(&data[0], window, first, last)
+	windowsReadMessage(data, message)
+	return result
+}
+
+func windowsTranslateMessage(message *windowsMessage) int {
+	data := windowsMessageData(message)
+	return windowsTranslateMessageRaw(&data[0])
+}
+
+func windowsDispatchMessage(message *windowsMessage) int {
+	data := windowsMessageData(message)
+	return windowsDispatchMessageRaw(&data[0])
+}
+
+func windowsBeginTrackMouseEvent(event *windowsTrackMouseEvent) int {
+	data := make([]byte, 24)
+	windowsPut32(data, 0, int(event.Size))
+	windowsPut32(data, 4, int(event.Flags))
+	windowsPut64(data, 8, event.Window)
+	windowsPut32(data, 16, int(event.HoverTime))
+	return windowsBeginTrackMouseEventRaw(&data[0])
+}
+
+func windowsScreenToClient(window int, point *windowsPoint) int {
+	data := make([]byte, 8)
+	windowsPut32(data, 0, int(point.X))
+	windowsPut32(data, 4, int(point.Y))
+	result := windowsScreenToClientRaw(window, &data[0])
+	point.X = int32(windowsGetSigned32(data, 0))
+	point.Y = int32(windowsGetSigned32(data, 4))
+	return result
 }
 
 func windowsDecodeUTF8(text string, index int) (int, int) {
@@ -456,14 +581,7 @@ func windowsRegisterGraphicsClass() bool {
 		setLastWindowError("DefWindowProcW lookup failed", windowsGetLastError())
 		return false
 	}
-	class := windowsWindowClass{
-		Style:      windowsClassOwnDC | windowsClassHRedraw | windowsClassVRedraw,
-		WindowProc: windowProc,
-		Instance:   instance,
-		Cursor:     windowsLoadCursor(0, windowsCursorArrow),
-		ClassName:  &windowsClassName[0],
-	}
-	if windowsRegisterClass(&class) == 0 {
+	if windowsRegisterClass(windowsClassOwnDC|windowsClassHRedraw|windowsClassVRedraw, windowProc, instance, windowsLoadCursor(0, windowsCursorArrow), &windowsClassName[0]) == 0 {
 		setLastWindowError("RegisterClassW failed", windowsGetLastError())
 		return false
 	}
@@ -534,23 +652,22 @@ func NewWindow(options WindowOptions) *Window {
 		w.Close()
 		return nil
 	}
-	format := windowsPixelFormatDescriptor{
-		Size:      40,
-		Version:   1,
-		Flags:     windowsFormatDrawToWindow | windowsFormatSupportOpenGL | windowsFormatDoubleBuffer,
-		PixelType: windowsFormatRGBA,
-		ColorBits: 32,
-		AlphaBits: 8,
-		DepthBits: 24,
-		LayerType: windowsMainPlane,
-	}
-	formatIndex := windowsChoosePixelFormat(w.device, &format)
+	format := make([]byte, 40)
+	windowsPut16(format, 0, 40)
+	windowsPut16(format, 2, 1)
+	windowsPut32(format, 4, windowsFormatDrawToWindow|windowsFormatSupportOpenGL|windowsFormatDoubleBuffer)
+	format[8] = byte(windowsFormatRGBA)
+	format[9] = 32
+	format[16] = 8
+	format[23] = 24
+	format[26] = byte(windowsMainPlane)
+	formatIndex := windowsChoosePixelFormat(w.device, &format[0])
 	if formatIndex == 0 {
 		setLastWindowError("ChoosePixelFormat failed", windowsGetLastError())
 		w.Close()
 		return nil
 	}
-	if windowsSetPixelFormat(w.device, formatIndex, &format) == 0 {
+	if windowsSetPixelFormat(w.device, formatIndex, &format[0]) == 0 {
 		setLastWindowError("SetPixelFormat failed", windowsGetLastError())
 		w.Close()
 		return nil
