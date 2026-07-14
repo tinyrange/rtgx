@@ -36,9 +36,6 @@ func windowsMoveMemory(destination int, source *byte, size int) {}
 // rtg:linkstatic ntdll.dll,RtlMoveMemory
 func windowsReadMemory(destination *byte, source int, size int) {}
 
-// rtg:linkstatic ntdll.dll,RtlMoveMemory
-func windowsStorePointer(destination *byte, source **byte, size int) {}
-
 // rtg:linkstatic user32.dll,RegisterClassW
 func windowsRegisterClassRaw(value *byte) int { return 0 }
 
@@ -286,6 +283,7 @@ const (
 
 var windowsClassName []byte
 var windowsClassReady bool
+var windowsClassInstance int
 var windowsWindows []*Window
 
 func windowsASCII(text string) []byte {
@@ -329,13 +327,13 @@ func windowsGet64(data []byte, offset int) int {
 	return windowsGet32(data, offset) | windowsGet32(data, offset+4)<<32
 }
 
-func windowsRegisterClass(style, windowProc, instance, cursor int, className *byte) int {
+func windowsRegisterClass(style, windowProc, instance, cursor, className int) int {
 	data := make([]byte, 72)
 	windowsPut32(data, 0, style)
 	windowsPut64(data, 8, windowProc)
 	windowsPut64(data, 24, instance)
 	windowsPut64(data, 40, cursor)
-	windowsStorePointer(&data[64], &className, 8)
+	windowsPut64(data, 64, className)
 	return windowsRegisterClassRaw(&data[0])
 }
 
@@ -568,11 +566,6 @@ func windowsRegisterGraphicsClass() bool {
 	if len(windowsClassName) == 0 {
 		windowsClassName = windowsUTF16("RTGGraphicsWindow")
 	}
-	instance := windowsGetModuleHandle(nil)
-	if instance == 0 {
-		setLastWindowError("GetModuleHandleW failed", windowsGetLastError())
-		return false
-	}
 	user32 := windowsUTF16("user32.dll")
 	module := windowsGetModuleHandle(&user32[0])
 	procName := windowsASCII("DefWindowProcW")
@@ -581,10 +574,30 @@ func windowsRegisterGraphicsClass() bool {
 		setLastWindowError("DefWindowProcW lookup failed", windowsGetLastError())
 		return false
 	}
-	if windowsRegisterClass(windowsClassOwnDC|windowsClassHRedraw|windowsClassVRedraw, windowProc, instance, windowsLoadCursor(0, windowsCursorArrow), &windowsClassName[0]) == 0 {
-		setLastWindowError("RegisterClassW failed", windowsGetLastError())
+	classNameMemory := windowsGlobalAlloc(0, len(windowsClassName))
+	if classNameMemory == 0 {
+		setLastWindowError("window class name allocation failed", windowsGetLastError())
 		return false
 	}
+	classNameAddress := windowsGlobalLock(classNameMemory)
+	if classNameAddress == 0 {
+		code := windowsGetLastError()
+		windowsGlobalFree(classNameMemory)
+		setLastWindowError("window class name lock failed", code)
+		return false
+	}
+	windowsMoveMemory(classNameAddress, &windowsClassName[0], len(windowsClassName))
+	registered := windowsRegisterClass(windowsClassOwnDC|windowsClassHRedraw|windowsClassVRedraw, windowProc, module, windowsLoadCursor(0, windowsCursorArrow), classNameAddress)
+	if registered == 0 {
+		code := windowsGetLastError()
+		windowsGlobalUnlock(classNameMemory)
+		windowsGlobalFree(classNameMemory)
+		setLastWindowError("RegisterClassW failed", code)
+		return false
+	}
+	windowsGlobalUnlock(classNameMemory)
+	windowsGlobalFree(classNameMemory)
+	windowsClassInstance = module
 	windowsClassReady = true
 	return true
 }
@@ -627,7 +640,7 @@ func NewWindow(options WindowOptions) *Window {
 	w := allocWindowsWindow()
 	w.width = options.Width
 	w.height = options.Height
-	w.instance = windowsGetModuleHandle(nil)
+	w.instance = windowsClassInstance
 	w.cursor = CursorArrow
 	w.shown = !options.Hidden
 	w.surface = NewSurface(w.width, w.height)
