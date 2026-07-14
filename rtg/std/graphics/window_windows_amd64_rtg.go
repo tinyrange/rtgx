@@ -36,7 +36,7 @@ func windowsMoveMemory(destination int, source *byte, size int) {}
 // rtg:linkstatic ntdll.dll,RtlMoveMemory
 func windowsReadMemory(destination *byte, source int, size int) {}
 
-// rtg:linkstatic user32.dll,RegisterClassExW
+// rtg:linkstatic user32.dll,RegisterClassW
 func windowsRegisterClass(value *windowsWindowClass) int { return 0 }
 
 // rtg:linkstatic user32.dll,CreateWindowExW
@@ -183,7 +183,6 @@ func glReadPixels(x, y, width, height, format, typ int, pixels []byte) {}
 func glFinish() {}
 
 type windowsWindowClass struct {
-	Size        uint32
 	Style       uint32
 	WindowProc  int
 	ClassExtra  int32
@@ -194,7 +193,6 @@ type windowsWindowClass struct {
 	Background  int
 	MenuName    *byte
 	ClassName   *byte
-	SmallIcon   int
 }
 
 type windowsPixelFormatDescriptor struct {
@@ -459,7 +457,6 @@ func windowsRegisterGraphicsClass() bool {
 		return false
 	}
 	class := windowsWindowClass{
-		Size:       80,
 		Style:      windowsClassOwnDC | windowsClassHRedraw | windowsClassVRedraw,
 		WindowProc: windowProc,
 		Instance:   instance,
@@ -467,7 +464,7 @@ func windowsRegisterGraphicsClass() bool {
 		ClassName:  &windowsClassName[0],
 	}
 	if windowsRegisterClass(&class) == 0 {
-		setLastWindowError("RegisterClassExW failed", windowsGetLastError())
+		setLastWindowError("RegisterClassW failed", windowsGetLastError())
 		return false
 	}
 	windowsClassReady = true
