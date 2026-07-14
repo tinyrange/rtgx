@@ -195,6 +195,7 @@ func rtgAmd64AsmLoadQwordRaxIndexRcxDisp(a *rtgAsm, disp int) {
 	rtgAsmEmit16(a, 0x0884)
 	rtgAsmEmit32(a, disp)
 }
+
 func rtgAmd64AsmLoadRaxMemRdxDisp(a *rtgAsm, disp int) {
 	if disp == 0 {
 		rtgAsmEmit24(a, 0x028b48)
@@ -432,6 +433,7 @@ func rtgAmd64EmitRaxRcxOp(g *rtgLinearGen, tok int) bool {
 	}
 	return false
 }
+
 func rtgAmd64EmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, label int, jumpIfTrue bool) bool {
 	p := g.prog
 	if e.tok < 0 || e.tok >= rtgTokCount(p) {
@@ -616,6 +618,11 @@ func rtgAmd64EmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) boo
 		valueType := rtgInferParsedExprType(g, ep, idx)
 		if !rtgTypeIsString(meta, valueType) {
 			return false
+		}
+		if offset, ok := rtgLocalStructSelectorOffset(g, ep, idx); ok {
+			rtgAsmLoadPrimaryStack(a, offset)
+			rtgAsmLoadSecondaryStack(a, offset-8)
+			return true
 		}
 		if !rtgEmitSelectorAddressSecondary(g, ep, idx) {
 			return false
@@ -990,6 +997,20 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 					return true
 				}
 			}
+			if arg.kind == rtgExprSelector {
+				argType := rtgInferParsedExprType(g, ep, ep.args[e.firstArg])
+				if rtgTypeIsSlice(g.meta, argType) || rtgTypeIsString(g.meta, argType) {
+					if offset, ok := rtgLocalStructSelectorOffset(g, ep, ep.args[e.firstArg]); ok {
+						rtgAsmLoadPrimaryStack(a, offset-8)
+						return true
+					}
+					if !rtgEmitSelectorAddressSecondary(g, ep, ep.args[e.firstArg]) {
+						return false
+					}
+					rtgAsmLoadPrimaryMemSecondaryDisp(a, 8)
+					return true
+				}
+			}
 			if arg.kind == rtgExprUnary && rtgTokCharIs(p, arg.tok, '*') {
 				if !rtgEmitIntExpr(g, ep, arg.left) {
 					return false
@@ -1176,6 +1197,10 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		}
 		if base.kind == rtgExprIndex {
 			return rtgEmitIndexedStructField(g, ep, e.left, e.nameStart, e.nameEnd)
+		}
+		if offset, ok := rtgLocalStructSelectorOffset(g, ep, idx); ok {
+			rtgAsmLoadPrimaryStack(a, offset)
+			return true
 		}
 		if !rtgEmitSelectorAddressSecondary(g, ep, idx) {
 			return false
@@ -1813,6 +1838,38 @@ func rtgAmd64EmitSelectorAddressRdx(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	fieldOffset := rtgStructFieldOffset(g, baseType, e.nameStart, e.nameEnd)
 	if fieldOffset < 0 {
 		return false
+	}
+	if rtgTargetArch == rtgArchAmd64 && base.kind == rtgExprSelector {
+		totalOffset := fieldOffset
+		rootIndex := e.left
+		for ep.exprs[rootIndex].kind == rtgExprSelector {
+			part := &ep.exprs[rootIndex]
+			partType := rtgResolveType(meta, rtgInferParsedExprType(g, ep, rootIndex))
+			if partType.kind == rtgTypePointer {
+				break
+			}
+			partBaseType := rtgInferParsedExprType(g, ep, part.left)
+			partOffset := rtgStructFieldOffset(g, partBaseType, part.nameStart, part.nameEnd)
+			if partOffset < 0 {
+				break
+			}
+			totalOffset += partOffset
+			rootIndex = part.left
+		}
+		root := &ep.exprs[rootIndex]
+		if root.kind == rtgExprIdent {
+			localIndex := rtgFindLocalIndex(g, root.nameStart, root.nameEnd)
+			if localIndex >= 0 {
+				rootType := rtgResolveType(meta, g.locals[localIndex].typ)
+				if rootType.kind == rtgTypePointer {
+					rtgAsmLoadSecondaryStack(a, g.locals[localIndex].offset)
+					if totalOffset != 0 {
+						rtgAsmAddSecondaryImm(a, totalOffset)
+					}
+					return true
+				}
+			}
+		}
 	}
 	if base.kind == rtgExprIndex {
 		leftType := rtgInferParsedExprType(g, ep, base.left)
