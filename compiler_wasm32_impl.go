@@ -2228,7 +2228,8 @@ func rtgWasm32EmitRaxRcxOp(g *rtgLinearGen, tok int) bool {
 	}
 	if c0 == '&' {
 		if c1 == '^' {
-			rtgWasm32EmitRegReg(a, rtgWasm32OpAndNotRegReg, rtgWasm32RegRax, rtgWasm32RegRcx)
+			rtgWasm32EmitRegReg(a, rtgWasm32OpAndNotRegReg, rtgWasm32RegRcx, rtgWasm32RegRax)
+			rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegRax, rtgWasm32RegRcx)
 		} else {
 			rtgWasm32EmitRegReg(a, rtgWasm32OpAndRegReg, rtgWasm32RegRax, rtgWasm32RegRcx)
 		}
