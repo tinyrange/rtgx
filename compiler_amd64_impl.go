@@ -470,6 +470,7 @@ func rtgAmd64EmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, labe
 	}
 	leftIndex := e.left
 	rightIndex := e.right
+	usesFloat := rtgBinaryUsesFloat(g, ep, e)
 	right := &ep.exprs[rightIndex]
 	rightValue := 0
 	rightOK := false
@@ -486,7 +487,7 @@ func rtgAmd64EmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, labe
 		rightValue = rtgFindSmallConstByName(g, right.nameStart, right.nameEnd)
 		rightOK = rightValue >= -128
 	}
-	if rightOK && rtgAsmImmFits8Signed(rightValue) {
+	if !usesFloat && rightOK && rtgAsmImmFits8Signed(rightValue) {
 		if !rtgEmitIntExpr(g, ep, leftIndex) {
 			return false
 		}
@@ -512,12 +513,24 @@ func rtgAmd64EmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, labe
 			}
 		}
 	}
-	if !rtgEmitIntExpr(g, ep, rightIndex) {
-		return false
+	if usesFloat {
+		if !rtgEmitScalarExprForKind(g, ep, rightIndex, rtgTypeFloat64) {
+			return false
+		}
+	} else {
+		if !rtgEmitIntExpr(g, ep, rightIndex) {
+			return false
+		}
 	}
 	rtgAsmPushPrimary(&g.asm)
-	if !rtgEmitIntExpr(g, ep, leftIndex) {
-		return false
+	if usesFloat {
+		if !rtgEmitScalarExprForKind(g, ep, leftIndex, rtgTypeFloat64) {
+			return false
+		}
+	} else {
+		if !rtgEmitIntExpr(g, ep, leftIndex) {
+			return false
+		}
 	}
 	rtgAsmPopTertiary(&g.asm)
 	if rtgTargetArch == rtgArchAarch64 {
