@@ -20,6 +20,18 @@ or wider language `int`.
 Both forms require descriptor-supplied byte order and ABI. Generated output
 uses unsigned carrier types and does not infer signed representation, char
 signedness, or object ABI. The preamble is freestanding-safe, deterministic,
-strict C89, and requires no libc symbols. This establishes the machine-profile
-and compile-time-assumption layer of #19; unit-to-C operation emission remains
-the next layer.
+strict C89, and requires no libc symbols.
+
+`RenderC89Support` extends the preamble with the signed-integer operations
+needed by an emitter. RTG signed values remain modular bit patterns in an
+unsigned carrier. Comparisons, division, remainder, sign extension, and
+arithmetic right shift are implemented without C signed overflow, signed
+right shift, out-of-range signed conversion, or shifts by the carrier width.
+The target runtime may override `RTG_C_DIVZERO()` to install its trap path.
+Readable helper names are macros over external symbols of five characters or
+fewer so linkers with six-character external-name significance cannot merge
+distinct helpers.
+
+This establishes the machine-profile, compile-time-assumption, and defined
+integer-semantics layers of #19; unit-to-C operation emission remains the next
+layer.
