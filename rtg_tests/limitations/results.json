@@ -5,8 +5,8 @@
     {
       "stage": "host",
       "target": "linux/amd64",
-      "commit": "578654015aae913316dcd5f2472ae6433df7fc7d",
-      "captured_at": "2026-07-14T12:51:04Z",
+      "commit": "3d086882ff8f471459b10000eee2c584a5bc693b",
+      "captured_at": "2026-07-14T12:52:05Z",
       "observations": [
         {
           "id": 1,
@@ -583,8 +583,8 @@
     {
       "stage": "stage3",
       "target": "linux/amd64",
-      "commit": "578654015aae913316dcd5f2472ae6433df7fc7d",
-      "captured_at": "2026-07-14T12:51:04Z",
+      "commit": "3d086882ff8f471459b10000eee2c584a5bc693b",
+      "captured_at": "2026-07-14T12:52:05Z",
       "observations": [
         {
           "id": 1,
