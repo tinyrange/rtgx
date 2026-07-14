@@ -211,6 +211,12 @@ var rtgNativeIntSize int = 8
 var rtgCurrentTarget int = rtgTargetLinuxAmd64
 var rtgCompilerArenaSize int
 
+// These bodies are used by the host Go build. Self-hosted compilers lower the
+// calls as arena intrinsics so large, phase-local scratch data can be reclaimed.
+func rtg_runtime_ArenaMark() int { return 0 }
+
+func rtg_runtime_ArenaReset(mark int) {}
+
 func rtgSetTarget(target int) {
 	if rtgCompilerFixedTarget != 0 {
 		rtgCurrentTarget = rtgCompilerFixedTarget
@@ -553,6 +559,86 @@ func rtgAsmEmit24(a *rtgAsm, v int) {
 	rtgAsmEmit8(a, v>>16)
 }
 
+func rtgAmd64RelaxBranches(a *rtgAsm) {
+	oldCode := a.code
+	oldLen := len(oldCode)
+	shortOp := make([]int, oldLen, oldLen)
+	for i := 0; i < len(a.relocs); i++ {
+		at := a.relocs[i].at & 2147483647
+		label := a.relocs[i].label & 2147483647
+		if label < 0 || label >= len(a.labelPos) || label >= len(a.labelSet) || !a.labelSet[label] {
+			continue
+		}
+		target := a.labelPos[label]
+		disp := target - (at + 4)
+		if disp < -128 || disp > 127 {
+			continue
+		}
+		if at >= 1 && oldCode[at-1] == 0xe9 {
+			shortOp[at-1] = 0xeb
+			continue
+		}
+		if at >= 2 && oldCode[at-2] == 0x0f && oldCode[at-1] >= 0x80 && oldCode[at-1] <= 0x8f {
+			shortOp[at-2] = int(oldCode[at-1]) - 0x10
+		}
+	}
+	positions := make([]int, oldLen+1, oldLen+1)
+	next := make([]byte, 0, cap(oldCode))
+	for i := 0; i < oldLen; {
+		positions[i] = len(next)
+		op := shortOp[i]
+		if op != 0 {
+			n := 5
+			if oldCode[i] == 0x0f {
+				n = 6
+			}
+			next = append(next, byte(op))
+			next = append(next, 0)
+			for j := 1; j < n; j++ {
+				positions[i+j] = len(next) - 1
+			}
+			i += n
+			continue
+		}
+		next = append(next, oldCode[i])
+		i++
+	}
+	positions[oldLen] = len(next)
+	var relocs []rtgLabelRef
+	relocs = make([]rtgLabelRef, 0, len(a.relocs))
+	for i := 0; i < len(a.relocs); i++ {
+		r := a.relocs[i]
+		at := r.at & 2147483647
+		label := r.label & 2147483647
+		start := at - 1
+		if at >= 2 && oldCode[at-2] == 0x0f {
+			start = at - 2
+		}
+		if start >= 0 && start < oldLen && shortOp[start] != 0 && label >= 0 && label < len(a.labelPos) && label < len(a.labelSet) && a.labelSet[label] {
+			newAt := positions[start] + 1
+			target := positions[a.labelPos[label]]
+			disp := target - (newAt + 1)
+			if disp >= -128 && disp <= 127 {
+				next[newAt] = byte(disp)
+				continue
+			}
+		}
+		r.at = positions[at]
+		relocs = append(relocs, r)
+	}
+	for i := 0; i < len(a.absRelocs); i++ {
+		at := a.absRelocs[i].at & 2147483647
+		a.absRelocs[i].at = positions[at]
+	}
+	for i := 0; i < len(a.labelPos); i++ {
+		if a.labelSet[i] {
+			a.labelPos[i] = positions[a.labelPos[i]]
+		}
+	}
+	a.code = next
+	a.relocs = relocs
+}
+
 func rtgAsmPatch(a *rtgAsm) {
 	if rtgTargetArch == rtgArchArm {
 		for i := 0; i < len(a.relocs); i++ {
@@ -603,6 +689,9 @@ func rtgAsmPatch(a *rtgAsm) {
 		}
 		a.dataOffset = a.codeOffset + len(a.code)
 		return
+	}
+	if rtgTargetArch == rtgArchAmd64 {
+		rtgAmd64RelaxBranches(a)
 	}
 	for i := 0; i < len(a.relocs); i++ {
 		at := a.relocs[i].at & 2147483647
@@ -2343,6 +2432,19 @@ func rtgBytesEqualText(src []byte, start int, end int, text string) bool {
 	return true
 }
 
+func rtgHexDigitValue(ch byte) int {
+	if ch >= '0' && ch <= '9' {
+		return int(ch - '0')
+	}
+	if ch >= 'a' && ch <= 'f' {
+		return int(ch-'a') + 10
+	}
+	if ch >= 'A' && ch <= 'F' {
+		return int(ch-'A') + 10
+	}
+	return -1
+}
+
 func rtgDecodeStringToken(p *rtgProgram, tokIndex int) []byte {
 	tok := rtgTokAt(p, tokIndex)
 	src := p.src
@@ -2352,6 +2454,15 @@ func rtgDecodeStringToken(p *rtgProgram, tokIndex int) []byte {
 	for i < end {
 		if src[i] == '\\' && i+1 < end {
 			i++
+			if src[i] == 'x' && i+2 < end {
+				hi := rtgHexDigitValue(src[i+1])
+				lo := rtgHexDigitValue(src[i+2])
+				if hi >= 0 && lo >= 0 {
+					out = append(out, byte(hi*16+lo))
+					i += 3
+					continue
+				}
+			}
 			if src[i] == 'n' {
 				out = append(out, '\n')
 			} else if src[i] == 't' {
@@ -5237,6 +5348,22 @@ func rtgAsmPushPrimary(a *rtgAsm) {
 	}
 	rtgAsmEmit8(a, 0x50)
 }
+
+func rtgAsmPushStackWord(a *rtgAsm, offset int) {
+	if rtgTargetArch == rtgArchAmd64 || rtgTargetArch == rtgArch386 {
+		rtgAsmEmit8(a, 0xff)
+		if offset >= 0 && offset <= 128 {
+			rtgAsmEmit8(a, 0x75)
+			rtgAsmEmit8(a, -offset)
+			return
+		}
+		rtgAsmEmit8(a, 0xb5)
+		rtgAsmEmit32(a, -offset)
+		return
+	}
+	rtgAsmLoadPrimaryStack(a, offset)
+	rtgAsmPushPrimary(a)
+}
 func rtgAsmPushTertiary(a *rtgAsm) {
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmPushRcx(a)
@@ -5727,6 +5854,8 @@ type rtgLinearGen struct {
 	copyWordsEmitted   bool
 	arenaAllocLabel    int
 	arenaAllocEmitted  bool
+	arenaClearLabel    int
+	arenaClearEmitted  bool
 	stringHeapOff      int
 	stringHeapEndOff   int
 	stringHeapDataOff  int
@@ -9268,6 +9397,53 @@ func rtgEmitMakeSliceRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	return true
 }
 
+func rtgEnsureArenaClearHelper(g *rtgLinearGen) int {
+	a := &g.asm
+	if g.arenaClearEmitted {
+		return g.arenaClearLabel
+	}
+	g.arenaClearEmitted = true
+	g.arenaClearLabel = rtgAsmNewLabel(a)
+	afterLabel := rtgAsmNewLabel(a)
+	loopLabel := rtgAsmNewLabel(a)
+	doneLabel := rtgAsmNewLabel(a)
+	rtgAsmJmpLabel(a, afterLabel)
+	rtgAsmMarkLabel(a, g.arenaClearLabel)
+	if rtgTargetArch == rtgArchAmd64 || rtgTargetArch == rtgArch386 {
+		rtgAsmPushPrimary(a)
+		rtgAsmCopyPrimaryToCallWord0(a)
+		rtgAsmPrimaryImm(a, 0)
+		rtgAsmEmit8(a, 0xfc)
+		rtgAsmEmit16(a, 0xaaf3)
+		rtgAsmPopPrimary(a)
+		rtgAsmRet(a)
+		rtgAsmMarkLabel(a, afterLabel)
+		return g.arenaClearLabel
+	}
+	rtgAsmCopyPrimaryToSecondary(a)
+	rtgAsmPushPrimary(a)
+	rtgAsmMarkLabel(a, loopLabel)
+	rtgAsmPushTertiary(a)
+	rtgAsmPopPrimary(a)
+	rtgAsmCmpPrimaryImm8(a, 0)
+	rtgAsmJzLabel(a, doneLabel)
+	rtgAsmPrimaryImm(a, 0)
+	rtgAsmStorePrimaryMemSecondaryDispSize(a, 0, 1)
+	rtgAsmAddSecondaryImm(a, 1)
+	rtgAsmPushTertiary(a)
+	rtgAsmPopPrimary(a)
+	rtgAsmPushImm(a, 1)
+	rtgAsmPopTertiary(a)
+	rtgAsmSubPrimaryTertiary(a)
+	rtgAsmCopyPrimaryToTertiary(a)
+	rtgAsmJmpLabel(a, loopLabel)
+	rtgAsmMarkLabel(a, doneLabel)
+	rtgAsmPopPrimary(a)
+	rtgAsmRet(a)
+	rtgAsmMarkLabel(a, afterLabel)
+	return g.arenaClearLabel
+}
+
 func rtgMakeStaticRingSlotCount(backingSize int) int {
 	if backingSize <= 4096 {
 		return 3
@@ -9754,8 +9930,29 @@ func rtgEmitRuntimeArenaReset(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rtgEmitRuntimeArenaResetMadvise(g)
 		return true
 	}
+	markOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	oldOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	rtgAsmStorePrimaryStack(a, markOff)
+	rtgAsmLoadPrimaryBss(a, g.stringHeapOff)
+	rtgAsmStorePrimaryStack(a, oldOff)
+	rtgEmitArenaClearRange(g, markOff, oldOff)
+	rtgAsmLoadPrimaryStack(a, markOff)
 	rtgAsmStorePrimaryBss(a, g.stringHeapOff)
 	return true
+}
+
+func rtgEmitArenaClearRange(g *rtgLinearGen, startOff int, endOff int) {
+	a := &g.asm
+	doneLabel := rtgAsmNewLabel(a)
+	rtgAsmJgeStackStack(a, startOff, endOff, doneLabel)
+	rtgAsmLoadPrimaryStack(a, endOff)
+	rtgAsmLoadTertiaryStack(a, startOff)
+	rtgAsmSubPrimaryTertiary(a)
+	rtgAsmPushPrimary(a)
+	rtgAsmLoadPrimaryStack(a, startOff)
+	rtgAsmPopTertiary(a)
+	rtgAsmCallLabel(a, rtgEnsureArenaClearHelper(g))
+	rtgAsmMarkLabel(a, doneLabel)
 }
 
 func rtgEmitRuntimeArenaResetMadvise(g *rtgLinearGen) {
@@ -9769,6 +9966,7 @@ func rtgEmitRuntimeArenaResetMadvise(g *rtgLinearGen) {
 	rtgAsmLoadPrimaryBss(a, g.stringHeapOff)
 	rtgAsmStorePrimaryStack(a, oldOff)
 	rtgEmitRuntimeArenaClampOldToPersistent(g, oldOff)
+	rtgEmitArenaClearRange(g, markOff, oldOff)
 	rtgAsmLoadPrimaryStack(a, markOff)
 	rtgAsmStorePrimaryBss(a, g.stringHeapOff)
 	rtgAsmLoadPrimaryStack(a, markOff)
@@ -9832,6 +10030,13 @@ func rtgEmitRuntimeArenaPersistReset(g *rtgLinearGen, ep *rtgExprParse, idx int)
 		rtgEmitRuntimeArenaPersistResetMadvise(g)
 		return true
 	}
+	markOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	oldOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	rtgAsmStorePrimaryStack(a, markOff)
+	rtgAsmLoadPrimaryBss(a, g.stringHeapEndOff)
+	rtgAsmStorePrimaryStack(a, oldOff)
+	rtgEmitArenaClearRange(g, oldOff, markOff)
+	rtgAsmLoadPrimaryStack(a, markOff)
 	rtgAsmStorePrimaryBss(a, g.stringHeapEndOff)
 	return true
 }
@@ -9846,6 +10051,7 @@ func rtgEmitRuntimeArenaPersistResetMadvise(g *rtgLinearGen) {
 	rtgAsmStorePrimaryStack(a, markOff)
 	rtgAsmLoadPrimaryBss(a, g.stringHeapEndOff)
 	rtgAsmStorePrimaryStack(a, oldOff)
+	rtgEmitArenaClearRange(g, oldOff, markOff)
 	rtgAsmLoadPrimaryStack(a, markOff)
 	rtgAsmStorePrimaryBss(a, g.stringHeapEndOff)
 	rtgAsmLoadPrimaryStack(a, oldOff)
@@ -9887,38 +10093,15 @@ func rtgEmitRuntimeArenaPersistString(g *rtgLinearGen, ep *rtgExprParse, idx int
 	if !rtgEmitStringValueRegs(g, ep, ep.args[e.firstArg]) {
 		return false
 	}
-	if rtgTargetArch != rtgArchAmd64 {
-		return true
-	}
 	a := &g.asm
 	srcOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	lenOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	destOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	rtgAsmStorePrimaryStack(a, srcOff)
 	rtgAsmStoreSecondaryStack(a, lenOff)
-	rtgStringHeapOffsets(g)
-	readyLabel := rtgAsmNewLabel(a)
-	rtgAsmLoadPrimaryBss(a, g.stringHeapEndOff)
-	rtgAsmCmpPrimaryImm8(a, 0)
-	rtgAsmJnzLabel(a, readyLabel)
-	rtgAsmPrimaryBssAddr(a, g.stringHeapDataOff)
-	rtgAsmPushImm(a, rtgStringArenaSize())
-	rtgAsmPopTertiary(a)
-	rtgAsmAddPrimaryTertiary(a)
-	rtgAsmStorePrimaryBss(a, g.stringHeapEndOff)
-	rtgAsmPrimaryBssAddr(a, g.stringHeapDataOff)
-	rtgAsmStorePrimaryBss(a, g.stringHeapOff)
-	rtgAsmMarkLabel(a, readyLabel)
-	rtgAsmLoadPrimaryBss(a, g.stringHeapEndOff)
-	rtgAsmLoadTertiaryStack(a, lenOff)
-	rtgAsmSubPrimaryTertiary(a)
-	rtgAsmStorePrimaryBss(a, g.stringHeapEndOff)
+	rtgEmitPersistentAllocToPrimary(g, lenOff)
 	rtgAsmStorePrimaryStack(a, destOff)
-	rtgAsmCopyPrimaryToCallWord0(a)
-	rtgAsmLoadPrimaryStack(a, srcOff)
-	rtgAsmCopyPrimaryToCallWord1(a)
-	rtgAsmLoadTertiaryStack(a, lenOff)
-	rtgAsmEmit16(a, 0xa4f3)
+	rtgEmitCopyBytesToPersistent(g, srcOff, lenOff, destOff)
 	rtgAsmLoadPrimaryStack(a, destOff)
 	rtgAsmLoadSecondaryStack(a, lenOff)
 	return true
@@ -9932,9 +10115,6 @@ func rtgEmitRuntimeArenaPersistBytes(g *rtgLinearGen, ep *rtgExprParse, idx int)
 	if !rtgEmitSliceValueRegs(g, ep, ep.args[e.firstArg]) {
 		return false
 	}
-	if rtgTargetArch != rtgArchAmd64 {
-		return true
-	}
 	a := &g.asm
 	srcOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	lenOff := rtgAddUnnamedLocal(g, rtgTypeInt)
@@ -9943,15 +10123,41 @@ func rtgEmitRuntimeArenaPersistBytes(g *rtgLinearGen, ep *rtgExprParse, idx int)
 	rtgAsmStoreSecondaryStack(a, lenOff)
 	rtgEmitPersistentAllocToPrimary(g, lenOff)
 	rtgAsmStorePrimaryStack(a, destOff)
-	rtgAsmCopyPrimaryToCallWord0(a)
-	rtgAsmLoadPrimaryStack(a, srcOff)
-	rtgAsmCopyPrimaryToCallWord1(a)
-	rtgAsmLoadTertiaryStack(a, lenOff)
-	rtgAsmEmit16(a, 0xa4f3)
+	rtgEmitCopyBytesToPersistent(g, srcOff, lenOff, destOff)
 	rtgAsmLoadPrimaryStack(a, destOff)
 	rtgAsmLoadSecondaryStack(a, lenOff)
 	rtgAsmLoadTertiaryStack(a, lenOff)
 	return true
+}
+
+func rtgEmitCopyBytesToPersistent(g *rtgLinearGen, srcOff int, lenOff int, destOff int) {
+	a := &g.asm
+	if rtgTargetArch == rtgArchAmd64 {
+		rtgAsmLoadPrimaryStack(a, destOff)
+		rtgAsmCopyPrimaryToCallWord0(a)
+		rtgAsmLoadPrimaryStack(a, srcOff)
+		rtgAsmCopyPrimaryToCallWord1(a)
+		rtgAsmLoadTertiaryStack(a, lenOff)
+		rtgAsmEmit16(a, 0xa4f3)
+		return
+	}
+	indexOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	loopLabel := rtgAsmNewLabel(a)
+	doneLabel := rtgAsmNewLabel(a)
+	rtgAsmStoreStackImm(a, indexOff, 0)
+	rtgAsmMarkLabel(a, loopLabel)
+	rtgAsmJgeStackStack(a, indexOff, lenOff, doneLabel)
+	rtgAsmLoadPrimaryStack(a, srcOff)
+	rtgAsmLoadTertiaryStack(a, indexOff)
+	rtgAsmLoadPrimaryIndexTertiarySize(a, 1)
+	rtgAsmPushPrimary(a)
+	rtgAsmLoadSecondaryStack(a, destOff)
+	rtgAsmLoadTertiaryStack(a, indexOff)
+	rtgAsmPopPrimary(a)
+	rtgAsmStorePrimaryMemSecondaryTertiarySize(a, 1)
+	rtgAsmIncStack(a, indexOff)
+	rtgAsmJmpLabel(a, loopLabel)
+	rtgAsmMarkLabel(a, doneLabel)
 }
 
 func rtgEmitPersistentAllocToPrimary(g *rtgLinearGen, sizeOff int) {
@@ -10410,6 +10616,17 @@ func rtgEmitCallArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 	a := &g.asm
 	typ := rtgInferParsedExprType(g, ep, idx)
 	if rtgTypeIsSlice(g.meta, typ) {
+		e := &ep.exprs[idx]
+		if e.kind == rtgExprIdent {
+			localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
+			if localIndex >= 0 {
+				offset := g.locals[localIndex].offset
+				rtgAsmPushStackWord(a, offset-16)
+				rtgAsmPushStackWord(a, offset-8)
+				rtgAsmPushStackWord(a, offset)
+				return 3
+			}
+		}
 		if !rtgEmitSliceValueRegs(g, ep, idx) {
 			return -1
 		}
@@ -10417,6 +10634,16 @@ func rtgEmitCallArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 		return 3
 	}
 	if rtgTypeIsString(g.meta, typ) {
+		e := &ep.exprs[idx]
+		if e.kind == rtgExprIdent {
+			localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
+			if localIndex >= 0 {
+				offset := g.locals[localIndex].offset
+				rtgAsmPushStackWord(a, offset-8)
+				rtgAsmPushStackWord(a, offset)
+				return 2
+			}
+		}
 		if !rtgEmitStringValueRegs(g, ep, idx) {
 			return -1
 		}
@@ -10452,12 +10679,50 @@ func rtgEmitCallArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 			rtgAsmPushImm(a, constResult.value)
 			return 1
 		}
+		localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
+		if localIndex >= 0 {
+			rtgAsmPushStackWord(a, g.locals[localIndex].offset)
+			return 1
+		}
+	}
+	if e.kind == rtgExprSelector {
+		if offset, ok := rtgLocalStructSelectorOffset(g, ep, idx); ok {
+			rtgAsmPushStackWord(a, offset)
+			return 1
+		}
 	}
 	if !rtgEmitIntExpr(g, ep, idx) {
 		return -1
 	}
 	rtgAsmPushPrimary(a)
 	return 1
+}
+
+func rtgLocalStructSelectorOffset(g *rtgLinearGen, ep *rtgExprParse, idx int) (int, bool) {
+	if rtgTargetArch != rtgArchAmd64 {
+		return 0, false
+	}
+	e := &ep.exprs[idx]
+	if e.kind != rtgExprSelector {
+		return 0, false
+	}
+	base := &ep.exprs[e.left]
+	if base.kind != rtgExprIdent {
+		return 0, false
+	}
+	localIndex := rtgFindLocalIndex(g, base.nameStart, base.nameEnd)
+	if localIndex < 0 {
+		return 0, false
+	}
+	baseType := rtgResolveType(g.meta, g.locals[localIndex].typ)
+	if baseType.kind != rtgTypeStruct {
+		return 0, false
+	}
+	fieldOffset := rtgStructFieldOffset(g, g.locals[localIndex].typ, e.nameStart, e.nameEnd)
+	if fieldOffset < 0 {
+		return 0, false
+	}
+	return g.locals[localIndex].offset - fieldOffset, true
 }
 
 func rtgEmitTupleArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, typ int) int {

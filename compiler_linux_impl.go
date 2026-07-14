@@ -1,8 +1,19 @@
 package main
 
 func rtgReadAll(fd int, out []byte) []byte {
-	buf := make([]byte, 1024)
+	buf := make([]byte, 0, 1024)
+	buf = buf[:cap(buf)]
 	for {
+		base := len(out)
+		if base < cap(out) {
+			expanded := out[:cap(out)]
+			n := read(fd, expanded[base:], -1)
+			if n <= 0 {
+				return out
+			}
+			out = expanded[:base+n]
+			continue
+		}
 		n := read(fd, buf, -1)
 		if n <= 0 {
 			return out
