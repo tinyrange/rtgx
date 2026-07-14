@@ -52,8 +52,11 @@ func TestWindowsTargetsEndToEnd(t *testing.T) {
 		target := target
 		t.Run(target.name, func(t *testing.T) {
 			targetDir := t.TempDir()
-			t.Run("stage0_smoke", func(t *testing.T) {
+			t.Run("stage0_print_smoke", func(t *testing.T) {
 				compileAndRunWindowsInput(t, target.name, stage0, []string{"tests/print_pass_smoke.go"})
+			})
+			t.Run("stage0_open_smoke", func(t *testing.T) {
+				compileAndRunWindowsInput(t, target.name, stage0, []string{"tests/windows_open_create_close_smoke.go"})
 			})
 			stage1 := buildWindowsStage1(t, stage0, target.name, files, targetDir)
 			stage2 := filepath.Join(targetDir, "rtg-stage2.exe")
@@ -164,6 +167,14 @@ func runWindowsCommand(t *testing.T, dir string, path string, args ...string) (c
 	gdbArgs := []string{
 		"--batch",
 		"-ex=run",
+	}
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-t" && args[i+1] == "windows/386" {
+			gdbArgs = append(gdbArgs, "-ex=continue")
+			break
+		}
+	}
+	gdbArgs = append(gdbArgs,
 		"-ex=p/x$rax",
 		"-ex=p/x$rsp",
 		"-ex=p/x$rcx",
@@ -181,7 +192,7 @@ func runWindowsCommand(t *testing.T, dir string, path string, args ...string) (c
 		"-ex=bt",
 		"-ex=x/16i$pc-32",
 		"--args", path,
-	}
+	)
 	gdbArgs = append(gdbArgs, args...)
 	diagnostic, diagnosticErr := runCommandInDir(t, dir, "gdb", gdbArgs...)
 	t.Logf("native Windows crash diagnostics: err=%v exit=%d\nstdout:\n%s\nstderr:\n%s", diagnosticErr, diagnostic.exitCode, diagnostic.stdout, diagnostic.stderr)
