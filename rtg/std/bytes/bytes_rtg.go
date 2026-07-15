@@ -2,6 +2,16 @@
 
 package bytes
 
+type eofError struct {
+	marker int
+}
+
+func (value *eofError) Error() string {
+	return "EOF"
+}
+
+var errEOFValue = eofError{marker: 1}
+
 func Equal(a []byte, b []byte) bool {
 	if len(a) != len(b) {
 		return false
@@ -126,6 +136,49 @@ func Repeat(b []byte, count int) []byte {
 		out = append(out, b...)
 	}
 	return out
+}
+
+type Buffer struct {
+	buf []byte
+	off int
+}
+
+func (b *Buffer) Write(p []byte) (int, error) {
+	b.buf = append(b.buf, p...)
+	return len(p), nil
+}
+
+func (b *Buffer) WriteString(s string) (int, error) {
+	for i := 0; i < len(s); i++ {
+		b.buf = append(b.buf, s[i])
+	}
+	return len(s), nil
+}
+
+func (b *Buffer) Read(p []byte) (int, error) {
+	if b.off >= len(b.buf) {
+		return 0, &errEOFValue
+	}
+	n := copy(p, b.buf[b.off:])
+	b.off += n
+	return n, nil
+}
+
+func (b *Buffer) Bytes() []byte {
+	return b.buf[b.off:]
+}
+
+func (b *Buffer) String() string {
+	return string(b.Bytes())
+}
+
+func (b *Buffer) Len() int {
+	return len(b.buf) - b.off
+}
+
+func (b *Buffer) Reset() {
+	b.buf = nil
+	b.off = 0
 }
 
 func isSpace(c byte) bool {
