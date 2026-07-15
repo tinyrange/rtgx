@@ -88,6 +88,14 @@ func TestC89ProfileValidation(t *testing.T) {
 	if _, err := profile.RenderC89Preamble(); err == nil || !strings.Contains(err.Error(), "runtime operation") {
 		t.Fatalf("invalid operation error = %v", err)
 	}
+	profile = C89ExplicitProfile("non-ASCII-\u2603", false, 32, 32, CEndianLittle, "abi")
+	if _, err := profile.RenderC89Preamble(); err == nil || !strings.Contains(err.Error(), "printable ASCII") {
+		t.Fatalf("non-ASCII profile error = %v", err)
+	}
+	profile = C89ExplicitProfile("valid", false, 32, 32, CEndianLittle, "line\nbreak")
+	if _, err := profile.RenderC89Preamble(); err == nil || !strings.Contains(err.Error(), "printable ASCII") {
+		t.Fatalf("non-printable ABI error = %v", err)
+	}
 }
 
 func compileC89(t *testing.T, preamble []byte, wantSuccess bool) string {
