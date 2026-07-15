@@ -9,6 +9,7 @@ import (
 	"os/exec"
 
 	"j5.nz/rtg/omnibus/resultabi"
+	"j5.nz/rtg/target"
 )
 
 // Command is one argv-preserving host tool invocation. Commands are never
@@ -72,6 +73,8 @@ type PipelinePlan struct {
 	Candidate PipelineArtifact
 
 	ObjectContract    ELFContract
+	Board             target.Board
+	BoardELF          target.ELFArtifactOptions
 	ResultSymbol      string
 	ExpectedProfile   uint32
 	ExpectedSignature uint64
@@ -132,6 +135,9 @@ func (p PipelinePlan) Validate() error {
 	}
 	if p.ExpectedProfile == 0 {
 		return fmt.Errorf("expected result profile is required")
+	}
+	if p.Board.Name != "" && p.BoardELF.VectorSymbol == "" {
+		return fmt.Errorf("board image gate requires an ELF vector symbol")
 	}
 	return nil
 }
@@ -221,6 +227,25 @@ func RunPipeline(plan PipelinePlan, runner CommandRunner) (PipelineResult, error
 	}{
 		{side: "reference", name: "link", command: plan.ReferenceLink},
 		{side: "candidate", name: "link", command: plan.CandidateLink},
+	}
+	for _, step := range steps {
+		if err := runPipelineCommand(runner, step.side, step.name, step.command); err != nil {
+			return result, err
+		}
+	}
+	if plan.Board.Name != "" {
+		if err := validatePipelineImage("reference", plan.Reference.Image, plan.Board, plan.BoardELF); err != nil {
+			return result, err
+		}
+		if err := validatePipelineImage("candidate", plan.Candidate.Image, plan.Board, plan.BoardELF); err != nil {
+			return result, err
+		}
+	}
+	steps = []struct {
+		side    string
+		name    string
+		command Command
+	}{
 		{side: "reference", name: "run", command: plan.ReferenceRun},
 		{side: "candidate", name: "run", command: plan.CandidateRun},
 	}
@@ -253,6 +278,18 @@ func RunPipeline(plan PipelinePlan, runner CommandRunner) (PipelineResult, error
 		return result, &PipelineError{Side: "candidate", Step: "compare-result", Err: fmt.Errorf("completed/signature = %d/%#x; reference is %d/%#x", candidate.CompletedProbes, candidate.Signature, reference.CompletedProbes, reference.Signature)}
 	}
 	return result, nil
+}
+
+func validatePipelineImage(side string, path string, board target.Board, options target.ELFArtifactOptions) error {
+	artifact, err := target.ArtifactFromELF(path, options)
+	if err != nil {
+		return &PipelineError{Side: side, Step: "validate-image", Err: err}
+	}
+	validation := target.Validate(board, artifact)
+	if validation.OK() {
+		return nil
+	}
+	return &PipelineError{Side: side, Step: "validate-image", Err: validation.Violations[0]}
 }
 
 func decodePipelineResult(artifact PipelineArtifact, symbol string) (resultabi.Snapshot, error) {

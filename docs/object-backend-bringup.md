@@ -27,6 +27,13 @@ and the first failed build, object, link, run, decode, validation, or comparison
 step. A standalone-image milestone may omit relocatable objects; earlier
 milestones must supply them.
 
+For freestanding targets, a plan can also carry a board descriptor and ELF
+vector options. After both links and before either runner starts, the pipeline
+derives section placement and imports from each final ELF and applies the same
+flash, RAM, stack, vector, entry, and forbidden-import gate used by `rtgboard`.
+An invalid reference or candidate image therefore cannot reach a simulator or
+physical flasher.
+
 The C and candidate emitters from #19 provide the concrete build commands and
 the target configuration supplies linker, runner/debug-reader, object, image,
 and memory-dump paths. This keeps orchestration independent of a particular

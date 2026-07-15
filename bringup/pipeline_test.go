@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"j5.nz/rtg/omnibus/resultabi"
+	"j5.nz/rtg/target"
 )
 
 func TestRunPipelineBuildsValidatesLinksAndComparesResults(t *testing.T) {
@@ -83,6 +84,45 @@ func TestPipelineRejectsDifferentOrChangedCanonicalUnits(t *testing.T) {
 	if _, err := RunPipeline(plan, ExecCommandRunner{}); err == nil || !strings.Contains(err.Error(), digest) {
 		t.Fatalf("changed canonical input error = %v", err)
 	}
+}
+
+func TestPipelineRejectsBoardImageBeforeRunningTarget(t *testing.T) {
+	compiler := cCompilerForPipelineTest(t)
+	dir := t.TempDir()
+	source := filepath.Join(dir, "omnibus.c")
+	writePipelineCSource(t, source, "rtg_stage0")
+	profile := uint32(0x10001)
+	signature := writePassingPipelineResult(t, filepath.Join(dir, "reference.bin"), profile)
+	writePassingPipelineResult(t, filepath.Join(dir, "candidate.bin"), profile)
+
+	plan := testPipelinePlan(compiler, dir, source, signature, profile)
+	plan.Board = target.CH32V003()
+	plan.BoardELF = target.ELFArtifactOptions{VectorSymbol: "main"}
+	plan.ReferenceRun = Command{Path: "reference-run-must-not-start"}
+	plan.CandidateRun = Command{Path: "candidate-run-must-not-start"}
+	runner := &recordingRunner{}
+	_, err := RunPipeline(plan, runner)
+	if err == nil {
+		t.Fatal("pipeline accepted a host image for the CH32V003 board")
+	}
+	var pipelineErr *PipelineError
+	if !errors.As(err, &pipelineErr) || pipelineErr.Side != "reference" || pipelineErr.Step != "validate-image" {
+		t.Fatalf("pipeline error = %#v", err)
+	}
+	for _, command := range runner.commands {
+		if strings.Contains(command.Path, "must-not-start") {
+			t.Fatalf("target run started before board validation: %#v", command)
+		}
+	}
+}
+
+type recordingRunner struct {
+	commands []Command
+}
+
+func (r *recordingRunner) Run(command Command) ([]byte, error) {
+	r.commands = append(r.commands, command)
+	return (ExecCommandRunner{}).Run(command)
 }
 
 func testPipelinePlan(compiler string, dir string, source string, signature uint64, profile uint32) PipelinePlan {
