@@ -60,6 +60,12 @@ func (p CMachineProfile) Validate() error {
 	if p.Name == "" || p.ABI == "" {
 		return fmt.Errorf("C machine profile name and ABI are required")
 	}
+	if !validCProfileText(p.Name) {
+		return fmt.Errorf("C machine profile name %q must contain printable ASCII only", p.Name)
+	}
+	if !validCProfileText(p.ABI) {
+		return fmt.Errorf("C machine profile %q: ABI %q must contain printable ASCII only", p.Name, p.ABI)
+	}
 	if p.CharBits != 8 {
 		return fmt.Errorf("C machine profile %q: only CHAR_BIT=8 is implemented", p.Name)
 	}
@@ -84,6 +90,18 @@ func (p CMachineProfile) Validate() error {
 		}
 	}
 	return nil
+}
+
+func validCProfileText(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] < 0x20 || value[i] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func supportedCWidth(bits int) bool {
