@@ -21,7 +21,7 @@ func TestFrontendCanonicalUnitCoreParity(t *testing.T) {
 	cases := []string{
 		"rtg_tests/quick/build_constraints/000_buildconstraints",
 		"rtg_tests/regressions/imported_alias_method",
-		"rtg_tests/regressions/std_bytes_split_api",
+		"rtg_tests/regressions/std_path_api",
 	}
 	for _, relative := range cases {
 		relative := relative
