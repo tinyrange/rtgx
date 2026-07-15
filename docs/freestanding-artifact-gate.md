@@ -1,0 +1,22 @@
+# Freestanding artifact gate
+
+`rtgboard` validates a linked ELF image against a board descriptor before the
+image is flashed. The gate reads allocated sections and unresolved symbols
+from the actual linker output, then applies the board's placement, entry,
+vector, import, flash, static RAM, heap, stack, and guard constraints.
+
+For the initial CH32V003 profile:
+
+```sh
+go run ./cmd/rtgboard -board ch32v003 -vector rtg_vectors \
+  -heap 128 -stack 512 firmware.elf
+```
+
+Successful and failed validations both print deterministic per-section and
+aggregate resource accounting. A failed validation also prints every
+localized violation and exits nonzero, so the command can be placed directly
+between linking and flashing in a board pipeline.
+
+The command consumes only a final linked artifact. Startup, vector generation,
+linker-script selection, and instruction emission remain separate from this
+host-side board gate.
