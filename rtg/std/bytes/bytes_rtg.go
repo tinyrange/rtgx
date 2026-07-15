@@ -2,12 +2,6 @@
 
 package bytes
 
-type SplitResult struct {
-	data   []byte
-	starts []int
-	ends   []int
-}
-
 func Equal(a []byte, b []byte) bool {
 	if len(a) != len(b) {
 		return false
@@ -81,37 +75,47 @@ func TrimSpace(s []byte) []byte {
 	return s[start:end]
 }
 
-func Split(s []byte, sep []byte) SplitResult {
-	var out SplitResult
-	out.data = s
+func Split(s []byte, sep []byte) [][]byte {
 	if len(sep) == 0 {
+		out := make([][]byte, len(s))
 		for i := 0; i < len(s); i++ {
-			out.starts = append(out.starts, i)
-			out.ends = append(out.ends, i+1)
+			out[i] = s[i : i+1]
 		}
 		return out
 	}
+	count := 1
+	remaining := s
+	for {
+		i := Index(remaining, sep)
+		if i < 0 {
+			break
+		}
+		count++
+		remaining = remaining[i+len(sep):]
+	}
+	out := make([][]byte, count)
 	start := 0
+	part := 0
 	for {
 		i := Index(s[start:], sep)
 		if i < 0 {
-			out.starts = append(out.starts, start)
-			out.ends = append(out.ends, len(s))
+			out[part] = s[start:]
 			return out
 		}
-		out.starts = append(out.starts, start)
-		out.ends = append(out.ends, start+i)
+		out[part] = s[start : start+i]
+		part++
 		start = start + i + len(sep)
 	}
 }
 
-func Join(items SplitResult, sep []byte) []byte {
+func Join(items [][]byte, sep []byte) []byte {
 	var out []byte
-	for i := 0; i < len(items.starts); i++ {
+	for i := 0; i < len(items); i++ {
 		if i > 0 {
 			out = append(out, sep...)
 		}
-		out = append(out, items.data[items.starts[i]:items.ends[i]]...)
+		item := items[i]
+		out = append(out, item...)
 	}
 	return out
 }
