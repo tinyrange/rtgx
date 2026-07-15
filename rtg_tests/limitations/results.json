@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "source_digest": "9d70dfdf1371fa0fab079602fc226e25a508df178b6e36c9af616e4de444dfad",
+  "source_digest": "ca0af999a251201bf0d0f795855957eccf0b30ef84d4652f3f62c8769869f80f",
   "runs": [
     {
       "stage": "host",
       "target": "linux/amd64",
-      "commit": "d116d49315fbc65061f69f6d57223a0dac48c5a6",
-      "captured_at": "2026-07-15T01:03:35Z",
+      "commit": "739668dd5fd7028d9b7e2c51e8e2e68fd5dec6af",
+      "captured_at": "2026-07-15T01:14:55Z",
       "observations": [
         {
           "id": 1,
@@ -583,8 +583,8 @@
     {
       "stage": "stage3",
       "target": "linux/amd64",
-      "commit": "d116d49315fbc65061f69f6d57223a0dac48c5a6",
-      "captured_at": "2026-07-15T01:03:35Z",
+      "commit": "739668dd5fd7028d9b7e2c51e8e2e68fd5dec6af",
+      "captured_at": "2026-07-15T01:14:55Z",
       "observations": [
         {
           "id": 1,
@@ -1004,17 +1004,17 @@
         {
           "id": 84,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/math: error RTG-LOAD-001 (loader): source collection failed"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 85,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/time: error RTG-LOAD-001 (loader): source collection failed"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 86,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/encoding/json: error RTG-LOAD-001 (loader): source collection failed"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 87,
@@ -1059,17 +1059,17 @@
         {
           "id": 95,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/regexp: error RTG-LOAD-001 (loader): source collection failed"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 96,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/reflect: error RTG-LOAD-001 (loader): source collection failed"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 97,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/net/http: error RTG-LOAD-001 (loader): source collection failed"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 98,
@@ -1079,12 +1079,12 @@
         {
           "id": 99,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/C: error RTG-LOAD-001 (loader): source collection failed"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 100,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/embed: error RTG-LOAD-001 (loader): source collection failed"
+          "message": "./cmd/app/main.go:3:11: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 101,
@@ -1104,17 +1104,17 @@
         {
           "id": 104,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/C: error RTG-LOAD-001 (loader): source collection failed"
+          "message": "./cmd/app/cgo_ignored.go:3:9: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 105,
           "status": "frontend-diagnostic",
-          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-008 (loader): unresolved import example.com/lib/pkg"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-014 (loader): dependency source is unavailable for example.com/lib@v0.0.0"
         },
         {
           "id": 106,
           "status": "frontend-diagnostic",
-          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-008 (loader): unresolved import example.com/lib/pkg"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-016 (loader): dependency has an invalid or missing go.mod: ./missing/go.mod"
         },
         {
           "id": 107,
