@@ -11,6 +11,7 @@ const rtgTargetWindowsAmd64 = 5
 const rtgTargetWindows386 = 6
 const rtgTargetWasiWasm32 = 7
 const rtgTargetDarwinArm64 = 8
+const rtgTargetWindowsArm64 = 9
 
 const rtgArchAmd64 = 1
 const rtgArch386 = 2
@@ -103,13 +104,13 @@ type rtgTargetProfile struct {
 // The target IDs are dense. Keep the core identity fields in compact tables so
 // profile construction and active compiler state consume the same source of
 // truth without pulling the full machine-profile builder into every compiler.
-const rtgTargetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03"
-const rtgTargetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03"
-const rtgTargetIntBitsTable = "\x00\x40\x20\x40\x20\x40\x20\x20\x40"
+const rtgTargetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x02"
+const rtgTargetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x03"
+const rtgTargetIntBitsTable = "\x00\x40\x20\x40\x20\x40\x20\x20\x40\x40"
 
 func rtgProfileForTarget(target int) (rtgTargetProfile, bool) {
 	var p rtgTargetProfile
-	if target < rtgTargetLinuxAmd64 || target > rtgTargetDarwinArm64 {
+	if target < rtgTargetLinuxAmd64 || target > rtgTargetWindowsArm64 {
 		return p, false
 	}
 	p.target = target
@@ -203,7 +204,7 @@ func rtgSetTarget(target int) {
 		target = rtgCompilerFixedTarget
 	}
 	rtgCurrentTarget = target
-	if target >= rtgTargetLinuxAmd64 && target <= rtgTargetDarwinArm64 {
+	if target >= rtgTargetLinuxAmd64 && target <= rtgTargetWindowsArm64 {
 		rtgTargetOS = int(rtgTargetOSTable[target])
 		rtgTargetArch = int(rtgTargetArchTable[target])
 		rtgNativeIntSize = int(rtgTargetIntBitsTable[target]) / 8
@@ -1211,10 +1212,22 @@ func rtgAsmPatchWindows(a *rtgAsm, layout rtgWinImportLayout, imageBase int, is6
 }
 
 func rtgAppendPEHeader64(out []byte, entryRVA int, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
+	return rtgAppendPEHeader64Machine(out, 0x8664, entryRVA, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, importRVA, importSize, iatRVA, iatSize)
+}
+
+func rtgAppendPEHeader64Machine(out []byte, machine int, entryRVA int, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
+	return rtgAppendPEHeader64MachineImageBase(out, machine, rtgWinImageBase, entryRVA, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, importRVA, importSize, iatRVA, iatSize)
+}
+
+func rtgAppendPEHeader64MachineImageBase(out []byte, machine int, imageBase int, entryRVA int, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
+	return rtgAppendPEHeader64MachineImageBaseStack(out, machine, imageBase, entryRVA, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, importRVA, importSize, iatRVA, iatSize, 0x100000, 0x100000)
+}
+
+func rtgAppendPEHeader64MachineImageBaseStack(out []byte, machine int, imageBase int, entryRVA int, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int, stackReserve int, stackCommit int) []byte {
 	sizeOfImage := rtgAlignValue(dataRVA+dataVirtualSize, rtgWinSectionAlign)
 	out = rtgAppendDOSStub(out)
 	out = rtgAppend32(out, 0x4550)
-	out = rtgAppend32(out, 0x00028664)
+	out = rtgAppend32(out, 0x00020000|machine)
 	out = rtgAppendUntil(out, len(out)+12)
 	out = rtgAppend32(out, 0x002200f0)
 	out = rtgAppend32(out, 0x0001020b)
@@ -1223,7 +1236,7 @@ func rtgAppendPEHeader64(out []byte, entryRVA int, textRawSize int, textVirtualS
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, entryRVA)
 	out = rtgAppend32(out, rtgWinSectionRVA)
-	out = rtgAppend64U32(out, rtgWinImageBase)
+	out = rtgAppend64(out, imageBase)
 	out = rtgAppend32(out, rtgWinSectionAlign)
 	out = rtgAppend32(out, rtgWinFileAlign)
 	out = rtgAppend64U32(out, 4)
@@ -1232,9 +1245,9 @@ func rtgAppendPEHeader64(out []byte, entryRVA int, textRawSize int, textVirtualS
 	out = rtgAppend32(out, rtgWinHeadersSize)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, rtgCompilerWindowsSubsystem)
-	for i := 0; i < 3; i++ {
-		out = rtgAppend64U32(out, 0x100000)
-	}
+	out = rtgAppend64U32(out, stackReserve)
+	out = rtgAppend64U32(out, stackCommit)
+	out = rtgAppend64U32(out, 0x100000)
 	out = rtgAppend64U32(out, 0x1000)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 16)
@@ -6393,7 +6406,7 @@ func rtgFixedTargetArch(target int) int {
 		if rtgCompilerFixedTarget == rtgTargetWindows386 || rtgCompilerFixedTarget == rtgTargetLinux386 {
 			return rtgArch386
 		}
-		if rtgCompilerFixedTarget == rtgTargetLinuxAarch64 || rtgCompilerFixedTarget == rtgTargetDarwinArm64 {
+		if rtgCompilerFixedTarget == rtgTargetLinuxAarch64 || rtgCompilerFixedTarget == rtgTargetDarwinArm64 || rtgCompilerFixedTarget == rtgTargetWindowsArm64 {
 			return rtgArchAarch64
 		}
 		if rtgCompilerFixedTarget == rtgTargetLinuxArm {
@@ -6407,7 +6420,7 @@ func rtgFixedTargetArch(target int) int {
 	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
 		return rtgArch386
 	}
-	if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 {
+	if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 || target == rtgTargetWindowsArm64 {
 		return rtgArchAarch64
 	}
 	if target == rtgTargetLinuxArm {
@@ -6423,7 +6436,7 @@ func rtgFixedTargetArch(target int) int {
 }
 func rtgFixedTargetOS(target int) int {
 	if rtgCompilerFixedTarget != 0 {
-		if rtgCompilerFixedTarget == rtgTargetWindowsAmd64 || rtgCompilerFixedTarget == rtgTargetWindows386 {
+		if rtgCompilerFixedTarget == rtgTargetWindowsAmd64 || rtgCompilerFixedTarget == rtgTargetWindows386 || rtgCompilerFixedTarget == rtgTargetWindowsArm64 {
 			return rtgOSWindows
 		}
 		if rtgCompilerFixedTarget == rtgTargetDarwinArm64 {
@@ -6434,7 +6447,7 @@ func rtgFixedTargetOS(target int) int {
 		}
 		return rtgOSLinux
 	}
-	if target == rtgTargetWindowsAmd64 || target == rtgTargetWindows386 {
+	if target == rtgTargetWindowsAmd64 || target == rtgTargetWindows386 || target == rtgTargetWindowsArm64 {
 		return rtgOSWindows
 	}
 	if target == rtgTargetDarwinArm64 {
@@ -10825,6 +10838,10 @@ func rtgEmitLinkStaticCall(g *rtgLinearGen, fn *rtgFuncInfo, wordCount int) bool
 	importID := rtgAsmAddWinStaticImport(&g.asm, fn.linkDLLStart, fn.linkDLLEnd, fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
 	if rtgTargetArch == rtgArch386 {
 		rtgWin386CallImport(&g.asm, importID)
+		return true
+	}
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgWinArm64CallStaticImport(&g.asm, importID, wordCount)
 		return true
 	}
 	if rtgTargetArch != rtgArchAmd64 {

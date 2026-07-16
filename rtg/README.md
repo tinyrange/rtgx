@@ -65,6 +65,7 @@ backend:
 | Linux ARM | `rtg-linux-arm` |
 | Windows amd64 | `rtg-windows-amd64.exe` |
 | Windows 386 | `rtg-windows-386.exe` |
+| Windows arm64 | `rtg-windows-arm64.exe` |
 | macOS arm64 | `rtg-darwin-arm64` |
 | WASI wasm32 | `rtg-wasi-wasm32.wasm` |
 

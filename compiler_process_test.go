@@ -19,6 +19,7 @@ func appMain() int {
 		"linux/arm",
 		"windows/amd64",
 		"windows/386",
+		"windows/arm64",
 		"wasi/wasm32",
 		"darwin/arm64",
 	} {

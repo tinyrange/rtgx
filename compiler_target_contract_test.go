@@ -21,6 +21,7 @@ var rtgAdvertisedTargetContracts = []rtgAdvertisedTargetContract{
 	{"linux/arm", rtgTargetLinuxArm, "\x7fELF"},
 	{"windows/amd64", rtgTargetWindowsAmd64, "MZ"},
 	{"windows/386", rtgTargetWindows386, "MZ"},
+	{"windows/arm64", rtgTargetWindowsArm64, "MZ"},
 	{"wasi/wasm32", rtgTargetWasiWasm32, "\x00asm"},
 	{"darwin/arm64", rtgTargetDarwinArm64, "\xcf\xfa\xed\xfe"},
 }

@@ -68,6 +68,9 @@ func rtgTryCompileScalarProgramAarch64(p *rtgProgram, meta *rtgMeta) rtgCompileR
 	a := &g.asm
 	rtgAsmInit(a)
 	a.codeOffset = rtgLinuxAarch64CodeOffset
+	if rtgTargetIsWindows() {
+		a.codeOffset = rtgWinSectionRVA
+	}
 	if rtgTargetIsDarwin() {
 		a.codeOffset = rtgDarwinArm64CodeOffset
 		g.darwinEntryOff = a.bssSize
@@ -91,7 +94,9 @@ func rtgTryCompileScalarProgramAarch64(p *rtgProgram, meta *rtgMeta) rtgCompileR
 		return result
 	}
 	entryOK := false
-	if rtgTargetIsDarwin() {
+	if rtgTargetIsWindows() {
+		entryOK = rtgEmitProgramEntryArgsWindowsArm64(&g, appIndex)
+	} else if rtgTargetIsDarwin() {
 		entryOK = rtgEmitProgramEntryArgsDarwinArm64(&g, appIndex)
 	} else {
 		entryOK = rtgEmitProgramEntryArgsAarch64(&g, appIndex)
@@ -101,7 +106,11 @@ func rtgTryCompileScalarProgramAarch64(p *rtgProgram, meta *rtgMeta) rtgCompileR
 		return result
 	}
 	rtgAsmCallLabel(a, g.funcLabels[appIndex])
-	if rtgTargetIsDarwin() {
+	if rtgTargetIsWindows() {
+		rtgAarch64AsmMovRegReg(a, 0, rtgAarch64RegRax)
+		rtgWinArm64CallImport(a, rtgWinImportExitProcess)
+		rtgAsmRet(a)
+	} else if rtgTargetIsDarwin() {
 		rtgAarch64AsmMovRegReg(a, 0, rtgAarch64RegRax)
 		rtgDarwinArm64CallImport(a, rtgDarwinImportExit)
 		rtgAsmRet(a)
@@ -123,7 +132,9 @@ func rtgTryCompileScalarProgramAarch64(p *rtgProgram, meta *rtgMeta) rtgCompileR
 		}
 	}
 	data := rtgAsmImageAarch64(a)
-	if rtgTargetIsDarwin() {
+	if rtgTargetIsWindows() {
+		data = rtgAsmImageWindowsArm64(a)
+	} else if rtgTargetIsDarwin() {
 		data = rtgAsmImageDarwinArm64(a)
 	}
 	var result rtgCompileResult

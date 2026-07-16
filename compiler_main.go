@@ -50,6 +50,9 @@ func rtgParseTargetArg(target string) int {
 	if len(target) == 11 && target[0] == 'w' && target[1] == 'i' && target[2] == 'n' && target[3] == 'd' && target[4] == 'o' && target[5] == 'w' && target[6] == 's' && target[7] == '/' && target[8] == '3' && target[9] == '8' && target[10] == '6' {
 		return rtgTargetWindows386
 	}
+	if len(target) == 13 && target[0] == 'w' && target[1] == 'i' && target[2] == 'n' && target[3] == 'd' && target[4] == 'o' && target[5] == 'w' && target[6] == 's' && target[7] == '/' && target[8] == 'a' && target[9] == 'r' && target[10] == 'm' && target[11] == '6' && target[12] == '4' {
+		return rtgTargetWindowsArm64
+	}
 	if len(target) == 11 && target[0] == 'w' && target[1] == 'a' && target[2] == 's' && target[3] == 'i' && target[4] == '/' && target[5] == 'w' && target[6] == 'a' && target[7] == 's' && target[8] == 'm' && target[9] == '3' && target[10] == '2' {
 		return rtgTargetWasiWasm32
 	}
@@ -83,7 +86,7 @@ func rtgPrintIntErr(v int) {
 }
 
 func rtgPrintUsage() {
-	rtgPrintErr("usage: rtg [-s] [-windows-gui] [-arena-size bytes] [-t linux/amd64|linux/386|linux/aarch64|linux/arm|windows/amd64|windows/386|wasi/wasm32|darwin/arm64] -o <output|-> <input.go|->...\n")
+	rtgPrintErr("usage: rtg [-s] [-windows-gui] [-arena-size bytes] [-t linux/amd64|linux/386|linux/aarch64|linux/arm|windows/amd64|windows/386|windows/arm64|wasi/wasm32|darwin/arm64] -o <output|-> <input.go|->...\n")
 }
 
 func rtgParsePositiveDecimal(value string) (int, bool) {
@@ -112,7 +115,7 @@ func rtgPrintUnsupportedTarget(target string) {
 	rtgPrintErr("rtg: unsupported target: ")
 	rtgPrintErr(target)
 	rtgPrintErr("\n")
-	rtgPrintErr("rtg: supported targets: linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, wasi/wasm32, darwin/arm64\n")
+	rtgPrintErr("rtg: supported targets: linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, windows/arm64, wasi/wasm32, darwin/arm64\n")
 }
 
 func rtgUnitRead32(src []byte, pos int) int {
@@ -443,7 +446,7 @@ func rtgCompileProgramToOutput(prog *rtgProgram, output int, target int) int {
 	var result rtgCompileResult
 	if rtgCompilerFixedTarget == rtgTargetLinux386 || rtgCompilerFixedTarget == rtgTargetWindows386 {
 		result = rtgTryCompileScalarProgram386(prog, &meta)
-	} else if rtgCompilerFixedTarget == rtgTargetLinuxAarch64 || rtgCompilerFixedTarget == rtgTargetDarwinArm64 {
+	} else if rtgCompilerFixedTarget == rtgTargetLinuxAarch64 || rtgCompilerFixedTarget == rtgTargetDarwinArm64 || rtgCompilerFixedTarget == rtgTargetWindowsArm64 {
 		result = rtgTryCompileScalarProgramAarch64(prog, &meta)
 	} else if rtgCompilerFixedTarget == rtgTargetLinuxArm {
 		result = rtgTryCompileScalarProgramArm(prog, &meta)
@@ -453,7 +456,7 @@ func rtgCompileProgramToOutput(prog *rtgProgram, output int, target int) int {
 		result = rtgTryCompileScalarProgramAmd64(prog, &meta)
 	} else if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
 		result = rtgTryCompileScalarProgram386(prog, &meta)
-	} else if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 {
+	} else if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 || target == rtgTargetWindowsArm64 {
 		result = rtgTryCompileScalarProgramAarch64(prog, &meta)
 	} else if target == rtgTargetLinuxArm {
 		result = rtgTryCompileScalarProgramArm(prog, &meta)
@@ -625,7 +628,7 @@ func appMain(args []string, env []string) int {
 		rtgPrintUsage()
 		return 1
 	}
-	if rtgCompilerWindowsSubsystem == 2 && target != rtgTargetWindowsAmd64 && target != rtgTargetWindows386 {
+	if rtgCompilerWindowsSubsystem == 2 && target != rtgTargetWindowsAmd64 && target != rtgTargetWindows386 && target != rtgTargetWindowsArm64 {
 		rtgPrintErr("rtg: -windows-gui requires a Windows target\n")
 		return 1
 	}

@@ -3,7 +3,7 @@ package main
 import "testing"
 
 func TestTargetCoreTablesCoverEveryTarget(t *testing.T) {
-	want := rtgTargetDarwinArm64 + 1
+	want := rtgTargetWindowsArm64 + 1
 	if len(rtgTargetOSTable) != want || len(rtgTargetArchTable) != want || len(rtgTargetIntBitsTable) != want {
 		t.Fatalf("core target table lengths = os:%d arch:%d int:%d, want %d", len(rtgTargetOSTable), len(rtgTargetArchTable), len(rtgTargetIntBitsTable), want)
 	}
@@ -30,6 +30,7 @@ func TestSetTargetDerivesStateFromTargetProfile(t *testing.T) {
 		rtgTargetLinuxArm,
 		rtgTargetWindowsAmd64,
 		rtgTargetWindows386,
+		rtgTargetWindowsArm64,
 		rtgTargetWasiWasm32,
 		rtgTargetDarwinArm64,
 	}
