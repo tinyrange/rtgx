@@ -76,7 +76,12 @@ func buildPrograms(graph load.Graph, transient bool) Result {
 		}
 		pkg := graph.Packages[i]
 		unitStart := arena.Mark()
-		emit := lower.EmitCheckedPackageFast(pkg, prog.Packages[i])
+		var emit lower.Result
+		if transient {
+			emit = lower.EmitCheckedPackageFastTransient(pkg, prog.Packages[i])
+		} else {
+			emit = lower.EmitCheckedPackageFast(pkg, prog.Packages[i])
+		}
 		unitEnd := arena.Mark()
 		if !emit.Ok {
 			result.ErrorDetail = emit.Error
@@ -96,7 +101,6 @@ func buildPrograms(graph load.Graph, transient bool) Result {
 			for j := 0; j < len(pkg.Files); j++ {
 				arena.Discard(pkg.Files[j].ArenaStart, pkg.Files[j].ArenaEnd)
 			}
-			arena.Discard(prog.Packages[i].CoreArenaStart, prog.Packages[i].CoreArenaEnd)
 			arena.Discard(pkg.CoreArenaStart, pkg.CoreArenaEnd)
 		}
 	}
