@@ -116,7 +116,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			out.File = fileIndex
 			out.Func = i
 			out.ErrorToken = fn.NameTok
-			refCount, selectorCount := countResolutionCandidatesCore(file, bodyStart, bodyEnd)
+			refCount, selectorCount := resolutionCapacitiesCore(bodyEnd - bodyStart)
 			out.CoreRefs = make([]CoreNameRef, 0, refCount)
 			out.CoreSelectors = make([]CoreSelectorRef, 0, selectorCount)
 			out.CoreRefs, out.CoreSelectors = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, file, fileIndex, info, checked, scope, bodyStart, bodyEnd)
@@ -182,7 +182,7 @@ func buildDeclInfoCore(file syntax.File, fileIndex int, info PackageInfo, checke
 	if valueStart >= 0 {
 		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, valueStart)
 		out.ValueStart, out.ValueEnd = trimDeclSpan(file, valueStart+1, decl.EndTok)
-		refCount, selectorCount := countResolutionCandidatesCore(file, out.ValueStart, out.ValueEnd)
+		refCount, selectorCount := resolutionCapacitiesCore(out.ValueEnd - out.ValueStart)
 		out.CoreRefs = make([]CoreNameRef, 0, refCount)
 		out.CoreSelectors = make([]CoreSelectorRef, 0, selectorCount)
 		out.CoreRefs, out.CoreSelectors = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, file, fileIndex, info, checked, CoreScope{}, out.ValueStart, out.ValueEnd)
@@ -201,19 +201,14 @@ type CoreScopeName struct {
 	Token int
 }
 
-func countResolutionCandidatesCore(file syntax.File, start int, end int) (int, int) {
-	refCount := 0
-	selectorCount := 0
-	for i := start; i < end && i < len(file.Tokens); i++ {
-		if file.Tokens[i].Kind == syntax.TokenIdent {
-			refCount++
-		}
-		if i > start && i+1 < end && i+1 < len(file.Tokens) && tokenTextIs(file, i, ".") &&
-			file.Tokens[i-1].Kind == syntax.TokenIdent && file.Tokens[i+1].Kind == syntax.TokenIdent {
-			selectorCount++
-		}
+func resolutionCapacitiesCore(tokens int) (int, int) {
+	if tokens < 0 {
+		tokens = 0
 	}
-	return refCount, selectorCount
+	// Package references and import selectors are a small subset of the token
+	// stream. These starting capacities avoid a second full resolution scan and
+	// still let append grow for unusually reference-dense source.
+	return tokens/8 + 4, tokens/64 + 2
 }
 
 func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int) ([]CoreNameRef, []CoreSelectorRef) {
