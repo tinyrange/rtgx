@@ -93,6 +93,9 @@ func buildPrograms(graph load.Graph, transient bool) Result {
 			ArenaEnd:   unitEnd,
 		})
 		if transient {
+			for j := 0; j < len(pkg.Files); j++ {
+				arena.Discard(pkg.Files[j].ArenaStart, pkg.Files[j].ArenaEnd)
+			}
 			arena.Discard(prog.Packages[i].CoreArenaStart, prog.Packages[i].CoreArenaEnd)
 			arena.Discard(pkg.CoreArenaStart, pkg.CoreArenaEnd)
 		}

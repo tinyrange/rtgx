@@ -69,7 +69,7 @@ func CheckGraphPackageCore(graph load.Graph, prog Program, pkgIndex int) Program
 func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, checked []PackageInfo) (PackageInfo, bool, int, int, int) {
 	pkg := graph.Packages[pkgIndex]
 	info.Decls = make([]DeclInfo, 0, countPackageDeclsCore(pkg))
-	info.Bodies = make([]FuncBody, 0, countPackageFuncsCore(pkg))
+	info.CoreBodies = make([]CoreFuncBody, 0, countPackageFuncsCore(pkg))
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Decls); i++ {
@@ -111,17 +111,18 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			}
 			bodyStart := fn.BodyStart + 1
 			bodyEnd := fn.BodyEnd - 1
-			var out FuncBody
+			var out CoreFuncBody
 			out.Kind = coreFuncKind(fn)
 			out.File = fileIndex
 			out.Func = i
+			out.ErrorToken = fn.NameTok
 			refCount, selectorCount := countResolutionRefsCore(file, fileIndex, info, checked, scope, bodyStart, bodyEnd)
 			out.CoreRefs = make([]CoreNameRef, 0, refCount)
 			out.CoreSelectors = make([]CoreSelectorRef, 0, selectorCount)
 			out.CoreRefs, out.CoreSelectors = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, file, fileIndex, info, checked, scope, bodyStart, bodyEnd)
 			locals := buildFuncLocalTypeSpansCore(file, fn)
 			out.CoreTypeRefs = buildFuncTypeRefsCore(file, fileIndex, info, checked, signature, locals, scope)
-			info.Bodies = append(info.Bodies, out)
+			info.CoreBodies = append(info.CoreBodies, out)
 		}
 	}
 	return info, true, CheckOK, -1, -1
@@ -214,7 +215,7 @@ func countResolutionRefsCore(file syntax.File, fileIndex int, info PackageInfo, 
 			file.Tokens[i-1].Kind == syntax.TokenIdent && file.Tokens[i+1].Kind == syntax.TokenIdent &&
 			!tokenTextIs(file, i-1, "_") && !tokenTextIs(file, i+1, "_") {
 			selector := resolveImportSelectorCore(fileIndex, info, checked, scope, file, i-1, i, i+1)
-			if selector.Kind == SelectorImport {
+			if selector.Symbol >= 0 {
 				selectorCount++
 			}
 		}
@@ -229,14 +230,14 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 			lookupImportTokenNameCore(info, fileIndex, file, i) < 0 {
 			symbolIndex := lookupPackageSymbolTokenCore(info, file, fileIndex, i)
 			if symbolIndex >= 0 {
-				refs = append(refs, CoreNameRef{Kind: RefPackage, Token: i, Index: symbolIndex, Package: info.Symbols[symbolIndex].Package})
+				refs = append(refs, CoreNameRef{Token: i, Index: symbolIndex, Package: info.Symbols[symbolIndex].Package})
 			}
 		}
 		if i > start && i+1 < end && i+1 < len(file.Tokens) && tokenTextIs(file, i, ".") &&
 			file.Tokens[i-1].Kind == syntax.TokenIdent && file.Tokens[i+1].Kind == syntax.TokenIdent &&
 			!tokenTextIs(file, i-1, "_") && !tokenTextIs(file, i+1, "_") {
 			selector := resolveImportSelectorCore(fileIndex, info, checked, scope, file, i-1, i, i+1)
-			if selector.Kind == SelectorImport {
+			if selector.Symbol >= 0 {
 				selectors = append(selectors, selector)
 			}
 		}
@@ -365,18 +366,14 @@ func appendTypeSpanRefsCore(refs []CoreTypeRef, file syntax.File, fileIndex int,
 
 func resolveImportSelectorCore(fileIndex int, info PackageInfo, checked []PackageInfo, scope CoreScope, file syntax.File, baseTok int, dotTok int, nameTok int) CoreSelectorRef {
 	selector := CoreSelectorRef{
-		Kind:      SelectorUnknown,
 		BaseTok:   baseTok,
 		DotTok:    dotTok,
 		NameTok:   nameTok,
-		BaseKind:  RefUnknown,
 		BaseIndex: -1,
-		Package:   -1,
 		Symbol:    -1,
 	}
 	scopeIndex := lookupScopeTokenNameCore(scope, file, baseTok)
 	if scopeIndex >= 0 && scope.Names[scopeIndex].Kind != NameLabel {
-		selector.BaseKind = RefScope
 		selector.BaseIndex = scopeIndex
 		return selector
 	}
@@ -384,7 +381,6 @@ func resolveImportSelectorCore(fileIndex int, info PackageInfo, checked []Packag
 	if importIndex < 0 || info.Imports[importIndex].Blank || info.Imports[importIndex].Dot {
 		return selector
 	}
-	selector.BaseKind = RefImport
 	selector.BaseIndex = importIndex
 	selector.BasePackage = info.Imports[importIndex].Package
 	if selector.BasePackage < 0 || selector.BasePackage >= len(checked) {
@@ -394,8 +390,6 @@ func resolveImportSelectorCore(fileIndex int, info PackageInfo, checked []Packag
 	if symbol < 0 {
 		return selector
 	}
-	selector.Kind = SelectorImport
-	selector.Package = selector.BasePackage
 	selector.Symbol = symbol
 	return selector
 }
