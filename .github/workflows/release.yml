@@ -55,6 +55,7 @@ jobs:
           ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t linux/arm -s -o dist/rtg-linux-arm ./rtg/cmd/rtg
           ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t windows/amd64 -s -o dist/rtg-windows-amd64.exe ./rtg/cmd/rtg
           ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t windows/386 -s -o dist/rtg-windows-386.exe ./rtg/cmd/rtg
+          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t windows/arm64 -s -o dist/rtg-windows-arm64.exe ./rtg/cmd/rtg
           ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t darwin/arm64 -s -o dist/rtg-darwin-arm64 ./rtg/cmd/rtg
           ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t wasi/wasm32 -s -o dist/rtg-wasi-wasm32.wasm ./rtg/cmd/rtg
           chmod +x \
@@ -70,6 +71,7 @@ jobs:
           ./dist/rtg-linux-amd64 > dist/rtg-help.txt
           grep -F "Usage: rtg" dist/rtg-help.txt
           grep -F "windows/amd64" dist/rtg-help.txt
+          grep -F "windows/arm64" dist/rtg-help.txt
           grep -F "darwin/arm64" dist/rtg-help.txt
           grep -F "wasi/wasm32" dist/rtg-help.txt
 
@@ -112,6 +114,12 @@ jobs:
           zip -qr ../dist/rtg-windows-386.zip rtg-windows-386
           cd ..
 
+          mkdir -p package/rtg-windows-arm64/bin
+          cp dist/rtg-windows-arm64.exe package/rtg-windows-arm64/bin/rtg.exe
+          cd package
+          zip -qr ../dist/rtg-windows-arm64.zip rtg-windows-arm64
+          cd ..
+
       - name: Package backend releases
         run: |
           set -eux
@@ -136,6 +144,7 @@ jobs:
             dist/rtg-linux-arm
             dist/rtg-windows-amd64.exe
             dist/rtg-windows-386.exe
+            dist/rtg-windows-arm64.exe
             dist/rtg-darwin-arm64
             dist/rtg-wasi-wasm32.wasm
             dist/rtg-linux-amd64.tar.gz
@@ -144,6 +153,7 @@ jobs:
             dist/rtg-linux-arm.tar.gz
             dist/rtg-windows-amd64.zip
             dist/rtg-windows-386.zip
+            dist/rtg-windows-arm64.zip
             dist/rtg-darwin-arm64.tar.gz
             dist/rtg-wasi-wasm32.tar.gz
             dist/rtgx-linux-amd64.tar.gz
@@ -164,6 +174,7 @@ jobs:
             dist/rtg-linux-arm \
             dist/rtg-windows-amd64.exe \
             dist/rtg-windows-386.exe \
+            dist/rtg-windows-arm64.exe \
             dist/rtg-darwin-arm64 \
             dist/rtg-wasi-wasm32.wasm \
             dist/rtg-linux-amd64.tar.gz \
@@ -172,6 +183,7 @@ jobs:
             dist/rtg-linux-arm.tar.gz \
             dist/rtg-windows-amd64.zip \
             dist/rtg-windows-386.zip \
+            dist/rtg-windows-arm64.zip \
             dist/rtg-darwin-arm64.tar.gz \
             dist/rtg-wasi-wasm32.tar.gz \
             dist/rtgx-linux-amd64.tar.gz \

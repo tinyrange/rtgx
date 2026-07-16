@@ -26,6 +26,7 @@ func TestTargetProfilesSeparateMachineWidthsFromBackendSlots(t *testing.T) {
 		{rtgTargetLinuxArm, rtgArchArm, rtgOSLinux, 32, 32},
 		{rtgTargetWindowsAmd64, rtgArchAmd64, rtgOSWindows, 64, 64},
 		{rtgTargetWindows386, rtgArch386, rtgOSWindows, 32, 32},
+		{rtgTargetWindowsArm64, rtgArchAarch64, rtgOSWindows, 64, 64},
 		{rtgTargetWasiWasm32, rtgArchWasm32, rtgOSWasi, 32, 32},
 		{rtgTargetDarwinArm64, rtgArchAarch64, rtgOSDarwin, 64, 64},
 	}
@@ -272,6 +273,7 @@ func TestStructLayoutHonorsTargetMaximumAlignment(t *testing.T) {
 	}{
 		{name: "windows-amd64", target: rtgTargetWindowsAmd64, offsets: []int{0, 8, 16}, size: 24, pointerOffsets: []int{0, 8, 16}, pointerSize: 24},
 		{name: "windows-386", target: rtgTargetWindows386, offsets: []int{0, 4, 12}, size: 16, pointerOffsets: []int{0, 4, 8}, pointerSize: 12},
+		{name: "windows-arm64", target: rtgTargetWindowsArm64, offsets: []int{0, 8, 16}, size: 24, pointerOffsets: []int{0, 8, 16}, pointerSize: 24},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -594,7 +596,7 @@ func appMain(args []string, env []string) int {
 	return messageBeep(0)
 }
 `)
-	for _, target := range []string{"windows/amd64", "windows/386"} {
+	for _, target := range []string{"windows/amd64", "windows/386", "windows/arm64"} {
 		target := target
 		t.Run(target, func(t *testing.T) {
 			data, ok := RtgCompileSourceToBytes(src, target)
@@ -612,6 +614,7 @@ func appMain(args []string, env []string) int {
 }
 
 func TestWindowsAmd64LinkStaticCallReservesAlignedShadowSpace(t *testing.T) {
+	rtgSetTarget(rtgTargetWindowsAmd64)
 	var asm rtgAsm
 	rtgAsmInit(&asm)
 	rtgWinAmd64CallStaticImport(&asm, 0, 2)
@@ -627,6 +630,7 @@ func TestWindowsAmd64LinkStaticCallReservesAlignedShadowSpace(t *testing.T) {
 }
 
 func TestWindowsAmd64LinkStaticCallAlignsStackArguments(t *testing.T) {
+	rtgSetTarget(rtgTargetWindowsAmd64)
 	tests := []struct {
 		name      string
 		wordCount int
@@ -675,6 +679,7 @@ func TestWindowsAmd64LinkStaticCallAlignsStackArguments(t *testing.T) {
 }
 
 func TestWindowsAmd64LinkStaticCallAlignsTwelveWordImport(t *testing.T) {
+	rtgSetTarget(rtgTargetWindowsAmd64)
 	var asm rtgAsm
 	rtgAsmInit(&asm)
 	rtgWinAmd64CallStaticImport(&asm, 0, 12)

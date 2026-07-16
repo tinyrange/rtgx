@@ -17,6 +17,10 @@ func compileTarget(input []int, output int, target int) int {
 			rtgCompilerFixedTarget = rtgTargetWindows386
 			return compileWindows386(input, output)
 		}
+		if rtgCompilerFixedTarget == rtgTargetWindowsArm64 {
+			rtgCompilerFixedTarget = rtgTargetWindowsArm64
+			return compileWindowsArm64(input, output)
+		}
 		if rtgCompilerFixedTarget == rtgTargetWasiWasm32 {
 			rtgCompilerFixedTarget = rtgTargetWasiWasm32
 			return compileWasiWasm32(input, output)
@@ -46,6 +50,9 @@ func compileTarget(input []int, output int, target int) int {
 	}
 	if target == rtgTargetWindows386 {
 		return compileWindows386(input, output)
+	}
+	if target == rtgTargetWindowsArm64 {
+		return compileWindowsArm64(input, output)
 	}
 	if target == rtgTargetWasiWasm32 {
 		return compileWasiWasm32(input, output)
@@ -124,7 +131,7 @@ func RtgCompileUnitToOutputStrip(unit []byte, targetName string, outputPath stri
 
 func RtgCompileUnitToOutputStripWindowsGUI(unit []byte, targetName string, outputPath string, stripSymbols bool, windowsGUI bool) bool {
 	target := rtgParseTargetArg(targetName)
-	if target == 0 || windowsGUI && target != rtgTargetWindowsAmd64 && target != rtgTargetWindows386 {
+	if target == 0 || windowsGUI && target != rtgTargetWindowsAmd64 && target != rtgTargetWindows386 && target != rtgTargetWindowsArm64 {
 		return false
 	}
 	rtgSetStripSymbols(stripSymbols)
@@ -169,7 +176,7 @@ func rtgCompileParsedProgram(prog *rtgProgram, target int) rtgCompileResult {
 	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
 		return rtgTryCompileScalarProgram386(prog, &meta)
 	}
-	if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 {
+	if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 || target == rtgTargetWindowsArm64 {
 		return rtgTryCompileScalarProgramAarch64(prog, &meta)
 	}
 	if target == rtgTargetLinuxArm {

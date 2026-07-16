@@ -45,7 +45,14 @@ func rtgAarch64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	rtgAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 	rtgAarch64AsmEmit(a, 0xa9bf7bfd)
 	rtgAarch64AsmEmit(a, 0x910003fd)
-	rtgAarch64AsmEmit(a, 0xd14023ff)
+	if rtgTargetOS == rtgOSWindows {
+		for i := 0; i < 8; i++ {
+			rtgAarch64AsmEmit(a, 0xd14007ff) // sub sp, sp, #1, lsl #12
+			rtgAarch64AsmEmit(a, 0xf90003ff) // str xzr, [sp]
+		}
+	} else {
+		rtgAarch64AsmEmit(a, 0xd14023ff)
+	}
 	if rtgTypeUsesHiddenResult(g.meta, metaFn.resultType) {
 		g.returnStruct = rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 		rtgAarch64AsmStoreRegStack(a, rtgAarch64RegRdi, g.returnStruct)

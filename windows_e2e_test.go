@@ -17,6 +17,7 @@ var windowsE2ETargets = []struct {
 }{
 	{name: "windows/amd64", machine: pe.IMAGE_FILE_MACHINE_AMD64},
 	{name: "windows/386", machine: pe.IMAGE_FILE_MACHINE_I386},
+	{name: "windows/arm64", machine: pe.IMAGE_FILE_MACHINE_ARM64},
 }
 
 func TestWindowsPEImages(t *testing.T) {
@@ -55,6 +56,9 @@ func TestWindowsTargetsEndToEnd(t *testing.T) {
 	for _, target := range windowsE2ETargets {
 		target := target
 		t.Run(target.name, func(t *testing.T) {
+			if target.name == "windows/arm64" && runtime.GOARCH != "arm64" {
+				t.Skip("Windows ARM64 execution requires a native ARM64 host")
+			}
 			targetDir := t.TempDir()
 			targetTestSources := append([]string(nil), testSources...)
 			if target.name == "windows/amd64" {

@@ -47,7 +47,7 @@ func TestCommandHelpRequested(t *testing.T) {
 	if CommandHelpRequested([]string{"rtg", "-o", "app", "."}) {
 		t.Fatal("compile command requested help")
 	}
-	for _, want := range []string{"Usage: rtg", "-o <file>", "windows/amd64", "darwin/arm64", "wasi/wasm32"} {
+	for _, want := range []string{"Usage: rtg", "-o <file>", "windows/amd64", "windows/arm64", "darwin/arm64", "wasi/wasm32"} {
 		if !strings.Contains(HelpText, want) {
 			t.Fatalf("HelpText missing %q", want)
 		}
@@ -115,6 +115,7 @@ func TestIsSupportedTarget(t *testing.T) {
 		"windows/amd64",
 		"darwin/arm64",
 		"windows/386",
+		"windows/arm64",
 		"wasi/wasm32",
 	}
 	for i := 0; i < len(supported); i++ {

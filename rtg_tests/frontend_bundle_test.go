@@ -44,6 +44,7 @@ func TestBundledFrontendStandaloneAllTargets(t *testing.T) {
 		{name: "linux/arm", artifact: "rtg-linux-arm", prefix: []byte{0x7f, 'E', 'L', 'F'}},
 		{name: "windows/amd64", artifact: "rtg-windows-amd64.exe", prefix: []byte{'M', 'Z'}},
 		{name: "windows/386", artifact: "rtg-windows-386.exe", prefix: []byte{'M', 'Z'}},
+		{name: "windows/arm64", artifact: "rtg-windows-arm64.exe", prefix: []byte{'M', 'Z'}},
 		{name: "darwin/arm64", artifact: "rtg-darwin-arm64", prefix: []byte{0xcf, 0xfa, 0xed, 0xfe}},
 		{name: "wasi/wasm32", artifact: "rtg-wasi-wasm32.wasm", prefix: []byte{0, 'a', 's', 'm'}},
 	}
