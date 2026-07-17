@@ -364,7 +364,8 @@ func rtgAsmEmit8(a *rtgAsm, v int) {
 }
 
 func rtgAsmEmit2(a *rtgAsm, v0 int, v1 int) {
-	a.code = rtgAppend16(a.code, v0|(v1<<8))
+	rtgAsmEmit8(a, v0)
+	rtgAsmEmit8(a, v1)
 }
 
 func rtgAsmEmit3(a *rtgAsm, v0 int, v1 int, v2 int) {
@@ -372,7 +373,10 @@ func rtgAsmEmit3(a *rtgAsm, v0 int, v1 int, v2 int) {
 }
 
 func rtgAsmEmit4(a *rtgAsm, v0 int, v1 int, v2 int, v3 int) {
-	a.code = rtgAppend32(a.code, v0|(v1<<8)|(v2<<16)|(v3<<24))
+	rtgAsmEmit8(a, v0)
+	rtgAsmEmit8(a, v1)
+	rtgAsmEmit8(a, v2)
+	rtgAsmEmit8(a, v3)
 }
 
 func rtgAsmEmit5(a *rtgAsm, v0 int, v1 int, v2 int, v3 int, v4 int) {
@@ -405,7 +409,8 @@ func rtgAsmAddFuncSymbol(a *rtgAsm, src []byte, nameStart int, nameEnd int, labe
 }
 
 func rtgAsmEmit32(a *rtgAsm, v int) {
-	a.code = rtgAppend32(a.code, v)
+	rtgAsmEmit16(a, v)
+	rtgAsmEmit16(a, v>>16)
 }
 
 func rtgFixedByteScratch(capacity int) []byte {
@@ -441,17 +446,19 @@ func rtgFixedCompositeFieldScratch(capacity int) []rtgCompositeField {
 }
 
 func rtgAsmEmit64(a *rtgAsm, v int) {
-	a.code = rtgAppend64(a.code, v)
+	rtgAsmEmit32(a, v)
+	rtgAsmEmit32(a, v>>32)
 }
 
 func rtgAsmEmit16(a *rtgAsm, v int) {
-	a.code = rtgAppend16(a.code, v)
+	rtgAsmEmit8(a, v)
+	rtgAsmEmit8(a, v>>8)
 }
 
 func rtgAsmEmit24(a *rtgAsm, v int) {
-	a.code = append(a.code, byte(v))
-	a.code = append(a.code, byte(v>>8))
-	a.code = append(a.code, byte(v>>16))
+	rtgAsmEmit8(a, v)
+	rtgAsmEmit8(a, v>>8)
+	rtgAsmEmit8(a, v>>16)
 }
 
 func rtgAmd64RelaxBranches(a *rtgAsm) {
@@ -5659,8 +5666,7 @@ func rtgEmitClosureCaptureWriteback(g *rtgLinearGen) bool {
 		if localIndex < 0 {
 			return false
 		}
-		rtgAsmLoadPrimaryStack(&g.asm, g.locals[localIndex].offset)
-		rtgAsmLoadSecondaryStack(&g.asm, g.closureEnvOffset)
+		rtgAsmLoadPrimarySecondaryStack(&g.asm, g.locals[localIndex].offset, g.closureEnvOffset)
 		rtgAsmStorePrimaryMemSecondaryDisp(&g.asm, (i+1)*rtgBackendValueSlotSize)
 	}
 	return true
@@ -5893,15 +5899,13 @@ func rtgEmitFunctionControlEpilogue(g *rtgLinearGen) bool {
 	} else if rtgTypeUsesHiddenResult(g.meta, fn.resultType) {
 		rtgAsmPrimaryImm(a, 0)
 	} else if rtgTypeIsSlice(g.meta, fn.resultType) {
-		rtgAsmLoadPrimaryStack(a, g.deferResultOffset)
-		rtgAsmLoadSecondaryStack(a, g.deferResultOffset-rtgBackendValueSlotSize)
+		rtgAsmLoadPrimarySecondaryStack(a, g.deferResultOffset, g.deferResultOffset-rtgBackendValueSlotSize)
 		rtgAsmLoadTertiaryStack(a, g.deferResultOffset-2*rtgBackendValueSlotSize)
 		if !rtgEmitCopySliceRegsToArena(g, fn.resultType) {
 			return false
 		}
 	} else if rtgTypeIsString(g.meta, fn.resultType) {
-		rtgAsmLoadPrimaryStack(a, g.deferResultOffset)
-		rtgAsmLoadSecondaryStack(a, g.deferResultOffset-rtgBackendValueSlotSize)
+		rtgAsmLoadPrimarySecondaryStack(a, g.deferResultOffset, g.deferResultOffset-rtgBackendValueSlotSize)
 	} else {
 		rtgAsmLoadPrimaryStack(a, g.deferResultOffset)
 	}
@@ -5934,14 +5938,12 @@ func rtgEmitBareReturnValues(g *rtgLinearGen) bool {
 			return true
 		}
 		if resolved.kind == rtgTypeSlice {
-			rtgAsmLoadPrimaryStack(&g.asm, offset)
-			rtgAsmLoadSecondaryStack(&g.asm, offset-rtgBackendValueSlotSize)
+			rtgAsmLoadPrimarySecondaryStack(&g.asm, offset, offset-rtgBackendValueSlotSize)
 			rtgAsmLoadTertiaryStack(&g.asm, offset-2*rtgBackendValueSlotSize)
 			return rtgEmitCopySliceRegsToArena(g, result.typ)
 		}
 		if resolved.kind == rtgTypeString {
-			rtgAsmLoadPrimaryStack(&g.asm, offset)
-			rtgAsmLoadSecondaryStack(&g.asm, offset-rtgBackendValueSlotSize)
+			rtgAsmLoadPrimarySecondaryStack(&g.asm, offset, offset-rtgBackendValueSlotSize)
 			return true
 		}
 		rtgAsmLoadPrimaryStack(&g.asm, offset)
@@ -6236,6 +6238,10 @@ func rtgAsmStorePrimaryStackSize(a *rtgAsm, offset int, size int) {
 func rtgAsmStoreSecondaryStack(a *rtgAsm, offset int) {
 	rtgAsmStackMem(a, offset, 0x8948, 0x55, 0x95)
 }
+func rtgAsmStorePrimarySecondaryStack(a *rtgAsm, primaryOffset int, secondaryOffset int) {
+	rtgAsmStorePrimaryStack(a, primaryOffset)
+	rtgAsmStoreSecondaryStack(a, secondaryOffset)
+}
 func rtgAsmLoadPrimaryStack(a *rtgAsm, offset int) {
 	if rtgTargetArch == rtgArchAmd64 {
 		n := len(a.code)
@@ -6307,6 +6313,10 @@ func rtgAsmAddressCallWord1Stack(a *rtgAsm, offset int) {
 func rtgAsmLoadSecondaryStack(a *rtgAsm, offset int) {
 	rtgAsmStackMem(a, offset, 0x8b48, 0x55, 0x95)
 }
+func rtgAsmLoadPrimarySecondaryStack(a *rtgAsm, primaryOffset int, secondaryOffset int) {
+	rtgAsmLoadPrimaryStack(a, primaryOffset)
+	rtgAsmLoadSecondaryStack(a, secondaryOffset)
+}
 func rtgAsmSecondaryDisp(a *rtgAsm, disp int) {
 	if rtgTargetArch == rtgArchAarch64 || rtgTargetArch == rtgArchArm {
 		return
@@ -6325,6 +6335,14 @@ func rtgAsmSecondaryDisp(a *rtgAsm, disp int) {
 func rtgAsmLoadTertiaryStack(a *rtgAsm, offset int) {
 	rtgAsmStackMem(a, offset, 0x8b48, 0x4d, 0x8d)
 }
+func rtgAsmLoadPrimaryTertiaryStack(a *rtgAsm, primaryOffset int, tertiaryOffset int) {
+	rtgAsmLoadPrimaryStack(a, primaryOffset)
+	rtgAsmLoadTertiaryStack(a, tertiaryOffset)
+}
+func rtgAsmLoadSecondaryTertiaryStack(a *rtgAsm, secondaryOffset int, tertiaryOffset int) {
+	rtgAsmLoadSecondaryStack(a, secondaryOffset)
+	rtgAsmLoadTertiaryStack(a, tertiaryOffset)
+}
 func rtgAsmStoreSliceStack(a *rtgAsm, offset int) {
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmStoreSliceStack(a, offset)
@@ -6338,8 +6356,7 @@ func rtgAsmStoreSliceStack(a *rtgAsm, offset int) {
 		rtgArmAsmStoreSliceStack(a, offset)
 		return
 	}
-	rtgAsmStorePrimaryStack(a, offset)
-	rtgAsmStoreSecondaryStack(a, offset-8)
+	rtgAsmStorePrimarySecondaryStack(a, offset, offset-8)
 	rtgAsmStackMem(a, offset-16, 0x8948, 0x4d, 0x8d)
 }
 func rtgAsmStoreStringBss(a *rtgAsm, offset int) {
@@ -6968,14 +6985,12 @@ func rtgEmitDeferStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 	rtgAsmStoreStackImm(&g.asm, sizeOffset, 3*rtgBackendValueSlotSize)
 	rtgEmitPersistentAllocToPrimary(g, sizeOffset)
 	rtgAsmStorePrimaryStack(&g.asm, recordOffset)
-	rtgAsmLoadPrimaryStack(&g.asm, g.deferHeadOffset)
-	rtgAsmLoadSecondaryStack(&g.asm, recordOffset)
+	rtgAsmLoadPrimarySecondaryStack(&g.asm, g.deferHeadOffset, recordOffset)
 	rtgAsmStorePrimaryMemSecondaryDisp(&g.asm, 0)
 	rtgAsmPrimaryImm(&g.asm, tag)
 	rtgAsmLoadSecondaryStack(&g.asm, recordOffset)
 	rtgAsmStorePrimaryMemSecondaryDisp(&g.asm, rtgBackendValueSlotSize)
-	rtgAsmLoadPrimaryStack(&g.asm, handleOffset)
-	rtgAsmLoadSecondaryStack(&g.asm, recordOffset)
+	rtgAsmLoadPrimarySecondaryStack(&g.asm, handleOffset, recordOffset)
 	rtgAsmStorePrimaryMemSecondaryDisp(&g.asm, 2*rtgBackendValueSlotSize)
 	rtgAsmLoadPrimaryStack(&g.asm, recordOffset)
 	rtgAsmStorePrimaryStack(&g.asm, g.deferHeadOffset)
@@ -7534,8 +7549,7 @@ func rtgEmitLinearRangeForScoped(g *rtgLinearGen, stmt *rtgStmt, rangeTok int) b
 	}
 	rtgAsmMarkLabel(a, continueLabel)
 	if resolved.kind == rtgTypeString {
-		rtgAsmLoadPrimaryStack(a, indexOffset)
-		rtgAsmLoadTertiaryStack(a, widthOffset)
+		rtgAsmLoadPrimaryTertiaryStack(a, indexOffset, widthOffset)
 		rtgAsmAddPrimaryTertiary(a)
 		rtgAsmStorePrimaryStack(a, indexOffset)
 	} else {
@@ -7627,8 +7641,7 @@ func rtgEmitStringRangeDecode(g *rtgLinearGen, ptr int, length int, index int, r
 
 func rtgEmitStringByteAt(g *rtgLinearGen, ptr int, index int, dest int) {
 	a := &g.asm
-	rtgAsmLoadPrimaryStack(a, ptr)
-	rtgAsmLoadTertiaryStack(a, index)
+	rtgAsmLoadPrimaryTertiaryStack(a, ptr, index)
 	rtgAsmLoadPrimaryIndexTertiarySize(a, 1)
 	rtgAsmStorePrimaryStack(a, dest)
 }
@@ -7727,8 +7740,7 @@ func rtgEmitLinearSwitch(g *rtgLinearGen, stmt *rtgStmt) bool {
 		if !rtgEmitStringValueRegs(g, ep, rootIndex) {
 			return false
 		}
-		rtgAsmStorePrimaryStack(a, valueOffset)
-		rtgAsmStoreSecondaryStack(a, lenOffset)
+		rtgAsmStorePrimarySecondaryStack(a, valueOffset, lenOffset)
 	} else if rootIndex >= 0 {
 		if typeSwitch {
 			if !rtgEmitInterfaceTypeTagPrimary(g, ep, rootIndex) {
@@ -8524,8 +8536,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 					return false
 				}
 				rtgAsmStorePrimaryStack(a, ptrOffset)
-				rtgAsmLoadSecondaryStack(a, ptrOffset)
-				rtgAsmLoadTertiaryStack(a, indexOffset)
+				rtgAsmLoadSecondaryTertiaryStack(a, ptrOffset, indexOffset)
 				rtgAsmLoadPrimaryIndexTertiarySize(a, elemSize)
 				rtgAsmPushPrimary(a)
 				rhs := rtgNewExprParse()
@@ -8541,8 +8552,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 					return false
 				}
 				rtgAsmNormalizePrimaryForKind(a, elemType.kind)
-				rtgAsmLoadSecondaryStack(a, ptrOffset)
-				rtgAsmLoadTertiaryStack(a, indexOffset)
+				rtgAsmLoadSecondaryTertiaryStack(a, ptrOffset, indexOffset)
 				rtgAsmStorePrimaryMemSecondaryTertiarySize(a, elemSize)
 				return true
 			}
@@ -8684,8 +8694,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 						return false
 					}
 					rtgAsmStorePrimaryStack(a, ptrOffset)
-					rtgAsmLoadSecondaryStack(a, ptrOffset)
-					rtgAsmLoadTertiaryStack(a, indexOffset)
+					rtgAsmLoadSecondaryTertiaryStack(a, ptrOffset, indexOffset)
 					elemSize := rtgTypeSize(meta, sliceType.elem)
 					rtgAsmMulTertiaryImm(a, elemSize)
 					rtgAsmAddSecondaryTertiary(a)
@@ -8951,8 +8960,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 			if globalOffset >= 0 {
 				rtgAsmStoreStringBss(a, globalOffset)
 			} else {
-				rtgAsmStorePrimaryStack(a, offset)
-				rtgAsmStoreSecondaryStack(a, offset-8)
+				rtgAsmStorePrimarySecondaryStack(a, offset, offset-8)
 			}
 			return true
 		}
@@ -9961,8 +9969,7 @@ func rtgEmitTypedAssign(g *rtgLinearGen, ep *rtgExprParse, idx int, offset int) 
 		if !rtgEmitComplexValueRegs(g, ep, idx) {
 			return false
 		}
-		rtgAsmStorePrimaryStack(&g.asm, offset)
-		rtgAsmStoreSecondaryStack(&g.asm, offset-rtgBackendValueSlotSize)
+		rtgAsmStorePrimarySecondaryStack(&g.asm, offset, offset-rtgBackendValueSlotSize)
 		return true
 	}
 	if destResolved.kind == rtgTypeInterface {
@@ -10087,8 +10094,7 @@ func rtgEmitTypedAssign(g *rtgLinearGen, ep *rtgExprParse, idx int, offset int) 
 		if !rtgEmitStringValueRegs(g, ep, idx) {
 			return false
 		}
-		rtgAsmStorePrimaryStack(&g.asm, offset)
-		rtgAsmStoreSecondaryStack(&g.asm, offset-8)
+		rtgAsmStorePrimarySecondaryStack(&g.asm, offset, offset-8)
 		return true
 	}
 	if rtgTypeKindIsScalarValue(destResolved.kind) || destResolved.kind == rtgTypePointer || destResolved.kind == rtgTypeFunc {
@@ -10410,8 +10416,7 @@ func rtgEmitCopySliceRegsToArena(g *rtgLinearGen, sliceType int) bool {
 	loopLabel := rtgAsmNewLabel(a)
 	doneLabel := rtgAsmNewLabel(a)
 	returnLabel := rtgAsmNewLabel(a)
-	rtgAsmStorePrimaryStack(a, srcOff)
-	rtgAsmStoreSecondaryStack(a, lenOff)
+	rtgAsmStorePrimarySecondaryStack(a, srcOff, lenOff)
 	rtgAsmStackMem(a, capOff, 0x8948, 0x4d, 0x8d)
 	rtgAsmLoadPrimaryStack(a, lenOff)
 	rtgAsmPushImm(a, slackCapacity)
@@ -10428,8 +10433,7 @@ func rtgEmitCopySliceRegsToArena(g *rtgLinearGen, sliceType int) bool {
 	rtgAsmLoadPrimaryStack(a, srcOff)
 	rtgAsmJnzPrimary(a, nonNilLabel)
 	rtgAsmPrimaryImm(a, 0)
-	rtgAsmLoadSecondaryStack(a, lenOff)
-	rtgAsmLoadTertiaryStack(a, capOff)
+	rtgAsmLoadSecondaryTertiaryStack(a, lenOff, capOff)
 	rtgAsmJmpLabel(a, returnLabel)
 	rtgAsmMarkLabel(a, nonNilLabel)
 	rtgAsmLoadPrimaryStack(a, lenOff)
@@ -10465,8 +10469,7 @@ func rtgEmitCopySliceRegsToArena(g *rtgLinearGen, sliceType int) bool {
 		rtgAsmJmpLabel(a, loopLabel)
 		rtgAsmMarkLabel(a, doneLabel)
 	}
-	rtgAsmLoadPrimaryStack(a, destOff)
-	rtgAsmLoadSecondaryStack(a, lenOff)
+	rtgAsmLoadPrimarySecondaryStack(a, destOff, lenOff)
 	rtgAsmLoadTertiaryStack(a, capOff)
 	rtgAsmMarkLabel(a, returnLabel)
 	return true
@@ -10544,16 +10547,13 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				rtgEmitRuntimeFault(g)
 				rtgAsmMarkLabel(a, done)
 			}
-			rtgAsmLoadPrimaryStack(a, maxOff)
-			rtgAsmLoadTertiaryStack(a, lowOff)
+			rtgAsmLoadPrimaryTertiaryStack(a, maxOff, lowOff)
 			rtgAsmSubPrimaryTertiary(a)
 			rtgAsmPushPrimary(a)
-			rtgAsmLoadPrimaryStack(a, highOff)
-			rtgAsmLoadTertiaryStack(a, lowOff)
+			rtgAsmLoadPrimaryTertiaryStack(a, highOff, lowOff)
 			rtgAsmSubPrimaryTertiary(a)
 			rtgAsmPushPrimary(a)
-			rtgAsmLoadPrimaryStack(a, baseOff)
-			rtgAsmLoadTertiaryStack(a, lowOff)
+			rtgAsmLoadPrimaryTertiaryStack(a, baseOff, lowOff)
 			if elemSize != 1 {
 				rtgAsmMulTertiaryImm(a, elemSize)
 			}
@@ -10600,8 +10600,7 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		if !rtgTypeIsSlice(meta, g.locals[localIndex].typ) {
 			return false
 		}
-		rtgAsmLoadPrimaryStack(a, g.locals[localIndex].offset)
-		rtgAsmLoadSecondaryStack(a, g.locals[localIndex].offset-8)
+		rtgAsmLoadPrimarySecondaryStack(a, g.locals[localIndex].offset, g.locals[localIndex].offset-8)
 		rtgAsmLoadTertiaryStack(a, g.locals[localIndex].offset-16)
 		return true
 	}
@@ -10718,12 +10717,10 @@ func rtgEmitStringSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) boo
 		} else {
 			rtgAsmCopyStackSlot(a, baseOff-8, highOff)
 		}
-		rtgAsmLoadPrimaryStack(a, highOff)
-		rtgAsmLoadTertiaryStack(a, lowOff)
+		rtgAsmLoadPrimaryTertiaryStack(a, highOff, lowOff)
 		rtgAsmSubPrimaryTertiary(a)
 		rtgAsmPushPrimary(a)
-		rtgAsmLoadPrimaryStack(a, baseOff)
-		rtgAsmLoadTertiaryStack(a, lowOff)
+		rtgAsmLoadPrimaryTertiaryStack(a, baseOff, lowOff)
 		rtgAsmAddPrimaryTertiary(a)
 		rtgAsmPopSecondary(a)
 		return true
@@ -10901,8 +10898,7 @@ func rtgEmitMakeSliceRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rtgEmitArenaAllocStackPrimary(g, sizeOffset)
 		rtgEmitZeroDynamicMakeSlice(g, lenOffset, elemSize)
 	}
-	rtgAsmLoadSecondaryStack(a, lenOffset)
-	rtgAsmLoadTertiaryStack(a, capOffset)
+	rtgAsmLoadSecondaryTertiaryStack(a, lenOffset, capOffset)
 	return true
 }
 
@@ -11010,8 +11006,7 @@ func rtgEmitByteSliceConversionRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	if !rtgEmitStringValueRegs(g, ep, argIndex) {
 		return false
 	}
-	rtgAsmStorePrimaryStack(a, srcOff)
-	rtgAsmStoreSecondaryStack(a, lenOff)
+	rtgAsmStorePrimarySecondaryStack(a, srcOff, lenOff)
 	rtgEmitArenaAllocStackPrimary(g, lenOff)
 	rtgAsmStorePrimaryStack(a, destOff)
 	rtgAsmStoreStackImm(a, idxOff, 0)
@@ -11033,8 +11028,7 @@ func rtgEmitByteSliceConversionRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	rtgAsmIncStack(a, idxOff)
 	rtgAsmJmpLabel(a, loopLabel)
 	rtgAsmMarkLabel(a, doneLabel)
-	rtgAsmLoadPrimaryStack(a, destOff)
-	rtgAsmLoadSecondaryStack(a, lenOff)
+	rtgAsmLoadPrimarySecondaryStack(a, destOff, lenOff)
 	rtgAsmCopySecondaryToTertiary(a)
 	return true
 }
@@ -11057,8 +11051,7 @@ func rtgEmitRuneSliceConversionRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	if !rtgEmitStringValueRegs(g, ep, ep.args[e.firstArg]) {
 		return false
 	}
-	rtgAsmStorePrimaryStack(a, srcOff)
-	rtgAsmStoreSecondaryStack(a, lenOff)
+	rtgAsmStorePrimarySecondaryStack(a, srcOff, lenOff)
 	rtgAsmStoreStackImm(a, indexOff, 0)
 	loop := rtgAsmNewLabel(a)
 	done := rtgAsmNewLabel(a)
@@ -11072,14 +11065,12 @@ func rtgEmitRuneSliceConversionRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	rtgAsmCopyPrimaryToSecondary(a)
 	rtgAsmPopPrimary(a)
 	rtgAsmStorePrimaryMemSecondaryDispSize(a, 0, 4)
-	rtgAsmLoadPrimaryStack(a, indexOff)
-	rtgAsmLoadTertiaryStack(a, widthOff)
+	rtgAsmLoadPrimaryTertiaryStack(a, indexOff, widthOff)
 	rtgAsmAddPrimaryTertiary(a)
 	rtgAsmStorePrimaryStack(a, indexOff)
 	rtgAsmJmpLabel(a, loop)
 	rtgAsmMarkLabel(a, done)
-	rtgAsmLoadPrimaryStack(a, destOff)
-	rtgAsmLoadSecondaryStack(a, destOff-8)
+	rtgAsmLoadPrimarySecondaryStack(a, destOff, destOff-8)
 	rtgAsmLoadTertiaryStack(a, destOff-16)
 	return true
 }
@@ -11127,8 +11118,7 @@ func rtgEmitCompositeFieldToStack(g *rtgLinearGen, ep *rtgExprParse, idx int, fi
 		if !rtgEmitStringValueRegs(g, ep, idx) {
 			return false
 		}
-		rtgAsmStorePrimaryStack(a, destOffset)
-		rtgAsmStoreSecondaryStack(a, destOffset-8)
+		rtgAsmStorePrimarySecondaryStack(a, destOffset, destOffset-8)
 		return true
 	}
 	if fieldResolved.kind == rtgTypeStruct {
@@ -12042,13 +12032,11 @@ func rtgEmitRuntimeArenaPersistString(g *rtgLinearGen, ep *rtgExprParse, idx int
 	srcOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	lenOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	destOff := rtgAddUnnamedLocal(g, rtgTypeInt)
-	rtgAsmStorePrimaryStack(a, srcOff)
-	rtgAsmStoreSecondaryStack(a, lenOff)
+	rtgAsmStorePrimarySecondaryStack(a, srcOff, lenOff)
 	rtgEmitPersistentAllocToPrimary(g, lenOff)
 	rtgAsmStorePrimaryStack(a, destOff)
 	rtgEmitCopyBytesToPersistent(g, srcOff, lenOff, destOff)
-	rtgAsmLoadPrimaryStack(a, destOff)
-	rtgAsmLoadSecondaryStack(a, lenOff)
+	rtgAsmLoadPrimarySecondaryStack(a, destOff, lenOff)
 	return true
 }
 
@@ -12064,13 +12052,11 @@ func rtgEmitRuntimeArenaPersistBytes(g *rtgLinearGen, ep *rtgExprParse, idx int)
 	srcOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	lenOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	destOff := rtgAddUnnamedLocal(g, rtgTypeInt)
-	rtgAsmStorePrimaryStack(a, srcOff)
-	rtgAsmStoreSecondaryStack(a, lenOff)
+	rtgAsmStorePrimarySecondaryStack(a, srcOff, lenOff)
 	rtgEmitPersistentAllocToPrimary(g, lenOff)
 	rtgAsmStorePrimaryStack(a, destOff)
 	rtgEmitCopyBytesToPersistent(g, srcOff, lenOff, destOff)
-	rtgAsmLoadPrimaryStack(a, destOff)
-	rtgAsmLoadSecondaryStack(a, lenOff)
+	rtgAsmLoadPrimarySecondaryStack(a, destOff, lenOff)
 	rtgAsmLoadTertiaryStack(a, lenOff)
 	return true
 }
@@ -12099,12 +12085,10 @@ func rtgEmitCopyBytesToPersistent(g *rtgLinearGen, srcOff int, lenOff int, destO
 	rtgAsmStoreStackImm(a, indexOff, 0)
 	rtgAsmMarkLabel(a, loopLabel)
 	rtgAsmJgeStackStack(a, indexOff, lenOff, doneLabel)
-	rtgAsmLoadPrimaryStack(a, srcOff)
-	rtgAsmLoadTertiaryStack(a, indexOff)
+	rtgAsmLoadPrimaryTertiaryStack(a, srcOff, indexOff)
 	rtgAsmLoadPrimaryIndexTertiarySize(a, 1)
 	rtgAsmPushPrimary(a)
-	rtgAsmLoadSecondaryStack(a, destOff)
-	rtgAsmLoadTertiaryStack(a, indexOff)
+	rtgAsmLoadSecondaryTertiaryStack(a, destOff, indexOff)
 	rtgAsmPopPrimary(a)
 	rtgAsmStorePrimaryMemSecondaryTertiarySize(a, 1)
 	rtgAsmIncStack(a, indexOff)
@@ -12879,8 +12863,7 @@ func rtgEmitAppendAssignDifferentSource(g *rtgLinearGen, stmt *rtgStmt, ep *rtgE
 	if !rtgEmitAppendToLocation(g, stmt, ep, ep, &tempLoc, root) {
 		return false
 	}
-	rtgAsmLoadPrimaryStack(&g.asm, tempOffset)
-	rtgAsmLoadSecondaryStack(&g.asm, tempOffset-8)
+	rtgAsmLoadPrimarySecondaryStack(&g.asm, tempOffset, tempOffset-8)
 	rtgAsmLoadTertiaryStack(&g.asm, tempOffset-16)
 	return rtgStoreSliceRegsToLocation(g, lhs, &lhsLoc)
 }
@@ -13094,8 +13077,7 @@ func rtgEmitAppendLocalToLocation(g *rtgLinearGen, locEp *rtgExprParse, loc *rtg
 		return true
 	}
 	if elem.kind == rtgTypeString {
-		rtgAsmLoadPrimaryStack(a, offset)
-		rtgAsmLoadSecondaryStack(a, offset-8)
+		rtgAsmLoadPrimarySecondaryStack(a, offset, offset-8)
 		rtgAsmPushStringRegs(a)
 		if !rtgEmitAppendDestPrimary(g, locEp, loc, 16) {
 			return false
@@ -13252,15 +13234,13 @@ func rtgEmitAppendExpansionToLocation(g *rtgLinearGen, ep *rtgExprParse, locEp *
 		if !rtgEmitSliceValueRegs(g, ep, valueIndex) {
 			return false
 		}
-		rtgAsmStorePrimaryStack(a, srcPtr)
-		rtgAsmStoreSecondaryStack(a, srcLen)
+		rtgAsmStorePrimarySecondaryStack(a, srcPtr, srcLen)
 		rtgAsmStoreStackImm(a, srcIndex, 0)
 		loopLabel := rtgAsmNewLabel(a)
 		doneLabel := rtgAsmNewLabel(a)
 		rtgAsmMarkLabel(a, loopLabel)
 		rtgAsmJgeStackStack(a, srcIndex, srcLen, doneLabel)
-		rtgAsmLoadPrimaryStack(a, srcPtr)
-		rtgAsmLoadTertiaryStack(a, srcIndex)
+		rtgAsmLoadPrimaryTertiaryStack(a, srcPtr, srcIndex)
 		rtgAsmLoadPrimaryIndexTertiarySize(a, 1)
 		rtgAsmPushPrimary(a)
 		if !rtgEmitAppendDestPrimary(g, locEp, loc, elemSize) {
@@ -13283,8 +13263,7 @@ func rtgEmitAppendExpansionToLocation(g *rtgLinearGen, ep *rtgExprParse, locEp *
 	if !rtgEmitSliceValueRegs(g, ep, valueIndex) {
 		return false
 	}
-	rtgAsmStorePrimaryStack(a, srcPtr)
-	rtgAsmStoreSecondaryStack(a, srcLen)
+	rtgAsmStorePrimarySecondaryStack(a, srcPtr, srcLen)
 	rtgAsmStoreStackImm(a, srcIndex, 0)
 	if loc.mem {
 		if !rtgEmitSliceLocationHeaderAddressSecondary(g, locEp, loc) {
@@ -13327,24 +13306,20 @@ func rtgEmitAppendExpansionToLocation(g *rtgLinearGen, ep *rtgExprParse, locEp *
 func rtgEmitAppendExpansionCopyElement(g *rtgLinearGen, elemSize int, srcPtr int, srcIndex int, destPtr int, destLen int) {
 	a := &g.asm
 	if elemSize == 1 || elemSize == 2 || elemSize == 4 || elemSize == 8 {
-		rtgAsmLoadPrimaryStack(a, srcPtr)
-		rtgAsmLoadTertiaryStack(a, srcIndex)
+		rtgAsmLoadPrimaryTertiaryStack(a, srcPtr, srcIndex)
 		rtgAsmLoadPrimaryIndexTertiarySize(a, elemSize)
 		rtgAsmPushPrimary(a)
-		rtgAsmLoadSecondaryStack(a, destPtr)
-		rtgAsmLoadTertiaryStack(a, destLen)
+		rtgAsmLoadSecondaryTertiaryStack(a, destPtr, destLen)
 		rtgAsmPopPrimary(a)
 		rtgAsmStorePrimaryMemSecondaryTertiarySize(a, elemSize)
 		return
 	}
 	for copyOff := 0; copyOff < elemSize; copyOff += 8 {
-		rtgAsmLoadPrimaryStack(a, srcPtr)
-		rtgAsmLoadTertiaryStack(a, srcIndex)
+		rtgAsmLoadPrimaryTertiaryStack(a, srcPtr, srcIndex)
 		rtgAsmMulTertiaryImm(a, elemSize)
 		rtgAsmLoadQwordPrimaryIndexTertiaryDisp(a, copyOff)
 		rtgAsmPushPrimary(a)
-		rtgAsmLoadSecondaryStack(a, destPtr)
-		rtgAsmLoadTertiaryStack(a, destLen)
+		rtgAsmLoadSecondaryTertiaryStack(a, destPtr, destLen)
 		rtgAsmMulTertiaryImm(a, elemSize)
 		rtgAsmAddSecondaryTertiary(a)
 		rtgAsmPopPrimary(a)
@@ -13626,14 +13601,12 @@ func rtgEmitStringCompare(g *rtgLinearGen, ep *rtgExprParse, left int, right int
 		if !rtgEmitStringValueRegs(g, ep, right) {
 			return false
 		}
-		rtgAsmStorePrimaryStack(a, rightOff)
-		rtgAsmStoreSecondaryStack(a, rightOff-8)
+		rtgAsmStorePrimarySecondaryStack(a, rightOff, rightOff-8)
 		if !rtgEmitStringValueRegs(g, ep, left) {
 			return false
 		}
 		rtgAsmPushStringRegs(a)
-		rtgAsmLoadPrimaryStack(a, rightOff)
-		rtgAsmLoadSecondaryStack(a, rightOff-8)
+		rtgAsmLoadPrimarySecondaryStack(a, rightOff, rightOff-8)
 		rtgAsmCopySecondaryToTertiary(a)
 		rtgAsmCopyPrimaryToSecondary(a)
 		rtgAsmPopCallWord0(a)
@@ -13698,11 +13671,9 @@ func rtgEmitCompositeCompareAt(g *rtgLinearGen, typ int, left int, right int, fa
 		return
 	}
 	if t.kind == rtgTypeString {
-		rtgAsmLoadPrimaryStack(a, left)
-		rtgAsmLoadSecondaryStack(a, left-8)
+		rtgAsmLoadPrimarySecondaryStack(a, left, left-8)
 		rtgAsmPushStringRegs(a)
-		rtgAsmLoadPrimaryStack(a, right)
-		rtgAsmLoadSecondaryStack(a, right-8)
+		rtgAsmLoadPrimarySecondaryStack(a, right, right-8)
 		rtgAsmCopySecondaryToTertiary(a)
 		rtgAsmCopyPrimaryToSecondary(a)
 		rtgAsmPopCallWord0(a)
@@ -13753,13 +13724,11 @@ func rtgEmitBuiltinCopy(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	if !rtgEmitSliceValueRegs(g, ep, destIndex) {
 		return false
 	}
-	rtgAsmStorePrimaryStack(a, destPtr)
-	rtgAsmStoreSecondaryStack(a, destLen)
+	rtgAsmStorePrimarySecondaryStack(a, destPtr, destLen)
 	if !rtgEmitSliceValueRegs(g, ep, srcIndex) {
 		return false
 	}
-	rtgAsmStorePrimaryStack(a, srcPtr)
-	rtgAsmStoreSecondaryStack(a, srcLen)
+	rtgAsmStorePrimarySecondaryStack(a, srcPtr, srcLen)
 	rtgAsmStoreStackImm(a, copyCount, 0)
 	loopLabel := rtgAsmNewLabel(a)
 	doneLabel := rtgAsmNewLabel(a)
@@ -13784,8 +13753,7 @@ func rtgEmitSliceBasePtrLenTokens(g *rtgLinearGen, p *rtgProgram, start int, end
 			if !rtgTypeIsSlice(meta, g.locals[localIndex].typ) {
 				return false
 			}
-			rtgAsmLoadPrimaryStack(a, g.locals[localIndex].offset)
-			rtgAsmLoadTertiaryStack(a, g.locals[localIndex].offset-8)
+			rtgAsmLoadPrimaryTertiaryStack(a, g.locals[localIndex].offset, g.locals[localIndex].offset-8)
 			return true
 		}
 		globalOffset := rtgFindGlobalOffset(g, nameStart, nameEnd)
@@ -13921,8 +13889,7 @@ func rtgEmitSlicePtrLen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		if localKind != rtgTypeSlice && localKind != rtgTypeString {
 			return false
 		}
-		rtgAsmLoadPrimaryStack(a, g.locals[localIndex].offset)
-		rtgAsmLoadTertiaryStack(a, g.locals[localIndex].offset-8)
+		rtgAsmLoadPrimaryTertiaryStack(a, g.locals[localIndex].offset, g.locals[localIndex].offset-8)
 		return true
 	}
 	if e.kind == rtgExprComposite {
@@ -14007,8 +13974,7 @@ func rtgEmitSlicePtrCap(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		if !rtgTypeIsSlice(meta, g.locals[localIndex].typ) {
 			return false
 		}
-		rtgAsmLoadPrimaryStack(a, g.locals[localIndex].offset)
-		rtgAsmLoadTertiaryStack(a, g.locals[localIndex].offset-16)
+		rtgAsmLoadPrimaryTertiaryStack(a, g.locals[localIndex].offset, g.locals[localIndex].offset-16)
 		return true
 	}
 	if e.kind == rtgExprComposite {
@@ -14140,8 +14106,7 @@ func rtgEmitMapEntryAddress(g *rtgLinearGen, ep *rtgExprParse, mapIndex int, key
 	if !rtgEmitStringValueRegs(g, ep, keyIndex) {
 		return false
 	}
-	rtgAsmStorePrimaryStack(a, keyPtrOff)
-	rtgAsmStoreSecondaryStack(a, keyLenOff)
+	rtgAsmStorePrimarySecondaryStack(a, keyPtrOff, keyLenOff)
 	rtgAsmStoreStackImm(a, indexOff, 0)
 	loopLabel := rtgAsmNewLabel(a)
 	notFoundLabel := rtgAsmNewLabel(a)
@@ -14742,8 +14707,7 @@ func rtgEmitCopyReturnedStructSliceFields(g *rtgLinearGen, typ int, srcOffset in
 		fieldSrcOffset := srcOffset - field.offset
 		fieldDestOffset := destOffset + field.offset
 		if fieldType.kind == rtgTypeSlice {
-			rtgAsmLoadPrimaryStack(&g.asm, fieldSrcOffset)
-			rtgAsmLoadSecondaryStack(&g.asm, fieldSrcOffset-8)
+			rtgAsmLoadPrimarySecondaryStack(&g.asm, fieldSrcOffset, fieldSrcOffset-8)
 			rtgAsmLoadTertiaryStack(&g.asm, fieldSrcOffset-16)
 			if !rtgEmitCopySliceRegsToArena(g, field.typ) {
 				return false
@@ -15914,8 +15878,7 @@ func rtgGenericEmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) b
 			if !rtgTypeIsString(meta, g.locals[localIndex].typ) {
 				return false
 			}
-			rtgAsmLoadPrimaryStack(a, g.locals[localIndex].offset)
-			rtgAsmLoadSecondaryStack(a, g.locals[localIndex].offset-8)
+			rtgAsmLoadPrimarySecondaryStack(a, g.locals[localIndex].offset, g.locals[localIndex].offset-8)
 			return true
 		}
 		globalOffset := rtgFindGlobalOffset(g, e.nameStart, e.nameEnd)
@@ -16277,19 +16240,16 @@ func rtgEmitByteSliceStringCopyValueRegs(g *rtgLinearGen, ep *rtgExprParse, argI
 		doneLabel := rtgAsmNewLabel(a)
 		rtgAsmMarkLabel(a, loopLabel)
 		rtgAsmJgeStackStack(a, indexOff, lenOff, doneLabel)
-		rtgAsmLoadPrimaryStack(a, srcOff)
-		rtgAsmLoadTertiaryStack(a, indexOff)
+		rtgAsmLoadPrimaryTertiaryStack(a, srcOff, indexOff)
 		rtgAsmLoadPrimaryIndexTertiarySize(a, 1)
 		rtgAsmPushPrimary(a)
-		rtgAsmLoadSecondaryStack(a, destOff)
-		rtgAsmLoadTertiaryStack(a, indexOff)
+		rtgAsmLoadSecondaryTertiaryStack(a, destOff, indexOff)
 		rtgAsmPopPrimary(a)
 		rtgAsmStorePrimaryMemSecondaryTertiarySize(a, 1)
 		rtgAsmIncStack(a, indexOff)
 		rtgAsmJmpLabel(a, loopLabel)
 		rtgAsmMarkLabel(a, doneLabel)
-		rtgAsmLoadPrimaryStack(a, destOff)
-		rtgAsmLoadSecondaryStack(a, lenOff)
+		rtgAsmLoadPrimarySecondaryStack(a, destOff, lenOff)
 		return true
 	}
 	rtgEmitArenaAllocStackPrimary(g, lenOff)
@@ -16300,8 +16260,7 @@ func rtgEmitByteSliceStringCopyValueRegs(g *rtgLinearGen, ep *rtgExprParse, argI
 	rtgAsmCopyPrimaryToCallWord1(a)
 	rtgAsmLoadTertiaryStack(a, lenOff)
 	rtgAsmEmit16(a, 0xa4f3)
-	rtgAsmLoadPrimaryStack(a, destOff)
-	rtgAsmLoadSecondaryStack(a, lenOff)
+	rtgAsmLoadPrimarySecondaryStack(a, destOff, lenOff)
 	return true
 }
 
@@ -16366,9 +16325,6 @@ func rtgEmitUTF8Cases(g *rtgLinearGen, ep *rtgExprParse, loc *rtgSliceLocation, 
 
 func rtgEmitRuneSliceStringCopyValueRegs(g *rtgLinearGen, ep *rtgExprParse, argIndex int) bool {
 	a := &g.asm
-	if !rtgEmitSlicePtrLen(g, ep, argIndex) {
-		return false
-	}
 	srcOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	lenOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	indexOff := rtgAddUnnamedLocal(g, rtgTypeInt)
@@ -16377,6 +16333,9 @@ func rtgEmitRuneSliceStringCopyValueRegs(g *rtgLinearGen, ep *rtgExprParse, argI
 	destOff := rtgAddUnnamedLocal(g, byteSliceType)
 	rtgZeroLocalAtOffset(g, destOff)
 	loc := rtgSliceLocation{offset: destOff, typ: byteSliceType, ok: true}
+	if !rtgEmitSlicePtrLen(g, ep, argIndex) {
+		return false
+	}
 	rtgAsmStorePrimaryStack(a, srcOff)
 	rtgAsmCopyTertiaryToPrimary(a)
 	rtgAsmStorePrimaryStack(a, lenOff)
@@ -16387,8 +16346,7 @@ func rtgEmitRuneSliceStringCopyValueRegs(g *rtgLinearGen, ep *rtgExprParse, argI
 	valid := rtgAsmNewLabel(a)
 	rtgAsmMarkLabel(a, loop)
 	rtgAsmJgeStackStack(a, indexOff, lenOff, done)
-	rtgAsmLoadPrimaryStack(a, srcOff)
-	rtgAsmLoadTertiaryStack(a, indexOff)
+	rtgAsmLoadPrimaryTertiaryStack(a, srcOff, indexOff)
 	rtgAsmLoadPrimaryIndexTertiarySize(a, 4)
 	rtgAsmStorePrimaryStack(a, valueOff)
 	rtgEmitStackLessImmJump(g, valueOff, 0, invalid)
@@ -16405,8 +16363,7 @@ func rtgEmitRuneSliceStringCopyValueRegs(g *rtgLinearGen, ep *rtgExprParse, argI
 	rtgAsmIncStack(a, indexOff)
 	rtgAsmJmpLabel(a, loop)
 	rtgAsmMarkLabel(a, done)
-	rtgAsmLoadPrimaryStack(a, destOff)
-	rtgAsmLoadSecondaryStack(a, destOff-8)
+	rtgAsmLoadPrimarySecondaryStack(a, destOff, destOff-8)
 	return true
 }
 
@@ -16444,8 +16401,7 @@ func rtgEmitStringConcatLocationValueRegs(g *rtgLinearGen, offset int) bool {
 		rtgAsmCopyPrimaryToCallWord1(a)
 		rtgAsmLoadTertiaryStack(a, offset-8)
 		rtgAsmEmit16(a, 0xa4f3)
-		rtgAsmLoadPrimaryStack(a, destOff)
-		rtgAsmLoadSecondaryStack(a, offset-8)
+		rtgAsmLoadPrimarySecondaryStack(a, destOff, offset-8)
 		return true
 	}
 	rtgAsmPushStack(a, offset)
@@ -16473,15 +16429,13 @@ func rtgEmitAppendStringBytesToLocation(g *rtgLinearGen, ep *rtgExprParse, idx i
 	if !rtgEmitStringValueRegs(g, ep, idx) {
 		return false
 	}
-	rtgAsmStorePrimaryStack(a, srcPtr)
-	rtgAsmStoreSecondaryStack(a, srcLen)
+	rtgAsmStorePrimarySecondaryStack(a, srcPtr, srcLen)
 	rtgAsmStoreStackImm(a, srcIndex, 0)
 	loopLabel := rtgAsmNewLabel(a)
 	doneLabel := rtgAsmNewLabel(a)
 	rtgAsmMarkLabel(a, loopLabel)
 	rtgAsmJgeStackStack(a, srcIndex, srcLen, doneLabel)
-	rtgAsmLoadPrimaryStack(a, srcPtr)
-	rtgAsmLoadTertiaryStack(a, srcIndex)
+	rtgAsmLoadPrimaryTertiaryStack(a, srcPtr, srcIndex)
 	rtgAsmLoadPrimaryIndexTertiarySize(a, 1)
 	rtgAsmPushPrimary(a)
 	if !rtgEmitAppendDestPrimary(g, locEp, loc, 1) {
@@ -16542,8 +16496,7 @@ func rtgEmitMapCompositeFieldToMem(g *rtgLinearGen, ep *rtgExprParse, idx int, f
 	if !rtgEmitMapAssignToLocal(g, ep, idx, fieldType, tempOffset) {
 		return false
 	}
-	rtgAsmLoadPrimaryStack(&g.asm, tempOffset)
-	rtgAsmLoadSecondaryStack(&g.asm, addrOffset)
+	rtgAsmLoadPrimarySecondaryStack(&g.asm, tempOffset, addrOffset)
 	rtgAsmStorePrimaryMemSecondaryDisp(&g.asm, fieldOffset)
 	return true
 }
@@ -16759,8 +16712,7 @@ func rtgEmitComplexValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		if localIndex < 0 || rtgResolveType(g.meta, g.locals[localIndex].typ).kind != rtgTypeComplex {
 			return false
 		}
-		rtgAsmLoadPrimaryStack(&g.asm, g.locals[localIndex].offset)
-		rtgAsmLoadSecondaryStack(&g.asm, g.locals[localIndex].offset-rtgBackendValueSlotSize)
+		rtgAsmLoadPrimarySecondaryStack(&g.asm, g.locals[localIndex].offset, g.locals[localIndex].offset-rtgBackendValueSlotSize)
 		return true
 	}
 	if (e.kind == rtgExprInt || e.kind == rtgExprFloat) && rtgExprTokenIsImaginary(g.prog, e.tok) {
@@ -16793,13 +16745,11 @@ func rtgEmitComplexValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		if !rtgEmitComplexValueRegs(g, ep, e.left) {
 			return false
 		}
-		rtgAsmStorePrimaryStack(&g.asm, leftReal)
-		rtgAsmStoreSecondaryStack(&g.asm, leftImag)
+		rtgAsmStorePrimarySecondaryStack(&g.asm, leftReal, leftImag)
 		if !rtgEmitComplexValueRegs(g, ep, e.right) {
 			return false
 		}
-		rtgAsmStorePrimaryStack(&g.asm, rightReal)
-		rtgAsmStoreSecondaryStack(&g.asm, rightImag)
+		rtgAsmStorePrimarySecondaryStack(&g.asm, rightReal, rightImag)
 		rtgEmitComplexBinaryComponent(g, leftReal, rightReal, rtgTokCharIs(g.prog, e.tok, '-'))
 		rtgAsmStorePrimaryStack(&g.asm, leftReal)
 		rtgEmitComplexBinaryComponent(g, leftImag, rightImag, rtgTokCharIs(g.prog, e.tok, '-'))
@@ -16819,8 +16769,7 @@ func rtgEmitComplexValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitComplexBinaryComponent(g *rtgLinearGen, left int, right int, subtract bool) {
-	rtgAsmLoadPrimaryStack(&g.asm, left)
-	rtgAsmLoadTertiaryStack(&g.asm, right)
+	rtgAsmLoadPrimaryTertiaryStack(&g.asm, left, right)
 	if subtract {
 		rtgAsmSubPrimaryTertiary(&g.asm)
 	} else {
@@ -16910,8 +16859,7 @@ func rtgEmitMethodSelectorValuePrimary(g *rtgLinearGen, ep *rtgExprParse, idx in
 	rtgAsmCopyPrimaryToSecondary(&g.asm)
 	rtgAsmPrimaryImm(&g.asm, fnIndex+1)
 	rtgAsmStorePrimaryMemSecondaryDisp(&g.asm, 0)
-	rtgAsmLoadPrimaryStack(&g.asm, receiverOffset)
-	rtgAsmLoadSecondaryStack(&g.asm, addrOffset)
+	rtgAsmLoadPrimarySecondaryStack(&g.asm, receiverOffset, addrOffset)
 	rtgAsmStorePrimaryMemSecondaryDisp(&g.asm, rtgBackendValueSlotSize)
 	rtgAsmLoadPrimaryStack(&g.asm, addrOffset)
 	return true
@@ -16942,8 +16890,7 @@ func rtgEmitClosureValuePrimary(g *rtgLinearGen, literalTok int) bool {
 		if localIndex < 0 {
 			return false
 		}
-		rtgAsmLoadPrimaryStack(&g.asm, g.locals[localIndex].offset)
-		rtgAsmLoadSecondaryStack(&g.asm, addrOffset)
+		rtgAsmLoadPrimarySecondaryStack(&g.asm, g.locals[localIndex].offset, addrOffset)
 		rtgAsmStorePrimaryMemSecondaryDisp(&g.asm, (i+1)*rtgBackendValueSlotSize)
 	}
 	rtgAsmLoadPrimaryStack(&g.asm, addrOffset)

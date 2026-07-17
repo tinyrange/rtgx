@@ -638,8 +638,7 @@ func rtgAmd64EmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) boo
 			if !rtgTypeIsString(meta, g.locals[localIndex].typ) {
 				return false
 			}
-			rtgAsmLoadPrimaryStack(a, g.locals[localIndex].offset)
-			rtgAsmLoadSecondaryStack(a, g.locals[localIndex].offset-8)
+			rtgAsmLoadPrimarySecondaryStack(a, g.locals[localIndex].offset, g.locals[localIndex].offset-8)
 			return true
 		}
 		globalOffset := rtgFindGlobalOffset(g, e.nameStart, e.nameEnd)
@@ -706,8 +705,7 @@ func rtgAmd64EmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) boo
 			return false
 		}
 		if offset, ok := rtgLocalStructSelectorOffset(g, ep, idx); ok {
-			rtgAsmLoadPrimaryStack(a, offset)
-			rtgAsmLoadSecondaryStack(a, offset-8)
+			rtgAsmLoadPrimarySecondaryStack(a, offset, offset-8)
 			return true
 		}
 		if !rtgEmitSelectorAddressSecondary(g, ep, idx) {
