@@ -364,37 +364,20 @@ func rtgAsmEmit8(a *rtgAsm, v int) {
 }
 
 func rtgAsmEmit2(a *rtgAsm, v0 int, v1 int) {
-	index := len(a.code)
-	a.code = a.code[:index+2]
-	a.code[index] = byte(v0)
-	a.code[index+1] = byte(v1)
+	a.code = rtgAppend16(a.code, v0|(v1<<8))
 }
 
 func rtgAsmEmit3(a *rtgAsm, v0 int, v1 int, v2 int) {
-	index := len(a.code)
-	a.code = a.code[:index+3]
-	a.code[index] = byte(v0)
-	a.code[index+1] = byte(v1)
-	a.code[index+2] = byte(v2)
+	rtgAsmEmit24(a, v0|(v1<<8)|(v2<<16))
 }
 
 func rtgAsmEmit4(a *rtgAsm, v0 int, v1 int, v2 int, v3 int) {
-	index := len(a.code)
-	a.code = a.code[:index+4]
-	a.code[index] = byte(v0)
-	a.code[index+1] = byte(v1)
-	a.code[index+2] = byte(v2)
-	a.code[index+3] = byte(v3)
+	a.code = rtgAppend32(a.code, v0|(v1<<8)|(v2<<16)|(v3<<24))
 }
 
 func rtgAsmEmit5(a *rtgAsm, v0 int, v1 int, v2 int, v3 int, v4 int) {
-	index := len(a.code)
-	a.code = a.code[:index+5]
-	a.code[index] = byte(v0)
-	a.code[index+1] = byte(v1)
-	a.code[index+2] = byte(v2)
-	a.code[index+3] = byte(v3)
-	a.code[index+4] = byte(v4)
+	rtgAsmEmit4(a, v0, v1, v2, v3)
+	rtgAsmEmit8(a, v4)
 }
 
 func rtgAsmAddAbsReloc(a *rtgAsm, at int, off int, kind int) {
@@ -469,14 +452,13 @@ func rtgAsmEmit64(a *rtgAsm, v int) {
 }
 
 func rtgAsmEmit16(a *rtgAsm, v int) {
-	rtgAsmEmit8(a, v)
-	rtgAsmEmit8(a, v>>8)
+	a.code = rtgAppend16(a.code, v)
 }
 
 func rtgAsmEmit24(a *rtgAsm, v int) {
-	rtgAsmEmit8(a, v)
-	rtgAsmEmit8(a, v>>8)
-	rtgAsmEmit8(a, v>>16)
+	a.code = append(a.code, byte(v))
+	a.code = append(a.code, byte(v>>8))
+	a.code = append(a.code, byte(v>>16))
 }
 
 func rtgAmd64RelaxBranches(a *rtgAsm) {
@@ -1569,9 +1551,9 @@ type rtgSymbolInfo struct {
 	typ          int
 	initStart    int
 	initEnd      int
-	iotaValue    int
+	iotaValue    int // const iota value; variable BSS offset during initialization
 	constValue   int
-	constValueOK int
+	constValueOK int // const validity; variable initialization walk state
 }
 
 type rtgFuncInfo struct {
@@ -1591,7 +1573,7 @@ type rtgFuncInfo struct {
 	linkDLLEnd      int
 	linkMethodStart int
 	linkMethodEnd   int
-	literalTok      int
+	literalTok      int // positive for a literal; negative after named-function init scanning
 }
 
 type rtgClosureInfo struct {
@@ -8233,54 +8215,100 @@ func rtgEmitCompareJumpOp(a *rtgAsm, c0 byte, c1 byte, label int, jumpIfTrue boo
 	rtgAsmEmit32(a, 0)
 	rtgAsmAddReloc(a, at, label)
 }
+
+const (
+	rtgInitVisiting     = 1
+	rtgInitDone         = 2
+	rtgInitFunctionSeen = -1
+)
+
+func rtgLinearInitGlobal(g *rtgLinearGen, index int) bool {
+	meta := g.meta
+	var s *rtgSymbolInfo
+	start := 0
+	end := 0
+	if index >= 0 {
+		s = &meta.globals[index]
+		if s.constValueOK != 0 {
+			return s.constValueOK == rtgInitDone
+		}
+		s.constValueOK = rtgInitVisiting
+		start = s.initStart
+		end = s.initEnd
+	} else {
+		fn := &meta.funcs[-index-1]
+		if fn.literalTok == rtgInitFunctionSeen {
+			return true
+		}
+		fn.literalTok = rtgInitFunctionSeen
+		start = fn.bodyStart
+		end = fn.bodyEnd
+	}
+	for tok := start; tok < end; tok++ {
+		if !rtgTokIsKind(meta.prog, tok, rtgTokIdent) {
+			continue
+		}
+		nameStart := int(rtgTokStart(meta.prog, tok))
+		nameEnd := int(rtgTokEnd(meta.prog, tok))
+		dependency := rtgFindMetaGlobalIndex(meta, nameStart, nameEnd, rtgTokVar)
+		if dependency >= 0 && !rtgLinearInitGlobal(g, dependency) {
+			return false
+		}
+		fnIndex := rtgFindMetaFunction(meta, nameStart, nameEnd)
+		if fnIndex >= 0 && !rtgLinearInitGlobal(g, -fnIndex-1) {
+			return false
+		}
+	}
+	if index < 0 {
+		return true
+	}
+	off := s.iotaValue
+	if rtgTypeIsInt(meta, s.typ) && rtgBytesEqualText(g.prog.src, s.nameStart, s.nameEnd, "rtgCompilerDefaultTarget") {
+		rtgAsmPrimaryImm(&g.asm, rtgCurrentTarget)
+		rtgAsmStorePrimaryBss(&g.asm, off)
+	} else if s.initStart < s.initEnd {
+		localBase := g.localCount
+		stackBase := g.stackUsed
+		ep := rtgNewExprParse()
+		rootIndex := rtgParseExpressionRoot(ep, g.prog, s.initStart, s.initEnd)
+		if rootIndex < 0 {
+			return false
+		}
+		tempOffset := rtgAddUnnamedLocal(g, s.typ)
+		if !rtgEmitExprToLocal(g, ep, rootIndex, tempOffset) {
+			return false
+		}
+		rtgEmitCopyStackToBss(g, tempOffset, off, rtgTypeCopySize(meta, s.typ))
+		g.localCount = localBase
+		g.stackUsed = stackBase
+	} else if rtgTypeIsSlice(meta, s.typ) {
+		rtgEmitInitEmptySliceBss(g, s.typ, off)
+	}
+	s.constValueOK = rtgInitDone
+	return true
+}
+
 func rtgLinearInitGlobals(g *rtgLinearGen) bool {
 	g.localCount = 0
 	g.stackUsed = 0
 	framePatch := rtgEmitGlobalInitFrameStart(g)
 	meta := g.meta
-	a := &g.asm
 	// Allocate every global before emitting any initializer. Go permits an
 	// initializer to depend on a variable declared later in the file.
 	for i := 0; i < len(meta.globals); i++ {
-		s := meta.globals[i]
+		s := &meta.globals[i]
 		if s.kind != rtgTokVar {
 			continue
 		}
 		off := g.asm.bssSize
+		s.iotaValue = off
 		g.globals = append(g.globals, rtgGlobalInfo{nameStart: s.nameStart, nameEnd: s.nameEnd, offset: off})
 		size := rtgTypeCopySize(meta, s.typ)
 		g.asm.bssSize += rtgAlignTo8(size)
 	}
-	globalIndex := 0
 	for i := 0; i < len(meta.globals); i++ {
-		s := meta.globals[i]
-		if s.kind != rtgTokVar {
-			continue
-		}
-		off := g.globals[globalIndex].offset
-		globalIndex++
-		if rtgTypeIsInt(meta, s.typ) && rtgBytesEqualText(g.prog.src, s.nameStart, s.nameEnd, "rtgCompilerDefaultTarget") {
-			rtgAsmPrimaryImm(a, rtgCurrentTarget)
-			rtgAsmStorePrimaryBss(a, off)
-			continue
-		}
-		if s.initStart < s.initEnd {
-			localBase := g.localCount
-			stackBase := g.stackUsed
-			ep := rtgNewExprParse()
-			rootIndex := rtgParseExpressionRoot(ep, g.prog, s.initStart, s.initEnd)
-			if rootIndex < 0 {
-				return false
-			}
-			tempOffset := rtgAddUnnamedLocal(g, s.typ)
-			if !rtgEmitExprToLocal(g, ep, rootIndex, tempOffset) {
-				return false
-			}
-			rtgEmitCopyStackToBss(g, tempOffset, off, rtgTypeCopySize(meta, s.typ))
-			g.localCount = localBase
-			g.stackUsed = stackBase
-		} else if rtgTypeIsSlice(meta, s.typ) {
-			rtgEmitInitEmptySliceBss(g, s.typ, off)
+		if meta.globals[i].kind == rtgTokVar && !rtgLinearInitGlobal(g, i) {
+			return false
 		}
 	}
 	rtgEmitGlobalInitFrameEnd(g, framePatch)
