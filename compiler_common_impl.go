@@ -10883,9 +10883,16 @@ func rtgEmitMakeStaticRingPrimary(g *rtgLinearGen, backingSize int, zeroSize int
 		addrOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 		rtgAsmStorePrimaryStack(a, addrOff)
 		rtgAsmCopyPrimaryToSecondary(a)
-		rtgAsmPrimaryImm(a, 0)
-		for at := 0; at < zeroSize; at += 8 {
-			rtgAsmStorePrimaryMemSecondaryDisp(a, at)
+		if zeroSize <= 128 {
+			rtgAsmPrimaryImm(a, 0)
+			for at := 0; at < zeroSize; at += 8 {
+				rtgAsmStorePrimaryMemSecondaryDisp(a, at)
+			}
+		} else {
+			rtgAsmPrimaryImm(a, zeroSize)
+			rtgAsmCopyPrimaryToTertiary(a)
+			rtgAsmLoadPrimaryStack(a, addrOff)
+			rtgAsmCallLabel(a, rtgEnsureMakeZeroHelper(g))
 		}
 		rtgAsmLoadPrimaryStack(a, addrOff)
 	}
