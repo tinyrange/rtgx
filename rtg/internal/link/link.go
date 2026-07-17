@@ -161,6 +161,9 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		Size:  0,
 		Line:  line,
 	})
+	if !lowerFunctionValuesCore(&program) {
+		return empty, false
+	}
 	return program, true
 }
 
@@ -168,6 +171,21 @@ func cloneCoreLinkString(value string) string {
 	data := make([]byte, len(value))
 	copy(data, []byte(value))
 	return string(data)
+}
+
+func replaceFunctionValueProgram(dst *unit.Program, src *unit.Program) {
+	dst.Package = src.Package
+	dst.ImportPath = src.ImportPath
+	dst.Text = src.Text
+	dst.Tokens = src.Tokens
+	dst.Imports = src.Imports
+	dst.Symbols = src.Symbols
+	dst.Decls = src.Decls
+	dst.Funcs = src.Funcs
+	dst.TypeRefs = src.TypeRefs
+	dst.Calls = src.Calls
+	dst.Refs = src.Refs
+	dst.Selectors = src.Selectors
 }
 
 func restoreCoreTokenLines(text []byte, tokens []unit.Token) {

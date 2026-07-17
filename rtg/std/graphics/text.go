@@ -190,9 +190,6 @@ func MeasureText(font *Font, text string) TextMetrics {
 }
 
 func glyphRows(r int) [7]byte {
-	if r >= 'a' && r <= 'z' {
-		r -= 'a' - 'A'
-	}
 	switch r {
 	case 'A':
 		return [7]byte{14, 17, 17, 31, 17, 17, 17}
@@ -246,6 +243,58 @@ func glyphRows(r int) [7]byte {
 		return [7]byte{17, 17, 10, 4, 4, 4, 4}
 	case 'Z':
 		return [7]byte{31, 1, 2, 4, 8, 16, 31}
+	case 'a':
+		return [7]byte{0, 0, 14, 1, 15, 17, 15}
+	case 'b':
+		return [7]byte{16, 16, 30, 17, 17, 17, 30}
+	case 'c':
+		return [7]byte{0, 0, 14, 17, 16, 17, 14}
+	case 'd':
+		return [7]byte{1, 1, 15, 17, 17, 17, 15}
+	case 'e':
+		return [7]byte{0, 0, 14, 17, 31, 16, 14}
+	case 'f':
+		return [7]byte{6, 8, 8, 28, 8, 8, 8}
+	case 'g':
+		return [7]byte{0, 0, 15, 17, 15, 1, 14}
+	case 'h':
+		return [7]byte{16, 16, 30, 17, 17, 17, 17}
+	case 'i':
+		return [7]byte{4, 0, 12, 4, 4, 4, 14}
+	case 'j':
+		return [7]byte{2, 0, 6, 2, 2, 18, 12}
+	case 'k':
+		return [7]byte{16, 16, 18, 20, 24, 20, 18}
+	case 'l':
+		return [7]byte{12, 4, 4, 4, 4, 4, 14}
+	case 'm':
+		return [7]byte{0, 0, 26, 21, 21, 21, 21}
+	case 'n':
+		return [7]byte{0, 0, 30, 17, 17, 17, 17}
+	case 'o':
+		return [7]byte{0, 0, 14, 17, 17, 17, 14}
+	case 'p':
+		return [7]byte{0, 0, 30, 17, 30, 16, 16}
+	case 'q':
+		return [7]byte{0, 0, 15, 17, 15, 1, 1}
+	case 'r':
+		return [7]byte{0, 0, 22, 25, 16, 16, 16}
+	case 's':
+		return [7]byte{0, 0, 15, 16, 14, 1, 30}
+	case 't':
+		return [7]byte{8, 8, 28, 8, 8, 9, 6}
+	case 'u':
+		return [7]byte{0, 0, 17, 17, 17, 19, 13}
+	case 'v':
+		return [7]byte{0, 0, 17, 17, 17, 10, 4}
+	case 'w':
+		return [7]byte{0, 0, 17, 17, 21, 21, 10}
+	case 'x':
+		return [7]byte{0, 0, 17, 10, 4, 10, 17}
+	case 'y':
+		return [7]byte{0, 0, 17, 17, 15, 1, 14}
+	case 'z':
+		return [7]byte{0, 0, 31, 2, 4, 8, 31}
 	case '0':
 		return [7]byte{14, 17, 19, 21, 25, 17, 14}
 	case '1':

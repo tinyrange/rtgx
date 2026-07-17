@@ -442,9 +442,10 @@ func (w *Window) dispatchNativeEvent(event int) {
 		if typ == 11 {
 			eventType = EventKeyUp
 		}
-		w.queue(Event{Type: eventType, Key: objcMsg0(event, selector("keyCode")), Modifiers: mods, Repeat: objcMsg0(event, selector("isARepeat")) != 0})
+		key := darwinKeyFromCode(objcMsg0(event, selector("keyCode")))
+		w.queue(Event{Type: eventType, Key: key, Modifiers: mods, Repeat: objcMsg0(event, selector("isARepeat")) != 0})
 		if typ == 10 {
-			text := cocoaUTF8(objcMsg0(event, selector("characters")))
+			text := textInputForKey(key, cocoaUTF8(objcMsg0(event, selector("characters"))))
 			if text != "" {
 				w.queue(Event{Type: EventTextInput, Text: text, Modifiers: mods})
 			}
@@ -464,7 +465,10 @@ func (w *Window) dispatchNativeEvent(event int) {
 			return
 		}
 		if typ == 22 {
-			w.queue(Event{Type: EventPointerWheel, X: x, Y: y, WheelX: objcMsgFloat0(event, selector("scrollingDeltaX")), WheelY: objcMsgFloat0(event, selector("scrollingDeltaY")), Modifiers: mods})
+			precise := objcMsg0(event, selector("hasPreciseScrollingDeltas")) != 0
+			wheelX := wheelDeltaPixels(objcMsgFloat0(event, selector("scrollingDeltaX")), precise)
+			wheelY := wheelDeltaPixels(objcMsgFloat0(event, selector("scrollingDeltaY")), precise)
+			w.queue(Event{Type: EventPointerWheel, X: x, Y: y, WheelX: wheelX, WheelY: wheelY, Modifiers: mods})
 			return
 		}
 		inside := x >= 0.0 && y >= 0.0 && x < Scalar(w.width) && y < Scalar(w.height)
@@ -605,17 +609,15 @@ func (w *Window) Present() bool {
 		return true
 	}
 	w.refreshBackingScale()
-	dirty := intersectPixelRect(pixelRect{maxX: w.width, maxY: w.height}, w.surface.dirty)
-	if dirty.maxX <= dirty.minX || dirty.maxY <= dirty.minY {
-		w.surface.ResetDirty()
-		return true
-	}
 	row := w.surface.Stride
-	for y := dirty.minY; y < dirty.maxY; y++ {
-		src := y * row
-		dst := (w.height - y - 1) * row
-		for x := dirty.minX * 4; x < dirty.maxX*4; x++ {
-			w.bottomUp[dst+x] = w.surface.Pixels[src+x]
+	for regionIndex := 0; regionIndex < len(w.surface.dirtyRects); regionIndex++ {
+		dirty := intersectPixelRect(pixelRect{maxX: w.width, maxY: w.height}, w.surface.dirtyRects[regionIndex])
+		for y := dirty.minY; y < dirty.maxY; y++ {
+			src := y * row
+			dst := (w.height - y - 1) * row
+			for x := dirty.minX * 4; x < dirty.maxX*4; x++ {
+				w.bottomUp[dst+x] = w.surface.Pixels[src+x]
+			}
 		}
 	}
 	objcMsg0(w.context, selector("makeCurrentContext"))
@@ -626,12 +628,18 @@ func (w *Window) Present() bool {
 	glMatrixMode(glModelView)
 	glLoadIdentity()
 	glDrawBuffer(glFrontAndBack)
-	glRasterPos2i(dirty.minX, w.height-dirty.maxY)
 	glPixelZoom(w.backingScale, w.backingScale)
 	glPixelStorei(glUnpackAlignment, 1)
 	glPixelStorei(glUnpackRowLength, w.width)
-	start := (w.height-dirty.maxY)*row + dirty.minX*4
-	glDrawPixels(dirty.maxX-dirty.minX, dirty.maxY-dirty.minY, glRGBA, glUnsignedByte, w.bottomUp[start:])
+	for regionIndex := 0; regionIndex < len(w.surface.dirtyRects); regionIndex++ {
+		dirty := intersectPixelRect(pixelRect{maxX: w.width, maxY: w.height}, w.surface.dirtyRects[regionIndex])
+		if dirty.maxX <= dirty.minX || dirty.maxY <= dirty.minY {
+			continue
+		}
+		glRasterPos2i(dirty.minX, w.height-dirty.maxY)
+		start := (w.height-dirty.maxY)*row + dirty.minX*4
+		glDrawPixels(dirty.maxX-dirty.minX, dirty.maxY-dirty.minY, glRGBA, glUnsignedByte, w.bottomUp[start:])
+	}
 	glPixelStorei(glUnpackRowLength, 0)
 	glFlush()
 	objcMsg0(w.context, selector("flushBuffer"))

@@ -205,6 +205,20 @@ func TestTextMetricsUTF8AndGlyphDrawing(t *testing.T) {
 	}
 }
 
+func TestBuiltinFontPreservesLowercaseShapes(t *testing.T) {
+	upper := glyphRows('A')
+	lower := glyphRows('a')
+	if lower == upper {
+		t.Fatal("builtin font folded lowercase into uppercase")
+	}
+	if lower[0] != 0 || lower[1] != 0 || lower[2] == 0 {
+		t.Fatalf("lowercase a rows = %#v", lower)
+	}
+	if glyphRow('a', 0) != 0 || glyphRow('A', 0) == 0 {
+		t.Fatal("RTG runtime glyph table folded lowercase into uppercase")
+	}
+}
+
 func putTestU16(data []byte, at int, value int) {
 	data[at] = byte(value >> 8)
 	data[at+1] = byte(value)
@@ -396,5 +410,60 @@ func TestEncodePPM(t *testing.T) {
 	}
 	if NewMask(1, 1, []byte{255}).EncodePPM() != nil {
 		t.Fatal("A8 image encoded as PPM")
+	}
+}
+
+func TestPlatformKeyNormalization(t *testing.T) {
+	if windowsKeyFromVirtual(37) != KeyLeft || windowsKeyFromVirtual(83) != KeyS || windowsKeyFromVirtual(-1) != KeyUnknown {
+		t.Fatal("Windows key normalization drifted")
+	}
+	if darwinKeyFromCode(123) != KeyLeft || darwinKeyFromCode(1) != KeyS || darwinKeyFromCode(-1) != KeyUnknown {
+		t.Fatal("Darwin key normalization drifted")
+	}
+}
+
+func TestNavigationKeysCannotBecomeTextInput(t *testing.T) {
+	navigation := []Key{
+		KeyBackspace, KeyDelete, KeyEscape,
+		KeyLeft, KeyRight, KeyUp, KeyDown,
+		KeyHome, KeyEnd, KeyPageUp, KeyPageDown,
+	}
+	for _, key := range navigation {
+		if got := textInputForKey(key, "\xef\x9c\x80"); got != "" {
+			t.Fatalf("navigation key %d produced text %q", key, got)
+		}
+	}
+
+	textKeys := []Key{KeyUnknown, KeyEnter, KeyTab, KeySpace, KeyA, KeyS}
+	for _, key := range textKeys {
+		if got := textInputForKey(key, "x"); got != "x" {
+			t.Fatalf("text key %d discarded text input", key)
+		}
+	}
+}
+
+func TestSurfaceDamageRegionsPreserveDisjointUpdates(t *testing.T) {
+	surface := NewSurface(100, 60)
+	surface.ResetDirty()
+	surface.BeginDamage(R(2, 3, 4, 5))
+	surface.FillRect(R(2, 3, 4, 5), White)
+	surface.EndDamage()
+	surface.BeginDamage(R(80, 40, 3, 2))
+	surface.FillRect(R(80, 40, 3, 2), White)
+	surface.EndDamage()
+	regions := surface.DirtyRects()
+	if len(regions) != 2 || regions[0] != R(2, 3, 4, 5) || regions[1] != R(80, 40, 3, 2) {
+		t.Fatalf("damage regions = %#v", regions)
+	}
+	bounding, ok := surface.DirtyRect()
+	if !ok || bounding != (Rect{MinX: 2, MinY: 3, MaxX: 83, MaxY: 42}) {
+		t.Fatalf("damage bounding rect = %#v, %v", bounding, ok)
+	}
+
+	surface.ResetDirty()
+	surface.FillRect(R(7, 8, 1, 1), White)
+	regions = surface.DirtyRects()
+	if len(regions) != 1 || regions[0] != R(7, 8, 1, 1) {
+		t.Fatalf("single-pixel immediate damage = %#v", regions)
 	}
 }

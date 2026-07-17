@@ -436,6 +436,137 @@ func appMain() int {
 	}
 }
 
+func TestLinkBuildCoreLowersBoundCallbackField(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/widgets/widgets.go", Src: []byte(`package widgets
+
+type Event struct { X int }
+type ClickHandler func(sender *Button, event Event)
+type Button struct { Click ClickHandler }
+
+func (button *Button) Dispatch(event Event) {
+	if button.Click != nil {
+		button.Click(button, event)
+	}
+}
+`)},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/widgets"
+
+type form struct {
+	button widgets.Button
+	total int
+}
+
+func (f *form) clicked(sender *widgets.Button, event widgets.Event) {
+	f.total += event.X
+}
+
+func main() {
+	f := &form{}
+	f.button.Click = f.clicked
+	f.button.Dispatch(widgets.Event{X: 42})
+	f.button.Click = nil
+	if f.total == 42 && f.button.Click == nil { print("PASS\n"); return }
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	for _, forbidden := range [][]byte{
+		[]byte("type ClickHandler func"),
+		[]byte("= f.clicked"),
+		[]byte("button.Click(button"),
+	} {
+		if bytes.Contains(linked.Program.Text, forbidden) {
+			t.Fatalf("linked backend subset still contains %q:\n%s", forbidden, string(linked.Program.Text))
+		}
+	}
+	if _, ok := unit.Unmarshal(linked.Data); !ok {
+		t.Fatal("linked callback unit did not decode")
+	}
+}
+
+func TestLinkBuildCoreLowersEscapingCapturedClosure(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type counter struct { step func(int) int }
+
+func newCounter(initial int) *counter {
+	value := initial
+	return &counter{step: func(delta int) int {
+		value += delta
+		return value
+	}}
+}
+
+func main() {
+	c := newCounter(10)
+	if c.step(12) == 22 && c.step(20) == 42 { print("PASS\n"); return }
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	for _, forbidden := range [][]byte{
+		[]byte("step func(int) int"),
+		[]byte("func(delta int) int"),
+		[]byte("c.step(12)"),
+	} {
+		if bytes.Contains(linked.Program.Text, forbidden) {
+			t.Fatalf("linked backend subset still contains %q:\n%s", forbidden, string(linked.Program.Text))
+		}
+	}
+	if _, ok := unit.Unmarshal(linked.Data); !ok {
+		t.Fatal("linked closure unit did not decode")
+	}
+}
+
+func TestLinkBuildCoreKeepsMethodThatSharesCallbackFieldName(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type Surface struct{}
+type PaintHandler func(surface *Surface)
+type Control struct { Paint PaintHandler }
+type Form struct{}
+func (f *Form) Paint(surface *Surface) bool { return surface != nil }
+type MainForm struct { Form }
+
+func NewForm() *MainForm { return &MainForm{} }
+func (c *Control) paint(surface *Surface) {}
+
+func appMain() int {
+	form := NewForm()
+	if !form.Paint(&Surface{}) { return 1 }
+	control := &Control{}
+	control.Paint = control.paint
+	control.Paint(&Surface{})
+	return 0
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte("form.Paint(&Surface{})")) {
+		t.Fatalf("ordinary method sharing callback field name was rewritten:\n%s", linked.Program.Text)
+	}
+	if bytes.Contains(linked.Program.Text, []byte("control.Paint(&Surface{})")) {
+		t.Fatalf("callback field call was not lowered:\n%s", linked.Program.Text)
+	}
+}
+
 func TestLinkBuildCorePreservesSearchClosure(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

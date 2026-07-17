@@ -119,7 +119,6 @@ func linkPrograms(programs []unit.Program, root int, rootName string) (unit.Prog
 	})
 	return program, true
 }
-
 func reserveLinkedProgram(program *unit.Program, programs []unit.Program) {
 	textCap := 0
 	tokenCap := 1
