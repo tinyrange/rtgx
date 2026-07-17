@@ -94,6 +94,10 @@ func rtgTryCompileScalarProgramAmd64(p *rtgProgram, meta *rtgMeta) rtgCompileRes
 		return result
 	}
 	rtgAsmCallLabel(a, g.funcLabels[appIndex])
+	if !rtgEmitProgramPanicCheck(&g) {
+		var result rtgCompileResult
+		return result
+	}
 	if rtgTargetIsWindows() {
 		rtgAsmCopyPrimaryToTertiary(a)
 		rtgWinAmd64CallImport(a, rtgWinImportExitProcess, 40)
