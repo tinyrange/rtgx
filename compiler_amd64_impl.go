@@ -67,7 +67,9 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		if !rtgEmitClosureCaptureWriteback(g) {
 			return false
 		}
-		rtgAsmPrimaryImm(a, 0)
+		if metaFn.resultType != 0 {
+			rtgAsmPrimaryImm(a, 0)
+		}
 		rtgAsmLeave(a)
 		rtgAsmRet(a)
 	}
