@@ -9935,6 +9935,9 @@ func rtgConversionTypeFromExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 	if builtin != 0 {
 		return builtin
 	}
+	if rtgTokCharIs(g.prog, callee.tok, '[') {
+		return rtgTypeFromExpr(g, ep, idx)
+	}
 	return rtgFindTypeByRange(g, callee.nameStart, callee.nameEnd)
 }
 func rtgLocalTypeAtOffset(g *rtgLinearGen, offset int) int {
@@ -10668,8 +10671,18 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				return rtgEmitMakeSliceRegs(g, ep, idx)
 			}
 		}
-		if e.argCount == 1 && callee == rtgIdentByteSlice {
-			return rtgEmitByteSliceConversionRegs(g, ep, idx)
+		if e.argCount == 1 {
+			conversion := rtgResolveType(meta, rtgConversionTypeFromExpr(g, ep, calleeLeft))
+			argIndex := ep.args[e.firstArg]
+			if conversion.kind == rtgTypeSlice && rtgTypeIsString(meta, rtgInferParsedExprType(g, ep, argIndex)) {
+				elem := rtgResolveType(meta, conversion.elem)
+				if elem.kind == rtgTypeByte {
+					return rtgEmitByteSliceConversionRegs(g, ep, idx)
+				}
+				if elem.kind == rtgTypeInt32 {
+					return rtgEmitRuneSliceConversionRegs(g, ep, idx)
+				}
+			}
 		}
 		callType := rtgInferParsedExprType(g, ep, idx)
 		if !rtgTypeIsSlice(meta, callType) {
@@ -11039,6 +11052,80 @@ func rtgEmitByteSliceConversionRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	rtgAsmMarkLabel(a, doneLabel)
 	rtgAsmLoadPrimaryStack(a, destOff)
 	rtgAsmLoadSecondaryStack(a, lenOff)
+	rtgAsmCopySecondaryToTertiary(a)
+	return true
+}
+
+func rtgEmitCheckedArenaAllocStackPrimary(g *rtgLinearGen, sizeOff int) {
+	a := &g.asm
+	rtgEmitArenaAllocStackPrimary(g, sizeOff)
+	ok := rtgAsmNewLabel(a)
+	rtgAsmCmpPrimaryImm8(a, 0)
+	rtgAsmJnzLabel(a, ok)
+	rtgAsmLoadPrimaryStack(a, sizeOff)
+	rtgAsmCmpPrimaryImm8(a, 0)
+	rtgAsmJzLabel(a, ok)
+	rtgAsmPrimaryImm(a, 2)
+	rtgEmitExitStatus(g)
+	rtgAsmMarkLabel(a, ok)
+}
+
+func rtgEmitArenaElementLimit(g *rtgLinearGen, countOff int, elemSize int) {
+	a := &g.asm
+	ok := rtgAsmNewLabel(a)
+	rtgEmitStackLessImmJump(g, countOff, rtgStringArenaSize()/elemSize+1, ok)
+	rtgAsmPrimaryImm(a, 2)
+	rtgEmitExitStatus(g)
+	rtgAsmMarkLabel(a, ok)
+}
+
+func rtgEmitRuneSliceConversionRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	a := &g.asm
+	e := &ep.exprs[idx]
+	if e.argCount != 1 {
+		return false
+	}
+	srcOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	lenOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	sizeOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	destOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	indexOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	countOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	runeOff := rtgAddUnnamedLocal(g, rtgTypeInt32)
+	widthOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	if !rtgEmitStringValueRegs(g, ep, ep.args[e.firstArg]) {
+		return false
+	}
+	rtgAsmStorePrimaryStack(a, srcOff)
+	rtgAsmStoreSecondaryStack(a, lenOff)
+	rtgEmitArenaElementLimit(g, lenOff, 4)
+	rtgAsmLoadTertiaryStack(a, lenOff)
+	rtgAsmMulTertiaryImm(a, 4)
+	rtgAsmPushTertiary(a)
+	rtgAsmPopPrimary(a)
+	rtgAsmStorePrimaryStack(a, sizeOff)
+	rtgEmitCheckedArenaAllocStackPrimary(g, sizeOff)
+	rtgAsmStorePrimaryStack(a, destOff)
+	rtgAsmStoreStackImm(a, indexOff, 0)
+	rtgAsmStoreStackImm(a, countOff, 0)
+	loop := rtgAsmNewLabel(a)
+	done := rtgAsmNewLabel(a)
+	rtgAsmMarkLabel(a, loop)
+	rtgAsmJgeStackStack(a, indexOff, lenOff, done)
+	rtgEmitStringRangeDecode(g, srcOff, lenOff, indexOff, runeOff, widthOff)
+	rtgAsmLoadPrimaryStack(a, runeOff)
+	rtgAsmLoadSecondaryStack(a, destOff)
+	rtgAsmLoadTertiaryStack(a, countOff)
+	rtgAsmStorePrimaryMemSecondaryTertiarySize(a, 4)
+	rtgAsmLoadPrimaryStack(a, indexOff)
+	rtgAsmLoadTertiaryStack(a, widthOff)
+	rtgAsmAddPrimaryTertiary(a)
+	rtgAsmStorePrimaryStack(a, indexOff)
+	rtgAsmIncStack(a, countOff)
+	rtgAsmJmpLabel(a, loop)
+	rtgAsmMarkLabel(a, done)
+	rtgAsmLoadPrimaryStack(a, destOff)
+	rtgAsmLoadSecondaryStack(a, countOff)
 	rtgAsmCopySecondaryToTertiary(a)
 	return true
 }
@@ -15850,7 +15937,7 @@ func rtgEmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		callee := &ep.exprs[e.left]
 		return rtgEmitStringValueRegs(g, ep, callee.left)
 	}
-	if e.kind == rtgExprCall && e.argCount == 1 && rtgExprIsIdentText(g.prog, ep, e.left, "string") {
+	if e.kind == rtgExprCall && e.argCount == 1 && rtgTypeIsString(g.meta, rtgConversionTypeFromExpr(g, ep, e.left)) {
 		argIndex := ep.args[e.firstArg]
 		if rtgTypeIsString(g.meta, rtgInferParsedExprType(g, ep, argIndex)) {
 			return rtgEmitStringValueRegs(g, ep, argIndex)
@@ -15861,6 +15948,9 @@ func rtgEmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			elem := rtgResolveType(g.meta, argResolved.elem)
 			if elem.kind == rtgTypeByte {
 				return rtgEmitByteSliceStringCopyValueRegs(g, ep, argIndex)
+			}
+			if elem.kind == rtgTypeInt32 {
+				return rtgEmitRuneSliceStringCopyValueRegs(g, ep, argIndex)
 			}
 		}
 	}
@@ -16305,6 +16395,109 @@ func rtgEmitByteSliceStringCopyValueRegs(g *rtgLinearGen, ep *rtgExprParse, argI
 	rtgAsmEmit16(a, 0xa4f3)
 	rtgAsmLoadPrimaryStack(a, destOff)
 	rtgAsmLoadSecondaryStack(a, lenOff)
+	return true
+}
+
+func rtgEmitUTF8StoreByte(g *rtgLinearGen, valueOff int, destOff int, lenOff int, divisor int, prefix int) {
+	a := &g.asm
+	rtgAsmLoadPrimaryStack(a, valueOff)
+	if divisor != 1 {
+		rtgAsmCopyPrimaryToTertiary(a)
+		rtgAsmPrimaryImm(a, divisor)
+		rtgAsmDivLeftTertiaryRightPrimary(a, false)
+	}
+	if prefix == 128 {
+		rtgAsmCopyPrimaryToTertiary(a)
+		rtgAsmPrimaryImm(a, 64)
+		rtgAsmDivLeftTertiaryRightPrimary(a, true)
+	}
+	if prefix != 0 {
+		rtgAsmPushPrimary(a)
+		rtgAsmPrimaryImm(a, prefix)
+		rtgAsmPopTertiary(a)
+		rtgAsmAddPrimaryTertiary(a)
+	}
+	rtgAsmPushPrimary(a)
+	rtgAsmLoadSecondaryStack(a, destOff)
+	rtgAsmLoadTertiaryStack(a, lenOff)
+	rtgAsmPopPrimary(a)
+	rtgAsmStorePrimaryMemSecondaryTertiarySize(a, 1)
+	rtgAsmIncStack(a, lenOff)
+}
+
+func rtgEmitRuneSliceStringCopyValueRegs(g *rtgLinearGen, ep *rtgExprParse, argIndex int) bool {
+	a := &g.asm
+	if !rtgEmitSlicePtrLen(g, ep, argIndex) {
+		return false
+	}
+	srcOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	lenOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	sizeOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	destOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	indexOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	outOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	valueOff := rtgAddUnnamedLocal(g, rtgTypeInt32)
+	rtgAsmStorePrimaryStack(a, srcOff)
+	rtgAsmPushTertiary(a)
+	rtgAsmPopPrimary(a)
+	rtgAsmStorePrimaryStack(a, lenOff)
+	rtgEmitArenaElementLimit(g, lenOff, 4)
+	rtgAsmLoadTertiaryStack(a, lenOff)
+	rtgAsmMulTertiaryImm(a, 4)
+	rtgAsmPushTertiary(a)
+	rtgAsmPopPrimary(a)
+	rtgAsmStorePrimaryStack(a, sizeOff)
+	rtgEmitCheckedArenaAllocStackPrimary(g, sizeOff)
+	rtgAsmStorePrimaryStack(a, destOff)
+	rtgAsmStoreStackImm(a, indexOff, 0)
+	rtgAsmStoreStackImm(a, outOff, 0)
+	loop := rtgAsmNewLabel(a)
+	done := rtgAsmNewLabel(a)
+	invalid := rtgAsmNewLabel(a)
+	valid := rtgAsmNewLabel(a)
+	one := rtgAsmNewLabel(a)
+	two := rtgAsmNewLabel(a)
+	three := rtgAsmNewLabel(a)
+	next := rtgAsmNewLabel(a)
+	rtgAsmMarkLabel(a, loop)
+	rtgAsmJgeStackStack(a, indexOff, lenOff, done)
+	rtgAsmLoadPrimaryStack(a, srcOff)
+	rtgAsmLoadTertiaryStack(a, indexOff)
+	rtgAsmLoadPrimaryIndexTertiarySize(a, 4)
+	rtgAsmStorePrimaryStack(a, valueOff)
+	rtgEmitStackLessImmJump(g, valueOff, 0, invalid)
+	rtgEmitStackGreaterEqualImmJump(g, valueOff, 1114112, invalid)
+	rtgEmitStackLessImmJump(g, valueOff, 55296, valid)
+	rtgEmitStackGreaterEqualImmJump(g, valueOff, 57344, valid)
+	rtgAsmJmpLabel(a, invalid)
+	rtgAsmMarkLabel(a, invalid)
+	rtgAsmStoreStackImm(a, valueOff, 65533)
+	rtgAsmMarkLabel(a, valid)
+	rtgEmitStackLessImmJump(g, valueOff, 128, one)
+	rtgEmitStackLessImmJump(g, valueOff, 2048, two)
+	rtgEmitStackLessImmJump(g, valueOff, 65536, three)
+	rtgEmitUTF8StoreByte(g, valueOff, destOff, outOff, 262144, 240)
+	rtgEmitUTF8StoreByte(g, valueOff, destOff, outOff, 4096, 128)
+	rtgEmitUTF8StoreByte(g, valueOff, destOff, outOff, 64, 128)
+	rtgEmitUTF8StoreByte(g, valueOff, destOff, outOff, 1, 128)
+	rtgAsmJmpLabel(a, next)
+	rtgAsmMarkLabel(a, three)
+	rtgEmitUTF8StoreByte(g, valueOff, destOff, outOff, 4096, 224)
+	rtgEmitUTF8StoreByte(g, valueOff, destOff, outOff, 64, 128)
+	rtgEmitUTF8StoreByte(g, valueOff, destOff, outOff, 1, 128)
+	rtgAsmJmpLabel(a, next)
+	rtgAsmMarkLabel(a, two)
+	rtgEmitUTF8StoreByte(g, valueOff, destOff, outOff, 64, 192)
+	rtgEmitUTF8StoreByte(g, valueOff, destOff, outOff, 1, 128)
+	rtgAsmJmpLabel(a, next)
+	rtgAsmMarkLabel(a, one)
+	rtgEmitUTF8StoreByte(g, valueOff, destOff, outOff, 1, 0)
+	rtgAsmMarkLabel(a, next)
+	rtgAsmIncStack(a, indexOff)
+	rtgAsmJmpLabel(a, loop)
+	rtgAsmMarkLabel(a, done)
+	rtgAsmLoadPrimaryStack(a, destOff)
+	rtgAsmLoadSecondaryStack(a, outOff)
 	return true
 }
 
