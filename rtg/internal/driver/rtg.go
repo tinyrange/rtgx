@@ -167,6 +167,7 @@ func (fs RTGFS) ReadFile(path string) ([]byte, bool) {
 	if fd < 0 {
 		return nil, false
 	}
+	arenaStart := arena.Mark()
 	out := make([]byte, 4096)
 	used := 0
 	for {
@@ -178,6 +179,7 @@ func (fs RTGFS) ReadFile(path string) ([]byte, bool) {
 		n := read(fd, out[used:], -1)
 		if n < 0 {
 			close(fd)
+			arena.Reset(arenaStart)
 			return nil, false
 		}
 		if n == 0 {
@@ -186,6 +188,11 @@ func (fs RTGFS) ReadFile(path string) ([]byte, bool) {
 		used += n
 	}
 	close(fd)
+	arenaEnd := arena.Mark()
+	finalBufferStart := arenaEnd - cap(out)
+	if finalBufferStart > arenaStart {
+		arena.Discard(arenaStart, finalBufferStart)
+	}
 	return out[:used], true
 }
 
