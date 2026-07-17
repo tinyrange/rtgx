@@ -61,6 +61,10 @@ func rtgTryCompileScalarProgramWasm32(p *rtgProgram, meta *rtgMeta) rtgCompileRe
 		return result
 	}
 	rtgAsmCallLabel(a, g.funcLabels[appIndex])
+	if !rtgEmitProgramPanicCheck(&g) {
+		var result rtgCompileResult
+		return result
+	}
 	rtgWasm32AsmExit(a)
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 		i := g.funcQueue[queueIndex]

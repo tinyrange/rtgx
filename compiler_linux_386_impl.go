@@ -116,6 +116,10 @@ func rtgTryCompileScalarProgram386(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 		return result
 	}
 	rtgAsmCallLabel(a, g.funcLabels[appIndex])
+	if !rtgEmitProgramPanicCheck(&g) {
+		var result rtgCompileResult
+		return result
+	}
 	if rtgTargetIsWindows() {
 		rtgAsmPushPrimary(a)
 		rtgWin386CallImport(a, rtgWinImportExitProcess)

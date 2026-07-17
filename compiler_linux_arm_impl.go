@@ -83,6 +83,10 @@ func rtgTryCompileScalarProgramArm(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 		return result
 	}
 	rtgAsmCallLabel(a, g.funcLabels[appIndex])
+	if !rtgEmitProgramPanicCheck(&g) {
+		var result rtgCompileResult
+		return result
+	}
 	rtgAsmCopyPrimaryToCallWord0(a)
 	rtgAsmPrimaryImm(a, 1)
 	rtgAsmSyscall(a)
