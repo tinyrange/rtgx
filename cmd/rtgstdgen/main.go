@@ -280,7 +280,7 @@ func compressBundle(data []byte) []byte {
 		for bit := 0; bit < 8 && pos < len(data); bit++ {
 			distance, length := matchAt(pos)
 			if length >= 3 {
-				pair := (distance-1)<<4 | length - 3
+				pair := (distance-1)<<4 | (length - 3)
 				out = append(out, byte(pair>>8), byte(pair))
 				for i := 0; i < length; i++ {
 					addPosition(pos + i)

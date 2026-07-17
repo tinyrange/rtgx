@@ -416,7 +416,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, line i
 		action := src.Tokens[i].Line
 		tok := src.Tokens[i]
 		if tok.Kind == unit.TokenEOF {
-			src.Tokens[i].Line = finalEOF
+			src.Tokens[i].Line = len(dst.Tokens)
 			continue
 		}
 		tokStart := tok.Start
@@ -540,6 +540,7 @@ func linkedTokenActions(program *unit.Program, aliases *[]string, symbolOffsets 
 		}
 	}
 	if programImportsUnsafe(program) {
+		markUnsafeSizeofTokens(program, actions)
 		markUnsafePointerCallTokens(program, actions)
 		markUnsafePointerConversionTokens(program, actions)
 	}
@@ -636,6 +637,28 @@ func markUnsafePointerCallTokens(program *unit.Program, actions []int) {
 		markSkipToken(actions, selector.NameTok)
 		markSkipToken(actions, open)
 		markSkipToken(actions, close)
+	}
+}
+
+func markUnsafeSizeofTokens(program *unit.Program, actions []int) {
+	for i := 0; i < len(program.Imports); i++ {
+		imp := program.Imports[i]
+		if !tokenTextEquals(program, imp.PathTok, "\"unsafe\"") && !tokenTextEquals(program, imp.PathTok, "`unsafe`") {
+			continue
+		}
+		name := "unsafe"
+		if imp.NameTok >= 0 {
+			name = tokenText(program, imp.NameTok)
+		}
+		if name == "" || name == "." || name == "_" {
+			continue
+		}
+		for tok := 0; tok+2 < len(program.Tokens); tok++ {
+			if tokenText(program, tok) == name && tokenTextEquals(program, tok+1, ".") && tokenTextEquals(program, tok+2, "Sizeof") {
+				markRedirectToken(actions, tok, tok+2)
+				markRedirectToken(actions, tok+1, tok+2)
+			}
+		}
 	}
 }
 

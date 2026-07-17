@@ -66,6 +66,36 @@ func Value() int { return answer }
 	}
 }
 
+func TestLinkUnitsMapsDependencyEOFToPackageBoundary(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/pkg/lib"
+
+func appMain() int { var value lib.Final; return len(value) }
+`)},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
+
+type Final []byte
+`)},
+	})
+	program, ok := LinkUnits(result.Units, result.Root)
+	if !ok {
+		t.Fatal("LinkUnits failed")
+	}
+	if len(program.Decls) != 1 {
+		t.Fatalf("linked declarations = %#v, want dependency type", program.Decls)
+	}
+	decl := program.Decls[0]
+	if decl.EndTok >= len(program.Tokens)-1 {
+		t.Fatalf("dependency declaration ends at linked EOF %d", decl.EndTok)
+	}
+	if got := linkedTokenText(program, decl.EndTok); got != "package" {
+		t.Fatalf("dependency declaration boundary = %q, want next package", got)
+	}
+}
+
 func TestLinkBuildUsesSerializedPackageUnitData(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
@@ -284,6 +314,34 @@ func appMain() int {
 	}
 	if _, err := rtgunit.Unmarshal(linked.Data); err != nil {
 		t.Fatalf("linked unit did not decode: %v", err)
+	}
+}
+
+func TestLinkUnitsCoreLowersUnresolvedUnsafeSizeof(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/std/unsafe/unsafe.go", Src: []byte(`package unsafe
+
+type Pointer *byte
+`)},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import u "unsafe"
+
+func appMain() int {
+	var value int
+	return int(u.Sizeof(value))
+}
+`)},
+	})
+	result.Units[result.Root].Program.Selectors = nil
+	result.Units[result.Root].Program.Calls = nil
+	program, ok := LinkUnitsCore(result.Units, result.Root)
+	if !ok {
+		t.Fatal("LinkUnitsCore failed")
+	}
+	if bytes.Contains(program.Text, []byte("u.Sizeof")) || !bytes.Contains(program.Text, []byte("Sizeof(value)")) {
+		t.Fatalf("linked source did not lower unsafe.Sizeof:\n%s", string(program.Text))
 	}
 }
 
