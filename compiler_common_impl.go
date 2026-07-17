@@ -1673,6 +1673,7 @@ func rtgParseProgram(src []byte) rtgProgram {
 	p.decls = make([]rtgDecl, 0, declCap)
 	p.funcs = make([]rtgFuncDecl, 0, funcCap)
 	p.ok = true
+	tokenCount := rtgTokCount(&p)
 
 	i := 0
 	if !rtgTokIsKind(&p, i, rtgTokPackage) {
@@ -1686,7 +1687,7 @@ func rtgParseProgram(src []byte) rtgProgram {
 	}
 	i++
 
-	for i < rtgTokCount(&p) && rtgTokKind(&p, i) != rtgTokEOF {
+	for i < tokenCount && rtgTokKind(&p, i) != rtgTokEOF {
 		if rtgTokIsKind(&p, i, rtgTokPackage) {
 			i++
 			if !rtgTokIsKind(&p, i, rtgTokIdent) {
@@ -1752,10 +1753,11 @@ func rtgParseProgram(src []byte) rtgProgram {
 
 func rtgParseFuncDecl(p *rtgProgram, start int, fn *rtgFuncDecl) {
 	fn.startTok = start
+	tokenCount := rtgTokCount(p)
 	i := start + 1
 	if !rtgTokIsKind(p, i, rtgTokIdent) {
 		receiverEnd := i + 1
-		for receiverEnd < rtgTokCount(p) && !rtgTokCharIs(p, receiverEnd, ')') {
+		for receiverEnd < tokenCount && !rtgTokCharIs(p, receiverEnd, ')') {
 			receiverEnd++
 		}
 		if receiverEnd <= i {
@@ -1772,14 +1774,14 @@ func rtgParseFuncDecl(p *rtgProgram, start int, fn *rtgFuncDecl) {
 	fn.nameStart = int(rtgTokStart(p, i))
 	fn.nameEnd = int(rtgTokEnd(p, i))
 	i++
-	i = rtgFindStatementBodyOpen(p, i, rtgTokCount(p))
+	i = rtgFindStatementBodyOpen(p, i, tokenCount)
 	if !rtgTokCharIs(p, i, '{') {
 		return
 	}
 	fn.bodyStart = i
 	depth := 1
 	i++
-	for i < rtgTokCount(p) && depth > 0 {
+	for i < tokenCount && depth > 0 {
 		if rtgTokCharIs(p, i, '{') {
 			depth++
 		} else if rtgTokCharIs(p, i, '}') {
@@ -1800,7 +1802,8 @@ func rtgSkipBalanced(p *rtgProgram, start int, open byte, close byte) int {
 	}
 	depth := 1
 	i := start + 1
-	for i < rtgTokCount(p) && depth > 0 {
+	tokenCount := rtgTokCount(p)
+	for i < tokenCount && depth > 0 {
 		c := rtgTokSingleChar(p, i)
 		if c == open {
 			depth++
@@ -1816,13 +1819,14 @@ func rtgSkipBalanced(p *rtgProgram, start int, open byte, close byte) int {
 }
 
 func rtgSkipTopLevelLine(p *rtgProgram, start int) int {
-	if start >= rtgTokCount(p) {
+	tokenCount := rtgTokCount(p)
+	if start >= tokenCount {
 		return start
 	}
 	line := rtgTokLine(p, start-1)
 	i := start
 	depth := 0
-	for i < rtgTokCount(p) {
+	for i < tokenCount {
 		if rtgTokKind(p, i) == rtgTokEOF {
 			return i
 		}
@@ -2127,7 +2131,21 @@ func rtgTokIsKind(p *rtgProgram, i int, kind int) bool {
 }
 
 func rtgTokIdentIs(p *rtgProgram, i int, text string) bool {
-	return rtgTokIsKind(p, i, rtgTokIdent) && rtgBytesEqualText(p.src, int(rtgTokStart(p, i)), int(rtgTokEnd(p, i)), text)
+	data := p.toks.data
+	base := i * rtgTokenStride
+	if i < 0 || base >= len(data) || int(data[base])&255 != rtgTokIdent {
+		return false
+	}
+	start := int(data[base+1])
+	if int(data[base+2])-start != len(text) {
+		return false
+	}
+	for j := 0; j < len(text); j++ {
+		if p.src[start+j] != text[j] {
+			return false
+		}
+	}
+	return true
 }
 
 func rtgTokSingleChar(p *rtgProgram, i int) byte {
@@ -3982,11 +4000,13 @@ func rtgParseTopDeclGroup(m *rtgMeta, p *rtgProgram, kind int, openTok int, endT
 }
 
 func rtgHashRange(src []byte, start int, end int) int {
-	h := 0
-	for i := start; i < end; i++ {
-		h = (h*33 + int(src[i])) & 2147483647
+	size := end - start
+	if size <= 0 {
+		return 0
 	}
-	return h
+	// This is only a bucket fingerprint; every lookup still verifies all bytes.
+	// Sampling keeps identifier lookup bounded even for long generated names.
+	return (((size*33+int(src[start]))*33+int(src[end-1]))*33 + int(src[start+size/2])) & 2147483647
 }
 
 func rtgMetaAppendGlobal(m *rtgMeta, sym rtgSymbolInfo) {
@@ -4547,11 +4567,12 @@ func rtgParseFuncInfo(m *rtgMeta, fnIndex int) {
 }
 
 func rtgParseFuncLiterals(m *rtgMeta, p *rtgProgram) {
-	for tok := 0; tok < rtgTokCount(p); tok++ {
-		if !rtgTokIsKind(p, tok, rtgTokFunc) || !rtgTokCharIs(p, tok+1, '(') || rtgFuncTokenIsDeclarationOrSignature(p, tok) {
+	tokenCount := rtgTokCount(p)
+	for tok := 0; tok < tokenCount; tok++ {
+		if int(p.toks.data[tok*rtgTokenStride])&255 != rtgTokFunc || !rtgTokCharIs(p, tok+1, '(') || rtgFuncTokenIsDeclarationOrSignature(p, tok) {
 			continue
 		}
-		bodyOpen := rtgFuncLiteralBodyOpen(p, tok, rtgTokCount(p))
+		bodyOpen := rtgFuncLiteralBodyOpen(p, tok, tokenCount)
 		if bodyOpen < 0 {
 			continue
 		}
@@ -4573,7 +4594,7 @@ func rtgParseFuncLiterals(m *rtgMeta, p *rtgProgram) {
 				}
 			}
 		}
-		bodyEnd := rtgFindMatchingBrace(p, bodyOpen, rtgTokCount(p))
+		bodyEnd := rtgFindMatchingBrace(p, bodyOpen, tokenCount)
 		if bodyEnd <= bodyOpen {
 			continue
 		}
@@ -8799,15 +8820,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 				inferredType := rtgInferParsedExprType(g, ep, len(ep.exprs)-1)
 				if assignTok+2 < stmt.endTok && rtgTokIsKind(p, assignTok+1, rtgTokIdent) && rtgTokCharIs(p, assignTok+2, '(') {
 					fnNameBase := (assignTok + 1) * rtgTokenStride
-					fnNameStart := int(tokenData[fnNameBase+1])
-					fnNameEnd := int(tokenData[fnNameBase+2])
-					fnIndex := -1
-					for i := 0; i < len(g.meta.funcs); i++ {
-						f := &g.meta.funcs[i]
-						if rtgBytesEqualRange(g.prog.src, f.nameStart, f.nameEnd, fnNameStart, fnNameEnd) {
-							fnIndex = i
-						}
-					}
+					fnIndex := rtgFindMetaFunction(meta, int(tokenData[fnNameBase+1]), int(tokenData[fnNameBase+2]))
 					if fnIndex >= 0 {
 						inferredType = meta.funcs[fnIndex].resultType
 					}
@@ -9799,11 +9812,12 @@ func rtgPointerTargetKind(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 func rtgTypeFromExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 	p := g.prog
 	e := &ep.exprs[idx]
-	if e.tok < 0 || e.tok >= rtgTokCount(p) {
+	tokenCount := rtgTokCount(p)
+	if e.tok < 0 || e.tok >= tokenCount {
 		return 0
 	}
 	endTok := e.tok
-	for endTok < rtgTokCount(p) && int(rtgTokEnd(p, endTok)) <= e.nameEnd {
+	for endTok < tokenCount && int(rtgTokEnd(p, endTok)) <= e.nameEnd {
 		endTok++
 	}
 	typeResult := rtgParseType(g.meta, p, e.tok, endTok)
@@ -14583,7 +14597,10 @@ func rtgEmitCopyReturnedStructSliceFields(g *rtgLinearGen, typ int, srcOffset in
 	return true
 }
 func rtgFuncInfoFromCall(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
+	if e.right > 0 {
+		return e.right - 1
+	}
 	nameStart := e.nameStart
 	nameEnd := e.nameEnd
 	wantMethod := false
@@ -14607,6 +14624,7 @@ func rtgFuncInfoFromCall(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 		isMethod := f.receiverType != 0
 		if isMethod == wantMethod && rtgBytesEqualRange(g.prog.src, f.nameStart, f.nameEnd, nameStart, nameEnd) {
 			if !wantMethod || rtgMethodReceiverTypeMatches(g.meta, wantReceiverType, f.receiverType) {
+				e.right = i + 1
 				return i
 			}
 			if allowInterfaceFallback {
@@ -14617,6 +14635,9 @@ func rtgFuncInfoFromCall(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 			}
 		}
 		i = g.meta.funcNext[i]
+	}
+	if interfaceCandidate >= 0 {
+		e.right = interfaceCandidate + 1
 	}
 	return interfaceCandidate
 }
