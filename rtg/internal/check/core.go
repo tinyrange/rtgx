@@ -115,6 +115,12 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if typeTok := invalidDefiniteAssignmentType(file, fn); typeTok >= 0 {
 				return info, false, CheckErrType, fileIndex, typeTok
 			}
+			callCheckArenaStart := arena.Mark()
+			callTypeTok := invalidDefiniteCallArgumentType(pkg, info, fileIndex, fn)
+			arena.Reset(callCheckArenaStart)
+			if callTypeTok >= 0 {
+				return info, false, CheckErrCallArgument, fileIndex, callTypeTok
+			}
 			scope, ok, scopeTok := buildFuncScopeCore(file, fn)
 			if !ok {
 				return info, false, CheckErrScope, fileIndex, scopeTok

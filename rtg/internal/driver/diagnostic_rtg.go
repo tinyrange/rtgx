@@ -146,6 +146,8 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Code, d.Message = "RTG-CHECK-014", "break is not inside a loop or switch"
 		} else if built.Build.ErrorDetail == check.CheckErrContinue {
 			d.Code, d.Message = "RTG-CHECK-015", "continue is not inside a loop"
+		} else if built.Build.ErrorDetail == check.CheckErrCallArgument {
+			d.Code, d.Message = "RTG-CHECK-016", "call argument is not assignable to its parameter"
 		}
 	} else {
 		d.Phase, d.Code, d.Message = "linker", "RTG-LINK-001", "package linking failed"

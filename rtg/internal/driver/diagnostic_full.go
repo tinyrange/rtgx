@@ -273,6 +273,8 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RTG-CHECK-014", "break is not inside a loop or switch"
 		case check.CheckErrContinue:
 			code, message = "RTG-CHECK-015", "continue is not inside a loop"
+		case check.CheckErrCallArgument:
+			code, message = "RTG-CHECK-016", "call argument is not assignable to its parameter"
 		}
 	} else if built.Build.Error == build.BuildErrLower {
 		phase, code, message = "lowerer", "RTG-LOWER-001", "checked program could not be lowered"
