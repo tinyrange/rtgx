@@ -6286,6 +6286,14 @@ func rtgAsmJgeStackStack(a *rtgAsm, left int, right int, label int) {
 	rtgAsmJnzLabel(a, label)
 }
 
+func rtgAsmJltStackStack(a *rtgAsm, left int, right int, label int) {
+	notLess := rtgAsmNewLabel(a)
+	rtgAsmJgeStackStack(a, left, right, notLess)
+	rtgAsmIncPrimary(a)
+	rtgAsmJmpLabel(a, label)
+	rtgAsmMarkLabel(a, notLess)
+}
+
 func rtgAsmAddressPrimaryStack(a *rtgAsm, offset int) {
 	rtgAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
 }
@@ -9737,7 +9745,15 @@ func rtgInferParsedExprTypeUncached(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 		}
 	}
 	if e.kind == rtgExprSlice {
-		return rtgInferParsedExprType(g, ep, e.left)
+		baseType := rtgInferParsedExprType(g, ep, e.left)
+		base := rtgResolveType(meta, baseType)
+		if base.kind == rtgTypePointer {
+			base = rtgResolveType(meta, base.elem)
+		}
+		if base.kind == rtgTypeArray {
+			return rtgAddType(meta, rtgTypeSlice, base.elem, 0, 0, rtgBackendSliceValueSize, 0, 0)
+		}
+		return baseType
 	}
 	if e.kind == rtgExprSelector {
 		baseType := rtgInferParsedExprType(g, ep, e.left)
@@ -10469,16 +10485,29 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	a := &g.asm
 	e := &ep.exprs[idx]
 	if e.kind == rtgExprSlice {
-		if !rtgEmitSliceValueRegs(g, ep, e.left) {
-			return false
+		baseType := rtgInferParsedExprType(g, ep, e.left)
+		baseResolved := rtgResolveType(meta, baseType)
+		arrayType := baseResolved
+		if baseResolved.kind == rtgTypePointer {
+			arrayType = rtgResolveType(meta, baseResolved.elem)
 		}
-		if e.firstArg >= 0 || e.nameStart >= 0 {
-			baseType := rtgInferParsedExprType(g, ep, e.left)
-			baseResolved := rtgResolveType(meta, baseType)
-			if baseResolved.kind != rtgTypeSlice {
+		if arrayType.kind == rtgTypeArray {
+			if baseResolved.kind == rtgTypePointer {
+				if !rtgEmitIntExpr(g, ep, e.left) {
+					return false
+				}
+			} else if !rtgEmitAddressPrimary(g, ep, e.left) {
 				return false
 			}
-			elemSize := rtgTypeSize(meta, baseResolved.elem)
+			rtgAsmSecondaryImm(a, arrayType.count)
+			rtgAsmCopySecondaryToTertiary(a)
+		} else {
+			if baseResolved.kind != rtgTypeSlice || !rtgEmitSliceValueRegs(g, ep, e.left) {
+				return false
+			}
+		}
+		if e.firstArg >= 0 || e.nameStart >= 0 || arrayType.kind == rtgTypeArray && e.right >= 0 {
+			elemSize := rtgTypeSize(meta, arrayType.elem)
 			if elemSize < 1 {
 				elemSize = 8
 			}
@@ -10510,6 +10539,18 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				rtgAsmStorePrimaryStack(a, maxOff)
 			} else {
 				rtgAsmCopyStackSlot(a, baseOff-16, maxOff)
+			}
+			if arrayType.kind == rtgTypeArray {
+				invalid := rtgAsmNewLabel(a)
+				done := rtgAsmNewLabel(a)
+				rtgEmitStackLessImmJump(g, lowOff, 0, invalid)
+				rtgAsmJltStackStack(a, highOff, lowOff, invalid)
+				rtgAsmJltStackStack(a, maxOff, highOff, invalid)
+				rtgAsmJltStackStack(a, baseOff-16, maxOff, invalid)
+				rtgAsmJmpLabel(a, done)
+				rtgAsmMarkLabel(a, invalid)
+				rtgEmitRuntimeFault(g)
+				rtgAsmMarkLabel(a, done)
 			}
 			rtgAsmLoadPrimaryStack(a, maxOff)
 			rtgAsmLoadTertiaryStack(a, lowOff)
@@ -10641,6 +10682,7 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	}
 	return false
 }
+
 func rtgEmitStringSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	meta := g.meta
 	a := &g.asm
@@ -11679,6 +11721,10 @@ func rtgEmitBuiltinPanic(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	if !rtgEmitInterfaceAssignToLocal(g, ep, argIndex, valueOffset) {
 		return false
 	}
+	return rtgEmitPanicState(g, valueOffset)
+}
+
+func rtgEmitPanicState(g *rtgLinearGen, valueOffset int) bool {
 	noPrevious := rtgAsmNewLabel(&g.asm)
 	rtgAsmLoadPrimaryBss(&g.asm, g.panicIDOff)
 	rtgAsmCmpPrimaryImm8(&g.asm, 0)
@@ -11707,6 +11753,17 @@ func rtgEmitBuiltinPanic(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	rtgAsmStorePrimaryBss(&g.asm, g.panicRecoveredOff)
 	rtgAsmJmpLabel(&g.asm, g.deferReturnLabel)
 	return true
+}
+
+func rtgEmitRuntimeFault(g *rtgLinearGen) {
+	if g.meta.panicEnabled {
+		valueOffset := rtgAddUnnamedLocal(g, rtgBuiltinTypeInterface)
+		rtgAsmStoreStackImm(&g.asm, valueOffset, 1)
+		rtgAsmStoreStackImm(&g.asm, valueOffset-rtgBackendValueSlotSize, rtgTypeInt)
+		rtgEmitPanicState(g, valueOffset)
+	} else {
+		rtgEmitExitStatus(g)
+	}
 }
 
 func rtgEmitBuiltinRecover(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
@@ -12486,6 +12543,9 @@ func rtgEmitAddressPrimary(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			return false
 		}
 		return true
+	}
+	if e.kind == rtgExprUnary && rtgTokCharIs(g.prog, e.tok, '*') {
+		return rtgEmitIntExpr(g, ep, e.left)
 	}
 	return false
 }
