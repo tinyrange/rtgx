@@ -76,6 +76,51 @@ func TestFrontendStructuredDiagnostics(t *testing.T) {
 			wantFile:   "cmd/app/main.go",
 			wantDetail: "feature is excluded from the current frontend scope",
 		},
+		{
+			name: "unused_import",
+			files: map[string]string{
+				"cmd/app/main.go": "package main\n\nimport \"example.com/diagnostic/lib\"\n\nfunc main() {}\n",
+				"lib/lib.go":      "package lib\n",
+			},
+			wantCode:   "RTG-CHECK-010",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "import is not used",
+		},
+		{
+			name:       "non_function_call",
+			files:      map[string]string{"cmd/app/main.go": "package main\n\nfunc main() { x := 1; x() }\n"},
+			wantCode:   "RTG-CHECK-011",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "called expression is not a function",
+		},
+		{
+			name:       "assignment_target",
+			files:      map[string]string{"cmd/app/main.go": "package main\n\nfunc main() { 1 = 2 }\n"},
+			wantCode:   "RTG-CHECK-012",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "left side of assignment is not assignable",
+		},
+		{
+			name:       "assignment_count",
+			files:      map[string]string{"cmd/app/main.go": "package main\n\nfunc main() { a, b := 1; _, _ = a, b }\n"},
+			wantCode:   "RTG-CHECK-013",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "assignment count does not match",
+		},
+		{
+			name:       "break_placement",
+			files:      map[string]string{"cmd/app/main.go": "package main\n\nfunc main() { break }\n"},
+			wantCode:   "RTG-CHECK-014",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "break is not inside a loop or switch",
+		},
+		{
+			name:       "continue_placement",
+			files:      map[string]string{"cmd/app/main.go": "package main\n\nfunc main() { continue }\n"},
+			wantCode:   "RTG-CHECK-015",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "continue is not inside a loop",
+		},
 	}
 
 	for _, frontend := range frontends {

@@ -136,6 +136,7 @@ func resolveNameRef(fileIndex int, info PackageInfo, scope FuncScope, name strin
 	}
 	importIndex := LookupImport(info, fileIndex, name)
 	if importIndex >= 0 && !info.Imports[importIndex].Blank && !info.Imports[importIndex].Dot {
+		info.Imports[importIndex].Used = true
 		ref.Kind = RefImport
 		ref.Index = importIndex
 		ref.Package = info.Imports[importIndex].Package

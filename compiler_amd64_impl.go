@@ -10,6 +10,13 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	oldContinue := g.continueDepth
 	oldCurrent := g.currentFunc
 	oldReturnStruct := g.returnStruct
+	oldClosureEnvOffset := g.closureEnvOffset
+	oldDeferHeadOffset := g.deferHeadOffset
+	oldDeferReturnLabel := g.deferReturnLabel
+	oldDeferResultOffset := g.deferResultOffset
+	oldDeferSites := g.deferSites
+	oldEmittingDefers := g.emittingDefers
+	oldSuppressPanicCheck := g.suppressPanicCheck
 	oldStackUsed := g.stackUsed
 	oldGotoLabels := g.gotoLabels
 	oldLastRangeReturns := g.lastRangeReturns
@@ -22,8 +29,10 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.gotoLabels = gotoLabels
 	g.breakDepth = 0
 	g.continueDepth = 0
+	g.pendingControl = 0
 	g.currentFunc = fnInfoIndex
 	g.returnStruct = 0
+	g.closureEnvOffset = 0
 	g.stackUsed = 0
 	rtgAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 	framePatch := len(a.code)
@@ -35,13 +44,29 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	if !rtgBindFunctionParams(g, fnInfoIndex) {
 		return false
 	}
+	if !rtgBindClosureCaptures(g, fnInfoIndex) {
+		return false
+	}
 	if !rtgBindNamedResults(g, fnInfoIndex) {
+		return false
+	}
+	if !rtgPrepareFunctionControl(g) {
 		return false
 	}
 	if !rtgEmitLinearRange(g, fn.bodyStart+1, fn.bodyEnd) {
 		return false
 	}
-	if !g.lastRangeReturns {
+	if g.deferReturnLabel > 0 {
+		if !g.lastRangeReturns {
+			rtgAsmJmpLabel(a, g.deferReturnLabel)
+		}
+		if !rtgEmitFunctionControlEpilogue(g) {
+			return false
+		}
+	} else if !g.lastRangeReturns {
+		if !rtgEmitClosureCaptureWriteback(g) {
+			return false
+		}
 		rtgAsmPrimaryImm(a, 0)
 		rtgAsmLeave(a)
 		rtgAsmRet(a)
@@ -61,6 +86,13 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.continueDepth = oldContinue
 	g.currentFunc = oldCurrent
 	g.returnStruct = oldReturnStruct
+	g.closureEnvOffset = oldClosureEnvOffset
+	g.deferHeadOffset = oldDeferHeadOffset
+	g.deferReturnLabel = oldDeferReturnLabel
+	g.deferResultOffset = oldDeferResultOffset
+	g.deferSites = oldDeferSites
+	g.emittingDefers = oldEmittingDefers
+	g.suppressPanicCheck = oldSuppressPanicCheck
 	g.stackUsed = oldStackUsed
 	g.gotoLabels = oldGotoLabels
 	g.lastRangeReturns = oldLastRangeReturns
@@ -272,9 +304,18 @@ func rtgAmd64AsmStoreRaxMemRdxDispSize(a *rtgAsm, disp int, size int) {
 	rtgAsmStorePrimaryMemSecondaryDisp(a, disp)
 }
 func rtgAmd64AsmNormalizeRaxForKind(a *rtgAsm, kind int) {
-	if kind == rtgTypeByte || kind == rtgTypeBool {
-		rtgAsmEmit8(a, 0x25)
-		rtgAsmEmit32(a, 0xff)
+	if kind == rtgTypeByte {
+		n := len(a.code)
+		if n >= 3 && a.code[n-3] == 0x0f && a.code[n-2] == 0xb6 && a.code[n-1] == 0xc0 {
+			return
+		}
+		if n >= 4 && a.code[n-4] == 0x48 && a.code[n-3] == 0x0f && a.code[n-2] == 0xb6 && a.code[n-1] == 0x02 {
+			return
+		}
+		if n >= 5 && a.code[n-5] == 0x48 && a.code[n-4] == 0x0f && a.code[n-3] == 0xb6 && a.code[n-2] == 0x04 && a.code[n-1] == 0x08 {
+			return
+		}
+		rtgAsmEmit24(a, 0xc0b60f)
 		return
 	}
 	if kind == rtgTypeInt8 {
@@ -290,6 +331,13 @@ func rtgAmd64AsmNormalizeRaxForKind(a *rtgAsm, kind int) {
 		return
 	}
 	if kind == rtgTypeInt32 {
+		n := len(a.code)
+		if n >= 3 && a.code[n-3] == 0x48 && a.code[n-2] == 0x63 && a.code[n-1] == 0xc0 {
+			return
+		}
+		if n >= 4 && a.code[n-4] == 0x48 && a.code[n-3] == 0x63 && a.code[n-2] == 0x04 && a.code[n-1] == 0x88 {
+			return
+		}
 		rtgAsmEmit24(a, 0xc06348)
 		return
 	}
@@ -304,9 +352,7 @@ func rtgAmd64AsmDecMemRdx(a *rtgAsm) {
 	rtgAsmEmit24(a, 0x0aff48)
 }
 func rtgAmd64AsmBoolNotRax(a *rtgAsm) {
-	rtgAsmEmit24(a, 0xc08548)
-	rtgAsmEmit24(a, 0xc0940f)
-	rtgAsmEmit24(a, 0xc0b60f)
+	rtgAsmEmit3(a, 0x83, 0xf0, 1)
 }
 func rtgAmd64AsmCmpRaxImm8(a *rtgAsm, imm int) {
 	if imm == 0 {
@@ -485,7 +531,6 @@ func rtgAmd64EmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, labe
 	}
 	leftIndex := e.left
 	rightIndex := e.right
-	usesFloat := rtgBinaryUsesFloat(g, ep, e)
 	right := &ep.exprs[rightIndex]
 	rightValue := 0
 	rightOK := false
@@ -502,7 +547,7 @@ func rtgAmd64EmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, labe
 		rightValue = rtgFindSmallConstByName(g, right.nameStart, right.nameEnd)
 		rightOK = rightValue >= -128
 	}
-	if !usesFloat && rightOK && rtgAsmImmFits8Signed(rightValue) {
+	if rightOK && rtgAsmImmFits8Signed(rightValue) {
 		if !rtgEmitIntExpr(g, ep, leftIndex) {
 			return false
 		}
@@ -510,9 +555,26 @@ func rtgAmd64EmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, labe
 		rtgEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue)
 		return true
 	}
+	if rtgTargetArch == rtgArchAmd64 {
+		left := &ep.exprs[leftIndex]
+		if left.kind == rtgExprIdent && right.kind == rtgExprIdent {
+			leftLocal := rtgFindLocalIndex(g, left.nameStart, left.nameEnd)
+			rightLocal := rtgFindLocalIndex(g, right.nameStart, right.nameEnd)
+			if leftLocal >= 0 && rightLocal >= 0 && rtgTypeIsInt(g.meta, g.locals[leftLocal].typ) && rtgTypeIsInt(g.meta, g.locals[rightLocal].typ) {
+				rtgAsmLoadPrimaryStack(&g.asm, g.locals[rightLocal].offset)
+				rtgAsmStackMem(&g.asm, g.locals[leftLocal].offset, 0x3948, 0x45, 0x85)
+				rtgEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue)
+				return true
+			}
+		}
+	}
 	if c0 == '=' || c0 == '!' {
 		leftType := rtgInferParsedExprType(g, ep, leftIndex)
 		rightType := rtgInferParsedExprType(g, ep, rightIndex)
+		leftResolved := rtgResolveType(g.meta, leftType)
+		if leftResolved.kind == rtgTypeArray || leftResolved.kind == rtgTypeStruct {
+			return false
+		}
 		if rtgTypeIsString(g.meta, leftType) || rtgTypeIsString(g.meta, rightType) {
 			return false
 		}
@@ -528,24 +590,12 @@ func rtgAmd64EmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, labe
 			}
 		}
 	}
-	if usesFloat {
-		if !rtgEmitScalarExprForKind(g, ep, rightIndex, rtgTypeFloat64) {
-			return false
-		}
-	} else {
-		if !rtgEmitIntExpr(g, ep, rightIndex) {
-			return false
-		}
+	if !rtgEmitIntExpr(g, ep, rightIndex) {
+		return false
 	}
 	rtgAsmPushPrimary(&g.asm)
-	if usesFloat {
-		if !rtgEmitScalarExprForKind(g, ep, leftIndex, rtgTypeFloat64) {
-			return false
-		}
-	} else {
-		if !rtgEmitIntExpr(g, ep, leftIndex) {
-			return false
-		}
+	if !rtgEmitIntExpr(g, ep, leftIndex) {
+		return false
 	}
 	rtgAsmPopTertiary(&g.asm)
 	if rtgTargetArch == rtgArchAarch64 {
@@ -697,44 +747,6 @@ func rtgAmd64EmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) boo
 		return true
 	}
 	return false
-}
-func rtgAmd64EmitCompositeFieldToMem(g *rtgLinearGen, ep *rtgExprParse, idx int, fieldType int, addrOffset int, fieldOffset int) bool {
-	a := &g.asm
-	fieldResolved := rtgResolveType(g.meta, fieldType)
-	if fieldResolved.kind == rtgTypeSlice {
-		if !rtgEmitSliceValueRegs(g, ep, idx) {
-			return false
-		}
-		rtgAsmPushSliceRegs(a)
-		rtgAsmLoadSecondaryStack(a, addrOffset)
-		rtgAsmPopStoreSliceMemSecondary(a, fieldOffset)
-		return true
-	}
-	if fieldResolved.kind == rtgTypeString {
-		if !rtgEmitStringValueRegs(g, ep, idx) {
-			return false
-		}
-		rtgAsmPushStringRegs(a)
-		rtgAsmLoadSecondaryStack(a, addrOffset)
-		rtgAsmPopStoreStringMemSecondary(a, fieldOffset)
-		return true
-	}
-	if fieldResolved.kind == rtgTypeStruct {
-		tempOffset := rtgAddTypedLocal(g, 0, 0, fieldType)
-		if !rtgEmitTypedAssign(g, ep, idx, tempOffset) {
-			return false
-		}
-		size := rtgTypeSize(g.meta, fieldType)
-		rtgAsmLoadSecondaryStack(a, addrOffset)
-		rtgEmitCopyTypedStackToMemSecondary(g, fieldType, tempOffset, fieldOffset, size)
-		return true
-	}
-	if !rtgEmitScalarExprForKind(g, ep, idx, fieldResolved.kind) {
-		return false
-	}
-	rtgAsmLoadSecondaryStack(a, addrOffset)
-	rtgAsmStorePrimaryMemSecondaryDispSize(a, fieldOffset, rtgNativeScalarStorageSize(fieldResolved.kind))
-	return true
 }
 func rtgAmd64EmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	meta := g.meta
@@ -914,6 +926,7 @@ func rtgAmd64EmitCallWithWordCount(g *rtgLinearGen, fnIndex int, wordCount int) 
 		}
 	}
 }
+
 func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	p := g.prog
 	a := &g.asm
@@ -945,7 +958,12 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			if !constResult.ok {
 				globalOffset := rtgFindGlobalOffset(g, e.nameStart, e.nameEnd)
 				if globalOffset < 0 {
-					return false
+					fnIndex := rtgFindMetaFunction(g.meta, e.nameStart, e.nameEnd)
+					if fnIndex < 0 {
+						return false
+					}
+					rtgAsmPrimaryImm(a, fnIndex+1)
+					return true
 				}
 				rtgAsmLoadPrimaryBss(a, globalOffset)
 				return true
@@ -968,31 +986,28 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	}
 	if e.kind == rtgExprCall {
 		callee := rtgExprIdentCode(p, ep, e.left)
+		if callee != rtgIdentSyscall && (rtgFunctionValueCalleeType(g, ep, e.left) != 0 || rtgFuncInfoFromCall(g, ep, e.left) >= 0) {
+			return rtgEmitUserCall(g, ep, idx)
+		}
+		if e.argCount == 1 && rtgExprIsIdentText(p, ep, e.left, "Sizeof") {
+			rtgAsmPrimaryImm(a, rtgTypeSize(g.meta, rtgInferParsedExprType(g, ep, ep.args[e.firstArg])))
+			return true
+		}
 		if callee == rtgIdentPanic {
 			return rtgEmitBuiltinPanic(g, ep, idx)
 		}
 		if callee == rtgIdentSyscall {
 			return rtgEmitArbitrarySyscall(g, ep, idx)
 		}
-		if e.argCount == 1 && (callee == rtgIdentInt || callee == rtgIdentInt64) {
-			return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt)
+		if callee == rtgIdentNew {
+			return rtgEmitBuiltinNew(g, ep, idx)
 		}
-		if e.argCount == 1 && (callee == rtgIdentByte || callee == rtgIdentInt8 || callee == rtgIdentInt16 || callee == rtgIdentInt32 || callee == rtgIdentUint16 || callee == rtgIdentUint32) {
-			if callee == rtgIdentByte {
-				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeByte)
-			} else if callee == rtgIdentInt8 {
-				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt8)
-			} else if callee == rtgIdentInt16 {
-				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt16)
-			} else if callee == rtgIdentUint16 {
-				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeUint16)
-			} else if callee == rtgIdentUint32 {
-				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeUint32)
+		if e.argCount == 1 {
+			conversionType := rtgConversionTypeFromExpr(g, ep, e.left)
+			conversion := rtgResolveType(g.meta, conversionType)
+			if rtgTypeKindIsScalarValue(conversion.kind) {
+				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], conversion.kind)
 			}
-			return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt32)
-		}
-		if e.argCount == 1 && callee == rtgIdentUint64 {
-			return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeUint64)
 		}
 		if e.argCount == 1 && (callee == rtgIdentCap || callee == rtgIdentLen) {
 			count := rtgArrayBuiltinCount(g, ep, e)
@@ -1002,6 +1017,9 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			}
 		}
 		if e.argCount == 1 && callee == rtgIdentCap {
+			if rtgEmitDirectSelectorWords(g, ep, ep.args[e.firstArg], 16, -1, rtgNativeIntSize) {
+				return true
+			}
 			if !rtgEmitSlicePtrCap(g, ep, ep.args[e.firstArg]) {
 				return false
 			}
@@ -1044,6 +1062,9 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			if arg.kind == rtgExprSelector {
 				argType := rtgInferParsedExprType(g, ep, ep.args[e.firstArg])
 				if rtgTypeIsSlice(g.meta, argType) || rtgTypeIsString(g.meta, argType) {
+					if rtgEmitDirectSelectorWords(g, ep, ep.args[e.firstArg], 8, -1, rtgNativeIntSize) {
+						return true
+					}
 					if offset, ok := rtgLocalStructSelectorOffset(g, ep, ep.args[e.firstArg]); ok {
 						rtgAsmLoadPrimaryStack(a, offset-8)
 						return true
@@ -1227,6 +1248,12 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		fieldType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, idx))
 		fieldSize := rtgNativeScalarStorageSize(fieldType.kind)
 		base := &ep.exprs[e.left]
+		if rtgEmitDirectSelectorWords(g, ep, idx, 0, -1, fieldSize) {
+			if nativeABI {
+				rtgAsmNormalizePrimaryForKind(a, fieldType.kind)
+			}
+			return true
+		}
 		if base.kind == rtgExprCall {
 			baseResolved := rtgResolveType(g.meta, baseType)
 			if baseResolved.kind == rtgTypePointer {
@@ -1361,6 +1388,13 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		if rtgBinaryUsesFloat(g, ep, e) {
 			return rtgEmitFloatBinaryExpr(g, ep, idx)
 		}
+		if rtgTok2Is(p, e.tok, '=', '=') || rtgTok2Is(p, e.tok, '!', '=') {
+			leftType := rtgInferParsedExprType(g, ep, e.left)
+			leftResolved := rtgResolveType(g.meta, leftType)
+			if leftResolved.kind == rtgTypeArray || leftResolved.kind == rtgTypeStruct {
+				return rtgEmitCompositeCompare(g, ep, e, leftType)
+			}
+		}
 		if rtgTok2Is(p, e.tok, '&', '&') || rtgTok2Is(p, e.tok, '|', '|') {
 			falseLabel := rtgAsmNewLabel(a)
 			endLabel := rtgAsmNewLabel(a)
@@ -1385,6 +1419,62 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rightExpr := &ep.exprs[e.right]
 		rightKind := rightExpr.kind
 		rightTok := rightExpr.tok
+		immOpcode := 0
+		immGroup := 0
+		immMultiply := false
+		immShift := 0
+		if rtgTokCharIs(p, e.tok, '+') {
+			immOpcode, immGroup = 0x05, 0xc0
+		} else if rtgTokCharIs(p, e.tok, '-') {
+			immOpcode, immGroup = 0x2d, 0xe8
+		} else if rtgTokCharIs(p, e.tok, '*') {
+			immMultiply = true
+		} else if rtgTokCharIs(p, e.tok, '&') {
+			immOpcode, immGroup = 0x25, 0xe0
+		} else if rtgTokCharIs(p, e.tok, '|') {
+			immOpcode, immGroup = 0x0d, 0xc8
+		} else if rtgTokCharIs(p, e.tok, '^') {
+			immOpcode, immGroup = 0x35, 0xf0
+		} else if rtgTok2Is(p, e.tok, '<', '<') {
+			immShift = 0xe0
+		} else if rtgTok2Is(p, e.tok, '>', '>') {
+			immShift = 0xf8
+		}
+		value := 0
+		immediate := false
+		if rightKind == rtgExprInt {
+			value = rtgParseIntToken(p, rightTok)
+			immediate = true
+		} else if rightKind == rtgExprChar {
+			value = rtgParseCharToken(p, rightTok)
+			immediate = true
+		} else if rightKind == rtgExprIdent {
+			value = rtgFindSmallConstByName(g, rightExpr.nameStart, rightExpr.nameEnd)
+			immediate = value >= -128
+		}
+		if rtgTargetArch == rtgArchAmd64 && immediate && (immOpcode != 0 || immMultiply || immShift != 0) {
+			if value >= -2147483647 && value <= 2147483647 && (immShift == 0 || value >= 0 && value < 64) {
+				if !rtgEmitIntExpr(g, ep, e.left) {
+					return false
+				}
+				if immShift != 0 {
+					rtgAsmEmit4(a, 0x48, 0xc1, immShift, value)
+				} else if immMultiply && rtgAsmImmFits8Signed(value) {
+					rtgAsmEmit4(a, 0x48, 0x6b, 0xc0, value)
+				} else if immMultiply {
+					rtgAsmEmit3(a, 0x48, 0x69, 0xc0)
+					rtgAsmEmit32(a, value)
+				} else if rtgAsmImmFits8Signed(value) {
+					rtgAsmEmit4(a, 0x48, 0x83, immGroup, value)
+				} else {
+					rtgAsmEmit2(a, 0x48, immOpcode)
+					rtgAsmEmit32(a, value)
+				}
+				resultType := rtgInferParsedExprType(g, ep, idx)
+				rtgAsmNormalizePrimaryForKind(a, rtgResolveType(g.meta, resultType).kind)
+				return true
+			}
+		}
 		if !rtgEmitIntExpr(g, ep, e.left) {
 			return false
 		}
@@ -1815,6 +1905,9 @@ func rtgAmd64EmitSelectorAddressRdx(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	if fieldOffset < 0 {
 		return false
 	}
+	if rtgStructPromotedPointerField(g, baseType, e.nameStart, e.nameEnd) >= 0 {
+		return rtgEmitPromotedPointerSelectorAddress(g, ep, idx, baseType)
+	}
 	if base.kind == rtgExprCall {
 		baseResolved := rtgResolveType(meta, baseType)
 		if baseResolved.kind != rtgTypePointer {
@@ -1827,6 +1920,14 @@ func rtgAmd64EmitSelectorAddressRdx(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 		if fieldOffset != 0 {
 			rtgAsmAddSecondaryImm(a, fieldOffset)
 		}
+		return true
+	}
+	if base.kind == rtgExprComposite {
+		offset := rtgAddUnnamedLocal(g, baseType)
+		if !rtgEmitTypedAssign(g, ep, e.left, offset) {
+			return false
+		}
+		rtgAsmStackMem(a, offset-fieldOffset, 0x8d48, 0x55, 0x95)
 		return true
 	}
 	if rtgTargetArch == rtgArchAmd64 && base.kind == rtgExprSelector {

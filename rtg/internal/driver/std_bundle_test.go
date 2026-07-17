@@ -4,6 +4,9 @@ package driver
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -29,4 +32,39 @@ func TestBundledStandardLibraryFS(t *testing.T) {
 	if _, ok := fs.ReadFile("/std/bytes/bytes_rtg.go"); !ok {
 		t.Fatal("RTG standard library source was not embedded")
 	}
+}
+
+func TestBundledStandardLibraryMatchesRepository(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "std"))
+	fs := OSFS{}
+	var walk func(string)
+	walk = func(dir string) {
+		entries, ok := fs.ReadDir(dir)
+		if !ok {
+			t.Fatalf("bundled directory missing: %s", dir)
+		}
+		for _, entry := range entries {
+			path := dir + "/" + entry.Name
+			if entry.IsDir {
+				walk(path)
+				continue
+			}
+			got, ok := fs.ReadFile(path)
+			if !ok {
+				t.Fatalf("bundled file missing: %s", path)
+			}
+			want, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path[len("/std/"):])))
+			if err != nil {
+				t.Fatalf("read repository source %s: %v", path, err)
+			}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("bundled source differs: %s", path)
+			}
+		}
+	}
+	walk("/std")
 }

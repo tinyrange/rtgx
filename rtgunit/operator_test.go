@@ -24,3 +24,13 @@ func TestScanSourceKeepsMultiByteOperatorsWhole(t *testing.T) {
 		}
 	}
 }
+
+func TestScanSourceKeepsImaginaryLiteralsWhole(t *testing.T) {
+	tokens, _ := scanSource([]byte("package p\nvar value = 2 + 1i\n"))
+	for _, token := range tokens {
+		if token.text == "1i" {
+			return
+		}
+	}
+	t.Fatal("imaginary literal 1i was split by the RTGU scanner")
+}

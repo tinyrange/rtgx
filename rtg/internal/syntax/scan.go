@@ -58,26 +58,8 @@ func Scan(src []byte) []Token {
 		}
 		if c >= '0' && c <= '9' {
 			start := i
-			kind := TokenNumber
-			i++
-			for i < len(src) {
-				part := src[i]
-				if !((part >= 'a' && part <= 'z') || (part >= 'A' && part <= 'Z') || (part >= '0' && part <= '9') || part == '_') {
-					break
-				}
-				i++
-			}
-			if i < len(src) && src[i] == '.' {
-				i++
-				for i < len(src) {
-					part := src[i]
-					if !((part >= 'a' && part <= 'z') || (part >= 'A' && part <= 'Z') || (part >= '0' && part <= '9') || part == '_') {
-						break
-					}
-					i++
-				}
-			}
-			tokens = append(tokens, Token{Kind: kind, Start: start, End: i, Line: line})
+			i = scanNumberEnd(src, i)
+			tokens = append(tokens, Token{Kind: TokenNumber, Start: start, End: i, Line: line})
 			continue
 		}
 		if c == '"' {
@@ -197,56 +179,8 @@ func (s *Scanner) Scan(src []byte) {
 		}
 		if c >= '0' && c <= '9' {
 			start := i
-			kind := TokenNumber
-			if c == '0' && i+1 < len(src) && (src[i+1] == 'x' || src[i+1] == 'X' || src[i+1] == 'b' || src[i+1] == 'B' || src[i+1] == 'o' || src[i+1] == 'O') {
-				hex := src[i+1] == 'x' || src[i+1] == 'X'
-				i += 2
-				for i < len(src) {
-					cc := src[i]
-					if cc == '.' && hex {
-						i++
-						continue
-					}
-					if hex && (cc == 'p' || cc == 'P') {
-						i++
-						if i < len(src) && (src[i] == '+' || src[i] == '-') {
-							i++
-						}
-						for i < len(src) && isDigitOrUnderscore(src[i]) {
-							i++
-						}
-						break
-					}
-					if !isIdentPart(cc) {
-						break
-					}
-					i++
-				}
-			} else {
-				i++
-				for i < len(src) && isDigitOrUnderscore(src[i]) {
-					i++
-				}
-				if i < len(src) && src[i] == '.' {
-					i++
-					for i < len(src) && isDigitOrUnderscore(src[i]) {
-						i++
-					}
-				}
-				if i < len(src) && (src[i] == 'e' || src[i] == 'E') {
-					i++
-					if i < len(src) && (src[i] == '+' || src[i] == '-') {
-						i++
-					}
-					for i < len(src) && isDigitOrUnderscore(src[i]) {
-						i++
-					}
-				}
-			}
-			if i < len(src) && src[i] == 'i' {
-				i++
-			}
-			s.add(kind, start, i, line)
+			i = scanNumberEnd(src, i)
+			s.add(TokenNumber, start, i, line)
 			continue
 		}
 		if c == '"' {
@@ -322,6 +256,59 @@ func (s *Scanner) Scan(src []byte) {
 		s.add(TokenOperator, start, i, line)
 	}
 	s.add(TokenEOF, len(src), len(src), line)
+}
+
+func scanNumberEnd(src []byte, start int) int {
+	i := start
+	if src[i] == '0' && i+1 < len(src) && (src[i+1] == 'x' || src[i+1] == 'X' || src[i+1] == 'b' || src[i+1] == 'B' || src[i+1] == 'o' || src[i+1] == 'O') {
+		hex := src[i+1] == 'x' || src[i+1] == 'X'
+		i += 2
+		for i < len(src) {
+			c := src[i]
+			if c == '.' && hex {
+				i++
+				continue
+			}
+			if hex && (c == 'p' || c == 'P') {
+				i++
+				if i < len(src) && (src[i] == '+' || src[i] == '-') {
+					i++
+				}
+				for i < len(src) && isDigitOrUnderscore(src[i]) {
+					i++
+				}
+				break
+			}
+			if !isIdentPart(c) {
+				break
+			}
+			i++
+		}
+	} else {
+		i++
+		for i < len(src) && isDigitOrUnderscore(src[i]) {
+			i++
+		}
+		if i < len(src) && src[i] == '.' {
+			i++
+			for i < len(src) && isDigitOrUnderscore(src[i]) {
+				i++
+			}
+		}
+		if i < len(src) && (src[i] == 'e' || src[i] == 'E') {
+			i++
+			if i < len(src) && (src[i] == '+' || src[i] == '-') {
+				i++
+			}
+			for i < len(src) && isDigitOrUnderscore(src[i]) {
+				i++
+			}
+		}
+	}
+	if i < len(src) && src[i] == 'i' {
+		i++
+	}
+	return i
 }
 
 func scanTokenCapacity(src []byte) int {

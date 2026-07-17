@@ -74,6 +74,23 @@ func TestScanFrontendKeywords(t *testing.T) {
 	}
 }
 
+func TestScanNumericLiteralParity(t *testing.T) {
+	src := []byte("077 0o77 0x1.8p+1 3e-2 1i 1.2e+3i")
+	core := Scan(src)
+	var scanner Scanner
+	scanner.Scan(src)
+	if !scanner.Ok || len(core) != len(scanner.Tokens) {
+		t.Fatalf("numeric scan shape = core %d host %d ok %v", len(core), len(scanner.Tokens), scanner.Ok)
+	}
+	for i := 0; i < len(core); i++ {
+		coreText := string(TokenText(src, core[i]))
+		hostText := string(TokenText(src, scanner.Tokens[i]))
+		if core[i].Kind != scanner.Tokens[i].Kind || coreText != hostText {
+			t.Fatalf("numeric token %d = core %d %q host %d %q", i, core[i].Kind, coreText, scanner.Tokens[i].Kind, hostText)
+		}
+	}
+}
+
 func TestKeywordHashCollisionRemainsIdentifier(t *testing.T) {
 	src := []byte("bits chan")
 	toks := Scan(src)

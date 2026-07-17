@@ -122,58 +122,63 @@ func rtgUnitRead32(src []byte, pos int) int {
 	return int(src[pos]) | (int(src[pos+1]) << 8) | (int(src[pos+2]) << 16) | (int(src[pos+3]) << 24)
 }
 
-func rtgUnitReadVar(src []byte, pos int, end int) (int, int, bool) {
-	value := 0
-	shift := 0
-	for pos < end && shift <= 28 {
-		b := src[pos]
-		pos++
+type rtgUnitReader struct {
+	src []byte
+	pos int
+	end int
+	ok  bool
+}
+
+func rtgUnitReadVar(r *rtgUnitReader) int {
+	if !r.ok || r.pos >= r.end {
+		r.ok = false
+		return 0
+	}
+	first := r.src[r.pos]
+	r.pos++
+	if first < 0x80 {
+		return int(first)
+	}
+	value := int(first & 0x7f)
+	shift := 7
+	for r.pos < r.end && shift <= 28 {
+		b := r.src[r.pos]
+		r.pos++
 		if shift >= 28 && b >= 0x10 {
-			return 0, pos, false
+			r.ok = false
+			return 0
 		}
 		value = value | (int(b&0x7f) << shift)
 		if b < 0x80 {
 			if shift > 0 && b == 0 {
-				return 0, pos, false
+				r.ok = false
+				return 0
 			}
-			return value, pos, true
+			return value
 		}
 		shift = shift + 7
 	}
-	return 0, pos, false
+	r.ok = false
+	return 0
 }
 
-func rtgDecodeUnitTokens(text []byte, data []byte) ([]byte, bool) {
-	pos := 0
-	count, next, ok := rtgUnitReadVar(data, pos, len(data))
-	if !ok {
+func rtgDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
+	r := rtgUnitReader{src: data, end: len(data), ok: true}
+	count := rtgUnitReadVar(&r)
+	if !r.ok {
 		return nil, false
 	}
-	pos = next
-	out := make([]byte, 0, count*rtgTokenStride)
+	out := make([]int32, 0, count*rtgTokenStride)
 	start := 0
 	line := 0
 	for i := 0; i < count; i++ {
-		kind, next, ok := rtgUnitReadVar(data, pos, len(data))
-		if !ok {
+		kind := rtgUnitReadVar(&r)
+		delta := rtgUnitReadVar(&r)
+		size := rtgUnitReadVar(&r)
+		lineDelta := rtgUnitReadVar(&r)
+		if !r.ok {
 			return nil, false
 		}
-		pos = next
-		delta, next, ok := rtgUnitReadVar(data, pos, len(data))
-		if !ok {
-			return nil, false
-		}
-		pos = next
-		size, next, ok := rtgUnitReadVar(data, pos, len(data))
-		if !ok {
-			return nil, false
-		}
-		pos = next
-		lineDelta, next, ok := rtgUnitReadVar(data, pos, len(data))
-		if !ok {
-			return nil, false
-		}
-		pos = next
 		start = start + delta
 		line = line + lineDelta
 		if kind < 0 || kind > 255 || start < 0 || start > 0xffffff || size < 0 || line < 0 || line > 0xffff || start+size > len(text) {
@@ -188,24 +193,15 @@ func rtgDecodeUnitTokens(text []byte, data []byte) ([]byte, bool) {
 		}
 		base := len(out)
 		out = out[:base+rtgTokenStride]
-		out[base] = byte(kind)
-		out[base+1] = byte(start)
-		out[base+2] = byte(start >> 8)
-		out[base+3] = byte(start >> 16)
-		out[base+4] = byte(size)
-		if kind == rtgTokOp {
-			if size > 0 {
-				out[base+5] = text[start]
-			} else {
-				out[base+5] = 0
-			}
-		} else {
-			out[base+5] = byte(size >> 8)
+		charBits := 0
+		if kind == rtgTokOp && size == 1 {
+			charBits = int(text[start]) << 24
 		}
-		out[base+6] = byte(line)
-		out[base+7] = byte(line >> 8)
+		out[base] = int32(kind | line<<8 | charBits)
+		out[base+1] = int32(start)
+		out[base+2] = int32(start + size)
 	}
-	if pos != len(data) {
+	if r.pos != r.end {
 		return nil, false
 	}
 	return out, true
@@ -302,39 +298,27 @@ func rtgDecodeUnitProgram(src []byte) (rtgProgram, bool, bool) {
 	if tokenCount <= 0 {
 		return prog, true, false
 	}
-	if int(tokens[(tokenCount-1)*rtgTokenStride]) != rtgTokEOF {
+	if int(tokens[(tokenCount-1)*rtgTokenStride])&255 != rtgTokEOF {
 		return prog, true, false
 	}
 	prog.src = text
 	prog.toks.data = tokens
-	declCount, next, ok := rtgUnitReadVar(declData, 0, len(declData))
-	if !ok {
+	declReader := rtgUnitReader{src: declData, end: len(declData), ok: true}
+	declCount := rtgUnitReadVar(&declReader)
+	if !declReader.ok {
 		return prog, true, false
 	}
-	pos = next
 	prog.decls = make([]rtgDecl, 0, declCount)
 	for i := 0; i < declCount; i++ {
 		var decl rtgDecl
 		nameSize := 0
 		tokCount := 0
-		decl.kind, pos, ok = rtgUnitReadVar(declData, pos, len(declData))
-		if !ok {
-			return prog, true, false
-		}
-		decl.nameStart, pos, ok = rtgUnitReadVar(declData, pos, len(declData))
-		if !ok {
-			return prog, true, false
-		}
-		nameSize, pos, ok = rtgUnitReadVar(declData, pos, len(declData))
-		if !ok {
-			return prog, true, false
-		}
-		decl.startTok, pos, ok = rtgUnitReadVar(declData, pos, len(declData))
-		if !ok {
-			return prog, true, false
-		}
-		tokCount, pos, ok = rtgUnitReadVar(declData, pos, len(declData))
-		if !ok {
+		decl.kind = rtgUnitReadVar(&declReader)
+		decl.nameStart = rtgUnitReadVar(&declReader)
+		nameSize = rtgUnitReadVar(&declReader)
+		decl.startTok = rtgUnitReadVar(&declReader)
+		tokCount = rtgUnitReadVar(&declReader)
+		if !declReader.ok {
 			return prog, true, false
 		}
 		decl.nameEnd = decl.nameStart + nameSize
@@ -344,14 +328,14 @@ func rtgDecodeUnitProgram(src []byte) (rtgProgram, bool, bool) {
 		}
 		prog.decls = append(prog.decls, decl)
 	}
-	if pos != len(declData) {
+	if declReader.pos != declReader.end {
 		return prog, true, false
 	}
-	funcCount, next, ok := rtgUnitReadVar(funcData, 0, len(funcData))
-	if !ok {
+	funcReader := rtgUnitReader{src: funcData, end: len(funcData), ok: true}
+	funcCount := rtgUnitReadVar(&funcReader)
+	if !funcReader.ok {
 		return prog, true, false
 	}
-	pos = next
 	prog.funcs = make([]rtgFuncDecl, 0, funcCount)
 	for i := 0; i < funcCount; i++ {
 		var fn rtgFuncDecl
@@ -360,40 +344,16 @@ func rtgDecodeUnitProgram(src []byte) (rtgProgram, bool, bool) {
 		receiverCount := 0
 		bodyCount := 0
 		endCount := 0
-		fn.nameStart, pos, ok = rtgUnitReadVar(funcData, pos, len(funcData))
-		if !ok {
-			return prog, true, false
-		}
-		nameSize, pos, ok = rtgUnitReadVar(funcData, pos, len(funcData))
-		if !ok {
-			return prog, true, false
-		}
-		fn.startTok, pos, ok = rtgUnitReadVar(funcData, pos, len(funcData))
-		if !ok {
-			return prog, true, false
-		}
-		nameTokDelta, pos, ok = rtgUnitReadVar(funcData, pos, len(funcData))
-		if !ok {
-			return prog, true, false
-		}
-		fn.receiverStart, pos, ok = rtgUnitReadVar(funcData, pos, len(funcData))
-		if !ok {
-			return prog, true, false
-		}
-		receiverCount, pos, ok = rtgUnitReadVar(funcData, pos, len(funcData))
-		if !ok {
-			return prog, true, false
-		}
-		fn.bodyStart, pos, ok = rtgUnitReadVar(funcData, pos, len(funcData))
-		if !ok {
-			return prog, true, false
-		}
-		bodyCount, pos, ok = rtgUnitReadVar(funcData, pos, len(funcData))
-		if !ok {
-			return prog, true, false
-		}
-		endCount, pos, ok = rtgUnitReadVar(funcData, pos, len(funcData))
-		if !ok {
+		fn.nameStart = rtgUnitReadVar(&funcReader)
+		nameSize = rtgUnitReadVar(&funcReader)
+		fn.startTok = rtgUnitReadVar(&funcReader)
+		nameTokDelta = rtgUnitReadVar(&funcReader)
+		fn.receiverStart = rtgUnitReadVar(&funcReader)
+		receiverCount = rtgUnitReadVar(&funcReader)
+		fn.bodyStart = rtgUnitReadVar(&funcReader)
+		bodyCount = rtgUnitReadVar(&funcReader)
+		endCount = rtgUnitReadVar(&funcReader)
+		if !funcReader.ok {
 			return prog, true, false
 		}
 		fn.nameEnd = fn.nameStart + nameSize
@@ -409,7 +369,7 @@ func rtgDecodeUnitProgram(src []byte) (rtgProgram, bool, bool) {
 		}
 		prog.funcs = append(prog.funcs, fn)
 	}
-	if pos != len(funcData) {
+	if funcReader.pos != funcReader.end {
 		return prog, true, false
 	}
 	prog.ok = true

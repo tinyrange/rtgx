@@ -210,25 +210,30 @@ func nextTopLevelComma(file syntax.File, start int, end int) int {
 	braceDepth := 0
 	i := start
 	for i < end {
-		if tokCharIs(file, i, '(') {
+		tok := file.Tokens[i]
+		c := byte(0)
+		if tok.Kind == syntax.TokenOperator && tok.End == tok.Start+1 {
+			c = file.Src[tok.Start]
+		}
+		if c == '(' {
 			parenDepth++
-		} else if tokCharIs(file, i, ')') {
+		} else if c == ')' {
 			if parenDepth > 0 {
 				parenDepth--
 			}
-		} else if tokCharIs(file, i, '[') {
+		} else if c == '[' {
 			bracketDepth++
-		} else if tokCharIs(file, i, ']') {
+		} else if c == ']' {
 			if bracketDepth > 0 {
 				bracketDepth--
 			}
-		} else if tokCharIs(file, i, '{') {
+		} else if c == '{' {
 			braceDepth++
-		} else if tokCharIs(file, i, '}') {
+		} else if c == '}' {
 			if braceDepth > 0 {
 				braceDepth--
 			}
-		} else if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokCharIs(file, i, ',') {
+		} else if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && c == ',' {
 			return i
 		}
 		i++
@@ -296,6 +301,12 @@ func tokenTextIs(file syntax.File, tok int, text string) bool {
 	token := file.Tokens[tok]
 	if token.End-token.Start != len(text) || token.Start < 0 || token.End > len(file.Src) {
 		return false
+	}
+	if len(text) == 1 {
+		return file.Src[token.Start] == text[0]
+	}
+	if len(text) == 2 {
+		return file.Src[token.Start] == text[0] && file.Src[token.Start+1] == text[1]
 	}
 	for i := 0; i < len(text); i++ {
 		if file.Src[token.Start+i] != text[i] {

@@ -50,6 +50,14 @@ func appMain() int {
 	if !hasExpr(body, ExprCall, "add(total, 1)", file) {
 		t.Fatalf("call expression not found: %#v", body.Exprs)
 	}
+	statements := ParseFuncBodyStatements(file, file.Funcs[0])
+	if !statements.Ok {
+		t.Fatalf("ParseFuncBodyStatements failed: err=%d tok=%d", statements.Error, statements.ErrorTok)
+	}
+	assertStmtKinds(t, statements, want)
+	if len(statements.Exprs) != 0 {
+		t.Fatalf("statement-only parse classified expressions: %#v", statements.Exprs)
+	}
 }
 
 func TestParseFuncBodySwitchAndLabels(t *testing.T) {

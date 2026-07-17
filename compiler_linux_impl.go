@@ -160,38 +160,63 @@ func rtgAsmMoveOffsetArg(a *rtgAsm) {
 
 func rtgEmitLinearPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 	p := g.prog
-	if stmt.exprStart < 0 || stmt.exprStart >= rtgTokCount(p) || !rtgBytesEqualText(p.src, int(rtgTokStart(p, stmt.exprStart)), int(rtgTokEnd(p, stmt.exprStart)), "print") {
+	if stmt.exprStart < 0 || stmt.exprStart >= rtgTokCount(p) {
 		return false
 	}
-	var ep rtgExprParse
-	rtgParseExpressionInto(&ep, p, stmt.exprStart, stmt.exprEnd)
+	ep := rtgNewExprParse()
+	rtgParseExpressionInto(ep, p, stmt.exprStart, stmt.exprEnd)
 	if !ep.ok || len(ep.exprs) == 0 {
 		return false
 	}
 	root := &ep.exprs[len(ep.exprs)-1]
-	if root.kind != rtgExprCall || root.argCount != 1 || !rtgExprIsIdentText(p, &ep, root.left, "print") {
+	if root.kind != rtgExprCall {
 		return false
 	}
-	argIndex := ep.args[root.firstArg]
-	argType := rtgResolveType(g.meta, rtgInferParsedExprType(g, &ep, argIndex))
-	if argType.kind == rtgTypeString {
-		if !rtgEmitStringValueRegs(g, &ep, argIndex) {
-			return false
-		}
-	} else if rtgTypeKindIsScalarInt(argType.kind) {
-		if !rtgEmitIntExpr(g, &ep, argIndex) {
-			return false
-		}
-		rtgAsmNormalizePrimaryForKind(&g.asm, argType.kind)
-		rtgAsmCallLabel(&g.asm, rtgEnsurePrintIntHelper(g))
-	} else {
+	builtinPrintln := rtgExprIdentCode(p, ep, root.left) == rtgIdentPrintln
+	println := builtinPrintln || rtgExprIsIdentText(p, ep, root.left, "Println")
+	if !println && !rtgExprIsIdentText(p, ep, root.left, "print") {
 		return false
 	}
-	return rtgEmitPrintValueRegs(g)
+	callee := &ep.exprs[root.left]
+	if rtgFuncInfoFromCall(g, ep, root.left) >= 0 || rtgFindLocalIndex(g, callee.nameStart, callee.nameEnd) >= 0 {
+		return false
+	}
+	fd := 1
+	if builtinPrintln {
+		fd = 2
+	}
+	for i := 0; i < root.argCount; i++ {
+		if println && i > 0 && !rtgEmitPrintStaticByte(g, ' ', fd) {
+			return false
+		}
+		argIndex := ep.args[root.firstArg+i]
+		argType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, argIndex))
+		if argType.kind == rtgTypeString {
+			if !rtgEmitStringValueRegs(g, ep, argIndex) {
+				return false
+			}
+		} else if rtgTypeKindIsScalarInt(argType.kind) {
+			if !rtgEmitIntExpr(g, ep, argIndex) {
+				return false
+			}
+			rtgAsmNormalizePrimaryForKind(&g.asm, argType.kind)
+			rtgAsmCallLabel(&g.asm, rtgEnsurePrintIntHelper(g))
+		} else {
+			return false
+		}
+		if !rtgEmitWriteValueRegs(g, fd) {
+			return false
+		}
+	}
+	return !println || rtgEmitPrintStaticByte(g, '\n', fd)
 }
 
-func rtgEmitPrintValueRegs(g *rtgLinearGen) bool {
-	return rtgEmitWriteValueRegs(g, 1)
+func rtgEmitPrintStaticByte(g *rtgLinearGen, value byte, fd int) bool {
+	offset := len(g.asm.data)
+	g.asm.data = append(g.asm.data, value)
+	rtgAsmPrimaryDataAddr(&g.asm, offset)
+	rtgAsmSecondaryImm(&g.asm, 1)
+	return rtgEmitWriteValueRegs(g, fd)
 }
 
 func rtgEmitWriteValueRegs(g *rtgLinearGen, fd int) bool {
@@ -251,13 +276,13 @@ func rtgEmitBuiltinReadWrite(g *rtgLinearGen, ep *rtgExprParse, idx int, seqSysc
 	}
 	fdStart := ep.exprs[idx].tok + 1
 	fdEnd := rtgFindExprBoundary(p, fdStart, ep.end)
-	var fdEp rtgExprParse
-	rtgParseExpressionInto(&fdEp, p, fdStart, fdEnd)
+	fdEp := rtgNewExprParse()
+	rtgParseExpressionInto(fdEp, p, fdStart, fdEnd)
 	if !fdEp.ok || len(fdEp.exprs) == 0 {
 		return false
 	}
 	fdIndex := len(fdEp.exprs) - 1
-	if !rtgEmitIntExpr(g, &fdEp, fdIndex) {
+	if !rtgEmitIntExpr(g, fdEp, fdIndex) {
 		return false
 	}
 	rtgAsmPushPrimary(a)
@@ -705,12 +730,12 @@ func rtgEmitWindowsReadWrite(g *rtgLinearGen, ep *rtgExprParse, idx int, isWrite
 	}
 	fdStart := ep.exprs[idx].tok + 1
 	fdEnd := rtgFindExprBoundary(p, fdStart, ep.end)
-	var fdEp rtgExprParse
-	rtgParseExpressionInto(&fdEp, p, fdStart, fdEnd)
+	fdEp := rtgNewExprParse()
+	rtgParseExpressionInto(fdEp, p, fdStart, fdEnd)
 	if !fdEp.ok || len(fdEp.exprs) == 0 {
 		return false
 	}
-	if !rtgEmitIntExpr(g, &fdEp, len(fdEp.exprs)-1) {
+	if !rtgEmitIntExpr(g, fdEp, len(fdEp.exprs)-1) {
 		return false
 	}
 	rtgAsmPushPrimary(a)

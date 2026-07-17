@@ -26,6 +26,13 @@ func rtgAarch64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	oldContinue := g.continueDepth
 	oldCurrent := g.currentFunc
 	oldReturnStruct := g.returnStruct
+	oldClosureEnvOffset := g.closureEnvOffset
+	oldDeferHeadOffset := g.deferHeadOffset
+	oldDeferReturnLabel := g.deferReturnLabel
+	oldDeferResultOffset := g.deferResultOffset
+	oldDeferSites := g.deferSites
+	oldEmittingDefers := g.emittingDefers
+	oldSuppressPanicCheck := g.suppressPanicCheck
 	oldStackUsed := g.stackUsed
 	oldGotoLabels := g.gotoLabels
 	oldLastRangeReturns := g.lastRangeReturns
@@ -38,8 +45,10 @@ func rtgAarch64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.gotoLabels = gotoLabels
 	g.breakDepth = 0
 	g.continueDepth = 0
+	g.pendingControl = 0
 	g.currentFunc = fnInfoIndex
 	g.returnStruct = 0
+	g.closureEnvOffset = 0
 	g.stackUsed = 0
 	rtgAarch64AsmAlign(a)
 	rtgAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
@@ -60,13 +69,29 @@ func rtgAarch64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	if !rtgBindFunctionParams(g, fnInfoIndex) {
 		return false
 	}
+	if !rtgBindClosureCaptures(g, fnInfoIndex) {
+		return false
+	}
 	if !rtgBindNamedResults(g, fnInfoIndex) {
+		return false
+	}
+	if !rtgPrepareFunctionControl(g) {
 		return false
 	}
 	if !rtgEmitLinearRange(g, fn.bodyStart+1, fn.bodyEnd) {
 		return false
 	}
-	if !g.lastRangeReturns {
+	if g.deferReturnLabel > 0 {
+		if !g.lastRangeReturns {
+			rtgAsmJmpLabel(a, g.deferReturnLabel)
+		}
+		if !rtgEmitFunctionControlEpilogue(g) {
+			return false
+		}
+	} else if !g.lastRangeReturns {
+		if !rtgEmitClosureCaptureWriteback(g) {
+			return false
+		}
 		rtgAsmPrimaryImm(a, 0)
 		rtgAsmLeave(a)
 		rtgAsmRet(a)
@@ -77,6 +102,13 @@ func rtgAarch64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.continueDepth = oldContinue
 	g.currentFunc = oldCurrent
 	g.returnStruct = oldReturnStruct
+	g.closureEnvOffset = oldClosureEnvOffset
+	g.deferHeadOffset = oldDeferHeadOffset
+	g.deferReturnLabel = oldDeferReturnLabel
+	g.deferResultOffset = oldDeferResultOffset
+	g.deferSites = oldDeferSites
+	g.emittingDefers = oldEmittingDefers
+	g.suppressPanicCheck = oldSuppressPanicCheck
 	g.stackUsed = oldStackUsed
 	g.gotoLabels = oldGotoLabels
 	g.lastRangeReturns = oldLastRangeReturns
@@ -807,7 +839,7 @@ func rtgAarch64AsmStoreRaxMemRdxDispSize(a *rtgAsm, disp int, size int) {
 }
 
 func rtgAarch64AsmNormalizeRaxForKind(a *rtgAsm, kind int) {
-	if kind == rtgTypeByte || kind == rtgTypeBool {
+	if kind == rtgTypeByte {
 		rtgAarch64AsmEmit(a, 0x92401c00)
 		return
 	}

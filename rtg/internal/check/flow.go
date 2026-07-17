@@ -178,21 +178,26 @@ func findTopLevelAssignOp(file syntax.File, start int, end int) int {
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && isAssignOp(file, i) {
 			return i
 		}
-		if tokCharIs(file, i, '(') {
+		tok := file.Tokens[i]
+		c := byte(0)
+		if tok.Kind == syntax.TokenOperator && tok.End == tok.Start+1 {
+			c = file.Src[tok.Start]
+		}
+		if c == '(' {
 			parenDepth++
-		} else if tokCharIs(file, i, ')') {
+		} else if c == ')' {
 			if parenDepth > 0 {
 				parenDepth--
 			}
-		} else if tokCharIs(file, i, '[') {
+		} else if c == '[' {
 			bracketDepth++
-		} else if tokCharIs(file, i, ']') {
+		} else if c == ']' {
 			if bracketDepth > 0 {
 				bracketDepth--
 			}
-		} else if tokCharIs(file, i, '{') {
+		} else if c == '{' {
 			braceDepth++
-		} else if tokCharIs(file, i, '}') {
+		} else if c == '}' {
 			if braceDepth > 0 {
 				braceDepth--
 			}
@@ -202,19 +207,27 @@ func findTopLevelAssignOp(file syntax.File, start int, end int) int {
 }
 
 func isAssignOp(file syntax.File, tok int) bool {
-	if tokenTextIs(file, tok, "=") || tokenTextIs(file, tok, ":=") {
-		return true
+	if tok < 0 || tok >= len(file.Tokens) {
+		return false
 	}
-	if tokenTextIs(file, tok, "+=") || tokenTextIs(file, tok, "-=") {
-		return true
+	token := file.Tokens[tok]
+	if token.Kind != syntax.TokenOperator || token.Start < 0 || token.End > len(file.Src) {
+		return false
 	}
-	if tokenTextIs(file, tok, "*=") || tokenTextIs(file, tok, "/=") {
-		return true
+	size := token.End - token.Start
+	if size == 1 {
+		return file.Src[token.Start] == '='
 	}
-	if tokenTextIs(file, tok, "%=") || tokenTextIs(file, tok, "&=") {
-		return true
+	if size == 2 && file.Src[token.Start+1] == '=' {
+		first := file.Src[token.Start]
+		return first == ':' || first == '+' || first == '-' || first == '*' || first == '/' || first == '%' || first == '&' || first == '|' || first == '^'
 	}
-	return tokenTextIs(file, tok, "|=") || tokenTextIs(file, tok, "^=")
+	if size == 3 && file.Src[token.Start+2] == '=' {
+		first := file.Src[token.Start]
+		second := file.Src[token.Start+1]
+		return first == '<' && second == '<' || first == '>' && second == '>' || first == '&' && second == '^'
+	}
+	return false
 }
 
 func assignKind(file syntax.File, tok int) int {

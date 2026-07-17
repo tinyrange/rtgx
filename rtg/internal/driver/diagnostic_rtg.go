@@ -134,6 +134,18 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Code, d.Message = "RTG-CHECK-006", "invalid name or scope"
 		} else if built.Build.ErrorDetail == check.CheckErrExcluded {
 			d.Code, d.Message = "RTG-CHECK-009", "feature is excluded from the current frontend scope"
+		} else if built.Build.ErrorDetail == check.CheckErrUnusedImport {
+			d.Code, d.Message = "RTG-CHECK-010", "import is not used"
+		} else if built.Build.ErrorDetail == check.CheckErrCall {
+			d.Code, d.Message = "RTG-CHECK-011", "called expression is not a function"
+		} else if built.Build.ErrorDetail == check.CheckErrAssignTarget {
+			d.Code, d.Message = "RTG-CHECK-012", "left side of assignment is not assignable"
+		} else if built.Build.ErrorDetail == check.CheckErrAssignCount {
+			d.Code, d.Message = "RTG-CHECK-013", "assignment count does not match"
+		} else if built.Build.ErrorDetail == check.CheckErrBreak {
+			d.Code, d.Message = "RTG-CHECK-014", "break is not inside a loop or switch"
+		} else if built.Build.ErrorDetail == check.CheckErrContinue {
+			d.Code, d.Message = "RTG-CHECK-015", "continue is not inside a loop"
 		}
 	} else {
 		d.Phase, d.Code, d.Message = "linker", "RTG-LINK-001", "package linking failed"

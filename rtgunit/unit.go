@@ -1374,6 +1374,19 @@ func scanSource(src []byte) ([]sourceToken, int) {
 						i++
 					}
 				}
+				if i < len(src) && (src[i] == 'e' || src[i] == 'E') {
+					kind = rtgTokFloat
+					i++
+					if i < len(src) && (src[i] == '+' || src[i] == '-') {
+						i++
+					}
+					for i < len(src) && ((src[i] >= '0' && src[i] <= '9') || src[i] == '_') {
+						i++
+					}
+				}
+			}
+			if i < len(src) && src[i] == 'i' {
+				i++
 			}
 			toks = append(toks, sourceToken{kind: kind, text: string(src[start:i]), line: line, start: start, end: i})
 			continue
@@ -1622,7 +1635,41 @@ func parseFuncDecl(toks []sourceToken, start int) (sourceFunc, bool) {
 	}
 	fn.nameTok = i
 	i++
-	for i < len(toks) && !tokCharIs(toks, i, '{') && toks[i].kind != rtgTokEOF {
+	if !tokCharIs(toks, i, '(') {
+		return fn, false
+	}
+	i = skipBalanced(toks, i, '(', ')')
+	if i <= fn.nameTok+1 {
+		return fn, false
+	}
+	for i < len(toks) && toks[i].kind != rtgTokEOF {
+		if tokCharIs(toks, i, '(') {
+			next := skipBalanced(toks, i, '(', ')')
+			if next <= i {
+				return fn, false
+			}
+			i = next
+			continue
+		}
+		if tokCharIs(toks, i, '[') {
+			next := skipBalanced(toks, i, '[', ']')
+			if next <= i {
+				return fn, false
+			}
+			i = next
+			continue
+		}
+		if tokCharIs(toks, i, '{') {
+			if i > 0 && (toks[i-1].kind == rtgTokStruct || toks[i-1].kind == rtgTokIdent && toks[i-1].text == "interface") {
+				next := skipBalanced(toks, i, '{', '}')
+				if next <= i {
+					return fn, false
+				}
+				i = next
+				continue
+			}
+			break
+		}
 		i++
 	}
 	if !tokCharIs(toks, i, '{') {

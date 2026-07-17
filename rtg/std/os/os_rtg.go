@@ -108,19 +108,23 @@ func WriteFile(name string, data []byte, perm FileMode) *osError {
 }
 
 func Open(name string) (File, *osError) {
-	fd := open(rtgPathCString(name), O_RDONLY)
+	return OpenFile(name, O_RDONLY, 0)
+}
+
+func OpenFile(name string, flag int, perm FileMode) (File, *osError) {
+	fd := open(rtgPathCString(name), flag)
 	if fd < 0 {
+		return File{}, errIO()
+	}
+	if flag&O_CREATE != 0 && chmod(fd, int(perm)) != 0 {
+		close(fd)
 		return File{}, errIO()
 	}
 	return File{fd: fd}, nil
 }
 
 func Create(name string) (File, *osError) {
-	fd := open(rtgPathCString(name), O_RDWR|O_CREATE|O_TRUNC)
-	if fd < 0 {
-		return File{}, errIO()
-	}
-	return File{fd: fd}, nil
+	return OpenFile(name, O_RDWR|O_CREATE|O_TRUNC, 0666)
 }
 
 func (f File) Read(p []byte) (int, *osError) {

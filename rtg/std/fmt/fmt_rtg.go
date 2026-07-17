@@ -2,6 +2,11 @@
 
 package fmt
 
+func Println(value string) {
+	print(value)
+	print("\n")
+}
+
 func Sprintf(format string, value int) string {
 	var out []byte
 	used := false

@@ -167,10 +167,15 @@ func (fs RTGFS) ReadFile(path string) ([]byte, bool) {
 	if fd < 0 {
 		return nil, false
 	}
-	buf := make([]byte, 4096)
-	out := make([]byte, 0, len(buf))
+	out := make([]byte, 4096)
+	used := 0
 	for {
-		n := read(fd, buf, -1)
+		if used == len(out) {
+			next := make([]byte, len(out)*2)
+			copy(next, out)
+			out = next
+		}
+		n := read(fd, out[used:], -1)
 		if n < 0 {
 			close(fd)
 			return nil, false
@@ -178,12 +183,10 @@ func (fs RTGFS) ReadFile(path string) ([]byte, bool) {
 		if n == 0 {
 			break
 		}
-		for i := 0; i < n; i++ {
-			out = append(out, buf[i])
-		}
+		used += n
 	}
 	close(fd)
-	return out, true
+	return out[:used], true
 }
 
 func (fs RTGFS) ReadDir(path string) ([]DirEntry, bool) {

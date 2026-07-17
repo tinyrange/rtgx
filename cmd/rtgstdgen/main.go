@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"go/format"
@@ -128,9 +129,91 @@ func generate(files []bundleFile, dirs map[string][]bundleEntry) []byte {
 	out.WriteString("//go:build rtg_bundle\n\n")
 	out.WriteString("package driver\n\n")
 	out.WriteString("const rtgBundledStdEnabled = true\n\n")
+	out.WriteString(`func bundledStdBase64Value(c byte) int {
+	if c >= 'A' && c <= 'Z' {
+		return int(c - 'A')
+	}
+	if c >= 'a' && c <= 'z' {
+		return int(c-'a') + 26
+	}
+	if c >= '0' && c <= '9' {
+		return int(c-'0') + 52
+	}
+	if c == '+' {
+		return 62
+	}
+	if c == '/' {
+		return 63
+	}
+	return -1
+}
+
+func bundledStdBase64(text string) []byte {
+	out := make([]byte, 0, len(text)*3/4)
+	value := 0
+	bits := 0
+	for i := 0; i < len(text); i++ {
+		part := bundledStdBase64Value(text[i])
+		if part < 0 {
+			break
+		}
+		value = value<<6 | part
+		bits += 6
+		if bits >= 8 {
+			bits -= 8
+			out = append(out, byte(value>>bits))
+			if bits == 0 {
+				value = 0
+			} else {
+				value &= 1<<bits - 1
+			}
+		}
+	}
+	return out
+}
+
+func bundledStdDecode(text string, size int) []byte {
+	encoded := bundledStdBase64(text)
+	out := make([]byte, 0, size)
+	pos := 0
+	for pos < len(encoded) && len(out) < size {
+		flags := encoded[pos]
+		pos++
+		for bit := 0; bit < 8 && len(out) < size; bit++ {
+			if flags&(1<<bit) != 0 {
+				if pos >= len(encoded) {
+					return nil
+				}
+				out = append(out, encoded[pos])
+				pos++
+				continue
+			}
+			if pos+1 >= len(encoded) {
+				return nil
+			}
+			pair := int(encoded[pos])<<8 | int(encoded[pos+1])
+			pos += 2
+			distance := (pair >> 4) + 1
+			length := pair&15 + 3
+			if distance > len(out) || len(out)+length > size {
+				return nil
+			}
+			for i := 0; i < length; i++ {
+				out = append(out, out[len(out)-distance])
+			}
+		}
+	}
+	if len(out) != size {
+		return nil
+	}
+	return out
+}
+
+`)
 	out.WriteString("func bundledStdReadFile(path string) ([]byte, bool) {\n")
 	for _, file := range files {
-		fmt.Fprintf(&out, "\tif path == %s {\n\t\treturn []byte(%s), true\n\t}\n", strconv.Quote(file.path), strconv.Quote(string(file.data)))
+		encoded := base64.StdEncoding.EncodeToString(compressBundle(file.data))
+		fmt.Fprintf(&out, "\tif path == %s {\n\t\tdata := bundledStdDecode(%s, %d)\n\t\treturn data, data != nil\n\t}\n", strconv.Quote(file.path), strconv.Quote(encoded), len(file.data))
 	}
 	out.WriteString("\treturn nil, false\n}\n\n")
 	out.WriteString("func bundledStdReadDir(path string) ([]DirEntry, bool) {\n")
@@ -149,4 +232,68 @@ func generate(files []bundleFile, dirs map[string][]bundleEntry) []byte {
 	}
 	out.WriteString("\treturn nil, false\n}\n")
 	return out.Bytes()
+}
+
+func compressBundle(data []byte) []byte {
+	positions := make(map[int][]int)
+	addPosition := func(pos int) {
+		if pos+2 >= len(data) {
+			return
+		}
+		key := int(data[pos])<<16 | int(data[pos+1])<<8 | int(data[pos+2])
+		positions[key] = append(positions[key], pos)
+	}
+	matchAt := func(pos int) (int, int) {
+		if pos+2 >= len(data) {
+			return 0, 0
+		}
+		key := int(data[pos])<<16 | int(data[pos+1])<<8 | int(data[pos+2])
+		values := positions[key]
+		bestDistance := 0
+		bestLength := 0
+		checked := 0
+		for i := len(values) - 1; i >= 0 && checked < 64; i-- {
+			distance := pos - values[i]
+			if distance > 4096 {
+				break
+			}
+			checked++
+			length := 0
+			for length < 18 && pos+length < len(data) && data[values[i]+length] == data[pos+length] {
+				length++
+			}
+			if length > bestLength {
+				bestDistance = distance
+				bestLength = length
+				if length == 18 {
+					break
+				}
+			}
+		}
+		return bestDistance, bestLength
+	}
+	var out []byte
+	for pos := 0; pos < len(data); {
+		flagPos := len(out)
+		out = append(out, 0)
+		flags := byte(0)
+		for bit := 0; bit < 8 && pos < len(data); bit++ {
+			distance, length := matchAt(pos)
+			if length >= 3 {
+				pair := (distance-1)<<4 | (length - 3)
+				out = append(out, byte(pair>>8), byte(pair))
+				for i := 0; i < length; i++ {
+					addPosition(pos + i)
+				}
+				pos += length
+				continue
+			}
+			flags |= 1 << bit
+			out = append(out, data[pos])
+			addPosition(pos)
+			pos++
+		}
+		out[flagPos] = flags
+	}
+	return out
 }

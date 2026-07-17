@@ -389,9 +389,14 @@ func skipBalanced(file File, start int, open byte, close byte) int {
 	depth := 1
 	i := start + 1
 	for i < len(file.Tokens) && file.Tokens[i].Kind != TokenEOF {
-		if tokCharIs(file.Src, file.Tokens, i, open) {
+		tok := file.Tokens[i]
+		c := byte(0)
+		if tok.Kind == TokenOperator && tok.End == tok.Start+1 {
+			c = file.Src[tok.Start]
+		}
+		if c == open {
 			depth++
-		} else if tokCharIs(file.Src, file.Tokens, i, close) {
+		} else if c == close {
 			depth--
 			if depth == 0 {
 				return i + 1
