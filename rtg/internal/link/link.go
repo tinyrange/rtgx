@@ -133,7 +133,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		return empty, false
 	}
 	program := unit.Program{Package: cloneCoreLinkString(rootName), ImportPath: cloneCoreLinkString(programs[root].ImportPath)}
-	reserveCompactLinkedProgram(&program, programs)
+	reserveCompactLinkedProgram(&program, programs, finalEOF)
 	line := 1
 	appendOK := true
 	for i := 0; i < len(programs); i++ {
@@ -248,20 +248,18 @@ func coreTokenAt(program unit.Program, start int, end int) int {
 	return -1
 }
 
-func reserveCompactLinkedProgram(program *unit.Program, programs []unit.Program) {
+func reserveCompactLinkedProgram(program *unit.Program, programs []unit.Program, finalEOF int) {
 	textCap := 0
-	tokenCap := 1
 	declCap := 0
 	funcCap := 0
 	for i := 0; i < len(programs); i++ {
 		p := programs[i]
 		textCap += len(p.Text) + 1
-		tokenCap += len(p.Tokens)
 		declCap += len(p.Decls)
 		funcCap += len(p.Funcs)
 	}
 	program.Text = make([]byte, 0, textCap)
-	program.Tokens = make([]unit.Token, 0, tokenCap)
+	program.Tokens = make([]unit.Token, 0, finalEOF+1)
 	program.Decls = make([]unit.Decl, 0, declCap)
 	program.Funcs = make([]unit.Func, 0, funcCap)
 }
