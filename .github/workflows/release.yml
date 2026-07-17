@@ -75,33 +75,9 @@ jobs:
           grep -F "darwin/arm64" dist/rtg-help.txt
           grep -F "wasi/wasm32" dist/rtg-help.txt
 
-      - name: Package frontend releases
+      - name: Package Windows frontend releases
         run: |
           set -eux
-          mkdir -p package/rtg-linux-amd64/bin
-          cp dist/rtg-linux-amd64 package/rtg-linux-amd64/bin/rtg
-          tar -C package -czf dist/rtg-linux-amd64.tar.gz rtg-linux-amd64
-
-          mkdir -p package/rtg-linux-386/bin
-          cp dist/rtg-linux-386 package/rtg-linux-386/bin/rtg
-          tar -C package -czf dist/rtg-linux-386.tar.gz rtg-linux-386
-
-          mkdir -p package/rtg-linux-arm64/bin
-          cp dist/rtg-linux-arm64 package/rtg-linux-arm64/bin/rtg
-          tar -C package -czf dist/rtg-linux-arm64.tar.gz rtg-linux-arm64
-
-          mkdir -p package/rtg-linux-arm/bin
-          cp dist/rtg-linux-arm package/rtg-linux-arm/bin/rtg
-          tar -C package -czf dist/rtg-linux-arm.tar.gz rtg-linux-arm
-
-          mkdir -p package/rtg-darwin-arm64/bin
-          cp dist/rtg-darwin-arm64 package/rtg-darwin-arm64/bin/rtg
-          tar -C package -czf dist/rtg-darwin-arm64.tar.gz rtg-darwin-arm64
-
-          mkdir -p package/rtg-wasi-wasm32/bin
-          cp dist/rtg-wasi-wasm32.wasm package/rtg-wasi-wasm32/bin/rtg.wasm
-          tar -C package -czf dist/rtg-wasi-wasm32.tar.gz rtg-wasi-wasm32
-
           mkdir -p package/rtg-windows-amd64/bin
           cp dist/rtg-windows-amd64.exe package/rtg-windows-amd64/bin/rtg.exe
           cd package
@@ -120,17 +96,6 @@ jobs:
           zip -qr ../dist/rtg-windows-arm64.zip rtg-windows-arm64
           cd ..
 
-      - name: Package backend releases
-        run: |
-          set -eux
-          mkdir -p package/rtgx-linux-amd64/bin
-          cp dist/rtgx-linux-amd64 package/rtgx-linux-amd64/bin/rtgx
-          tar -C package -czf dist/rtgx-linux-amd64.tar.gz rtgx-linux-amd64
-
-          mkdir -p package/rtgx-linux-arm64/bin
-          cp dist/rtgx-linux-arm64 package/rtgx-linux-arm64/bin/rtgx
-          tar -C package -czf dist/rtgx-linux-arm64.tar.gz rtgx-linux-arm64
-
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
         with:
@@ -147,17 +112,9 @@ jobs:
             dist/rtg-windows-arm64.exe
             dist/rtg-darwin-arm64
             dist/rtg-wasi-wasm32.wasm
-            dist/rtg-linux-amd64.tar.gz
-            dist/rtg-linux-386.tar.gz
-            dist/rtg-linux-arm64.tar.gz
-            dist/rtg-linux-arm.tar.gz
             dist/rtg-windows-amd64.zip
             dist/rtg-windows-386.zip
             dist/rtg-windows-arm64.zip
-            dist/rtg-darwin-arm64.tar.gz
-            dist/rtg-wasi-wasm32.tar.gz
-            dist/rtgx-linux-amd64.tar.gz
-            dist/rtgx-linux-arm64.tar.gz
           if-no-files-found: error
 
       - name: Upload release asset
@@ -177,15 +134,7 @@ jobs:
             dist/rtg-windows-arm64.exe \
             dist/rtg-darwin-arm64 \
             dist/rtg-wasi-wasm32.wasm \
-            dist/rtg-linux-amd64.tar.gz \
-            dist/rtg-linux-386.tar.gz \
-            dist/rtg-linux-arm64.tar.gz \
-            dist/rtg-linux-arm.tar.gz \
             dist/rtg-windows-amd64.zip \
             dist/rtg-windows-386.zip \
             dist/rtg-windows-arm64.zip \
-            dist/rtg-darwin-arm64.tar.gz \
-            dist/rtg-wasi-wasm32.tar.gz \
-            dist/rtgx-linux-amd64.tar.gz \
-            dist/rtgx-linux-arm64.tar.gz \
             --clobber
