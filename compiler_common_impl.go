@@ -381,18 +381,11 @@ func rtgAsmEmit5(a *rtgAsm, v0 int, v1 int, v2 int, v3 int, v4 int) {
 }
 
 func rtgAsmAddAbsReloc(a *rtgAsm, at int, off int, kind int) {
-	index := len(a.absRelocs)
-	a.absRelocs = a.absRelocs[:index+1]
-	a.absRelocs[index].at = at & 2147483647
-	a.absRelocs[index].off = off & 2147483647
-	a.absRelocs[index].kind = kind & 2147483647
+	a.absRelocs = append(a.absRelocs, rtgAbsRef{at: at & 2147483647, off: off & 2147483647, kind: kind & 2147483647})
 }
 
 func rtgAsmAddReloc(a *rtgAsm, at int, label int) {
-	index := len(a.relocs)
-	a.relocs = a.relocs[:index+1]
-	a.relocs[index].at = at & 2147483647
-	a.relocs[index].label = label & 2147483647
+	a.relocs = append(a.relocs, rtgLabelRef{at: at & 2147483647, label: label & 2147483647})
 }
 
 func rtgAsmAddFuncSymbol(a *rtgAsm, src []byte, nameStart int, nameEnd int, label int) {
@@ -1895,12 +1888,7 @@ func rtgScan(src []byte, toks *rtgTokens) {
 				}
 				i++
 			}
-			base := len(toks.data)
-			toks.data = toks.data[:base+rtgTokenStride]
-			data := toks.data
-			data[base] = int32(rtgKeywordKind(src, start, i) | line<<8)
-			data[base+1] = int32(start)
-			data[base+2] = int32(i)
+			rtgScanAppendToken(toks, rtgKeywordKind(src, start, i), start, i-start, line)
 			continue
 		}
 		if c >= '0' && c <= '9' {
@@ -1949,12 +1937,7 @@ func rtgScan(src []byte, toks *rtgTokens) {
 				kind = rtgTokFloat
 				i++
 			}
-			base := len(toks.data)
-			toks.data = toks.data[:base+rtgTokenStride]
-			data := toks.data
-			data[base] = int32(kind | line<<8)
-			data[base+1] = int32(start)
-			data[base+2] = int32(i)
+			rtgScanAppendToken(toks, kind, start, i-start, line)
 			continue
 		}
 		if c == '"' {
@@ -2021,28 +2004,18 @@ func rtgScan(src []byte, toks *rtgTokens) {
 				}
 			}
 		}
-		base := len(toks.data)
-		toks.data = toks.data[:base+rtgTokenStride]
 		size := i - start
-		data := toks.data
 		charBits := 0
 		if size == 1 {
 			charBits = int(src[start]) << 24
 		}
-		data[base] = int32(rtgTokOp | line<<8 | charBits)
-		data[base+1] = int32(start)
-		data[base+2] = int32(i)
+		rtgScanAppendToken(toks, rtgTokOp|charBits, start, size, line)
 	}
 	rtgScanAppendToken(toks, rtgTokEOF, srcLen, 0, line)
 }
 
 func rtgScanAppendToken(toks *rtgTokens, kind int, start int, size int, line int) {
-	base := len(toks.data)
-	toks.data = toks.data[:base+rtgTokenStride]
-	data := toks.data
-	data[base] = int32(kind | line<<8)
-	data[base+1] = int32(start)
-	data[base+2] = int32(start + size)
+	toks.data = append(toks.data, int32(kind|line<<8), int32(start), int32(start+size))
 }
 
 func rtgKeywordKind(src []byte, start int, end int) int {
