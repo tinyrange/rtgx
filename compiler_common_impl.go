@@ -9995,7 +9995,7 @@ func rtgEmitTypedAssign(g *rtgLinearGen, ep *rtgExprParse, idx int, offset int) 
 					return false
 				}
 				size := rtgTypeSize(meta, destType)
-				rtgEmitCopyTypedStackToStack(g, destType, g.locals[localIndex].offset, offset, size)
+				rtgEmitCopyStackToStack(g, g.locals[localIndex].offset, offset, size)
 				return true
 			}
 			globalOffset := rtgFindGlobalOffset(g, e.nameStart, e.nameEnd)
@@ -11033,30 +11033,6 @@ func rtgEmitCopyStackToMemSecondary(g *rtgLinearGen, srcOffset int, destDisp int
 }
 func rtgEmitCopyMemSecondaryToStack(g *rtgLinearGen, destOffset int, size int) {
 	rtgEmitCopyNative(g, 0, destOffset, size, rtgNativeCopyMemToStack)
-}
-
-func rtgEmitCopyTypedStackToStack(g *rtgLinearGen, typ int, srcOffset int, destOffset int, size int) {
-	if rtgTypeUsesNativeABI(g.meta, typ) {
-		rtgEmitCopyNative(g, srcOffset, destOffset, size, rtgNativeCopyStackToStack)
-		return
-	}
-	rtgEmitCopyStackToStack(g, srcOffset, destOffset, size)
-}
-
-func rtgEmitCopyTypedStackToMemSecondary(g *rtgLinearGen, typ int, srcOffset int, destDisp int, size int) {
-	if rtgTypeUsesNativeABI(g.meta, typ) {
-		rtgEmitCopyNative(g, srcOffset, destDisp, size, rtgNativeCopyStackToMem)
-		return
-	}
-	rtgEmitCopyStackToMemSecondary(g, srcOffset, destDisp, size)
-}
-
-func rtgEmitCopyTypedMemSecondaryToStack(g *rtgLinearGen, typ int, destOffset int, size int) {
-	if rtgTypeUsesNativeABI(g.meta, typ) {
-		rtgEmitCopyNative(g, 0, destOffset, size, rtgNativeCopyMemToStack)
-		return
-	}
-	rtgEmitCopyMemSecondaryToStack(g, destOffset, size)
 }
 
 const rtgNativeCopyStackToStack = 1
@@ -16368,7 +16344,7 @@ func rtgEmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				tempOffset := rtgAddUnnamedLocal(g, resultType)
 				rtgEmitCopyBssToStack(g, globalOffset, tempOffset, size)
 				rtgAsmLoadSecondaryStack(&g.asm, g.returnStruct)
-				rtgEmitCopyTypedStackToMemSecondary(g, resultType, tempOffset, 0, size)
+				rtgEmitCopyStackToMemSecondary(g, tempOffset, 0, size)
 				return true
 			}
 		}

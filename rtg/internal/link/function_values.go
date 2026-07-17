@@ -52,40 +52,40 @@ type functionValueEdit struct {
 	text  string
 }
 
-func lowerFunctionValuesCore(program unit.Program) (unit.Program, bool) {
+func lowerFunctionValuesCore(program *unit.Program) bool {
 	if !functionValueProgramNeedsLowering(program) {
-		return program, true
+		return true
 	}
 	signatures, fields, edits, ok := discoverFunctionValueTypes(program)
 	if !ok {
-		return program, false
+		return false
 	}
 	if len(signatures) == 0 {
-		return program, true
+		return true
 	}
 	edits = appendFunctionValuePackageEdits(program, edits)
 	for i := 0; i < len(program.Tokens); i++ {
-		text := tokenText(program, i)
+		text := functionValueTokenText(program, i)
 		if text == "=" {
 			edits, ok = lowerFunctionValueAssignment(program, i, signatures, fields, edits)
 			if !ok {
-				return program, false
+				return false
 			}
 		}
 	}
 	var closures []functionValueClosure
 	signatures, closures, edits, ok = lowerFunctionValueLiterals(program, signatures, fields, closures, edits)
 	if !ok {
-		return program, false
+		return false
 	}
 	for i := 0; i < len(program.Tokens); i++ {
-		text := tokenText(program, i)
+		text := functionValueTokenText(program, i)
 		if text == "==" || text == "!=" {
 			edits = lowerFunctionValueNilComparison(program, i, fields, edits)
 		}
 	}
 	for i := 0; i < len(program.Tokens); i++ {
-		if tokenTextEquals(program, i, "(") {
+		if functionValueTokenEquals(program, i, "(") {
 			edits = lowerFunctionValueCall(program, i, signatures, fields, edits)
 		}
 	}
@@ -99,7 +99,7 @@ func lowerFunctionValuesCore(program unit.Program) (unit.Program, bool) {
 	generated := functionValueGeneratedText(signatures, closures)
 	text, ok := applyFunctionValueEdits(program.Text, edits)
 	if !ok {
-		return program, false
+		return false
 	}
 	if len(text) > 0 && text[len(text)-1] != '\n' {
 		text = append(text, '\n')
@@ -108,16 +108,16 @@ func lowerFunctionValuesCore(program unit.Program) (unit.Program, bool) {
 	return reparseFunctionValueProgram(program, text)
 }
 
-func functionValueProgramNeedsLowering(program unit.Program) bool {
+func functionValueProgramNeedsLowering(program *unit.Program) bool {
 	for i := 0; i+1 < len(program.Tokens); i++ {
-		if tokenTextEquals(program, i, "func") && tokenTextEquals(program, i+1, "(") && !functionValueIsDeclaredFunction(program, i) {
+		if functionValueTokenEquals(program, i, "func") && functionValueTokenEquals(program, i+1, "(") && !functionValueIsDeclaredFunction(program, i) {
 			return true
 		}
 	}
 	return false
 }
 
-func discoverFunctionValueTypes(program unit.Program) ([]functionValueSignature, []functionValueField, []functionValueEdit, bool) {
+func discoverFunctionValueTypes(program *unit.Program) ([]functionValueSignature, []functionValueField, []functionValueEdit, bool) {
 	var signatures []functionValueSignature
 	var fields []functionValueField
 	var edits []functionValueEdit
@@ -130,13 +130,13 @@ func discoverFunctionValueTypes(program unit.Program) ([]functionValueSignature,
 		if nameTok < 0 {
 			return signatures, fields, edits, false
 		}
-		owner := tokenText(program, nameTok)
+		owner := functionValueTokenText(program, nameTok)
 		start := nameTok + 1
-		if tokenTextEquals(program, start, "=") {
+		if functionValueTokenEquals(program, start, "=") {
 			start++
 		}
-		if tokenTextEquals(program, start, "func") {
-			sig, end, ok := parseFunctionValueSignature(program, start, tokenText(program, nameTok))
+		if functionValueTokenEquals(program, start, "func") {
+			sig, end, ok := parseFunctionValueSignature(program, start, functionValueTokenText(program, nameTok))
 			if !ok {
 				return signatures, fields, edits, false
 			}
@@ -145,7 +145,7 @@ func discoverFunctionValueTypes(program unit.Program) ([]functionValueSignature,
 			signatures = append(signatures, sig)
 			continue
 		}
-		if !tokenTextEquals(program, start, "struct") || !tokenTextEquals(program, start+1, "{") {
+		if !functionValueTokenEquals(program, start, "struct") || !functionValueTokenEquals(program, start+1, "{") {
 			continue
 		}
 		close := functionValueFindMatchingBrace(program, start+1)
@@ -158,15 +158,15 @@ func discoverFunctionValueTypes(program unit.Program) ([]functionValueSignature,
 				j++
 				continue
 			}
-			fieldName := tokenText(program, j)
+			fieldName := functionValueTokenText(program, j)
 			typeTok := j + 1
-			sigIndex := functionValueSignatureByName(signatures, tokenText(program, typeTok))
+			sigIndex := functionValueSignatureByName(signatures, functionValueTokenText(program, typeTok))
 			if sigIndex >= 0 {
 				fields = append(fields, functionValueField{owner: owner, name: fieldName, sig: sigIndex})
 				j = typeTok + 1
 				continue
 			}
-			if tokenTextEquals(program, typeTok, "func") {
+			if functionValueTokenEquals(program, typeTok, "func") {
 				name := "__rtg_function_" + functionValueDecimal(len(signatures))
 				sig, end, ok := parseFunctionValueSignature(program, typeTok, name)
 				if !ok {
@@ -191,9 +191,9 @@ func discoverFunctionValueTypes(program unit.Program) ([]functionValueSignature,
 			continue
 		}
 		nameTok := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
-		owner := tokenText(program, nameTok)
+		owner := functionValueTokenText(program, nameTok)
 		start := nameTok + 1
-		if !tokenTextEquals(program, start, "struct") || !tokenTextEquals(program, start+1, "{") {
+		if !functionValueTokenEquals(program, start, "struct") || !functionValueTokenEquals(program, start+1, "{") {
 			continue
 		}
 		close := functionValueFindMatchingBrace(program, start+1)
@@ -201,20 +201,20 @@ func discoverFunctionValueTypes(program unit.Program) ([]functionValueSignature,
 			if program.Tokens[j].Kind != unit.TokenIdent {
 				continue
 			}
-			sigIndex := functionValueSignatureByName(signatures, tokenText(program, j+1))
-			if sigIndex >= 0 && functionValueFieldByOwnerAndName(fields, owner, tokenText(program, j)) < 0 {
-				fields = append(fields, functionValueField{owner: owner, name: tokenText(program, j), sig: sigIndex})
+			sigIndex := functionValueSignatureByName(signatures, functionValueTokenText(program, j+1))
+			if sigIndex >= 0 && functionValueFieldByOwnerAndName(fields, owner, functionValueTokenText(program, j)) < 0 {
+				fields = append(fields, functionValueField{owner: owner, name: functionValueTokenText(program, j), sig: sigIndex})
 			}
 		}
 	}
 	return signatures, fields, edits, true
 }
 
-func parseFunctionValueSignature(program unit.Program, funcTok int, name string) (functionValueSignature, int, bool) {
+func parseFunctionValueSignature(program *unit.Program, funcTok int, name string) (functionValueSignature, int, bool) {
 	var sig functionValueSignature
 	sig.name = name
 	sig.declFuncTok = funcTok
-	if !tokenTextEquals(program, funcTok, "func") || !tokenTextEquals(program, funcTok+1, "(") {
+	if !functionValueTokenEquals(program, funcTok, "func") || !functionValueTokenEquals(program, funcTok+1, "(") {
 		return sig, funcTok, false
 	}
 	close := functionValueFindMatchingParen(program, funcTok+1)
@@ -228,7 +228,7 @@ func parseFunctionValueSignature(program unit.Program, funcTok int, name string)
 	sig.params = params
 	sig.paramNames = names
 	end := close + 1
-	if tokenTextEquals(program, end, "(") {
+	if functionValueTokenEquals(program, end, "(") {
 		resultClose := functionValueFindMatchingParen(program, end)
 		if resultClose < 0 {
 			return sig, funcTok, false
@@ -236,9 +236,9 @@ func parseFunctionValueSignature(program unit.Program, funcTok int, name string)
 		sig.result = functionValueTokensText(program, end, resultClose+1)
 		end = resultClose + 1
 	} else if functionValueTokenCanStartType(program, end) && program.Tokens[end].Line == program.Tokens[close].Line {
-		sig.result = tokenText(program, end)
+		sig.result = functionValueTokenText(program, end)
 		if sig.result == "*" && end+1 < len(program.Tokens) {
-			sig.result = sig.result + tokenText(program, end+1)
+			sig.result = sig.result + functionValueTokenText(program, end+1)
 			end += 2
 		} else {
 			end++
@@ -247,13 +247,13 @@ func parseFunctionValueSignature(program unit.Program, funcTok int, name string)
 	return sig, end, true
 }
 
-func normalizedFunctionValueParams(program unit.Program, start int, end int) (string, []string, bool) {
+func normalizedFunctionValueParams(program *unit.Program, start int, end int) (string, []string, bool) {
 	var partStarts []int
 	var partEnds []int
 	partStart := start
 	depth := 0
 	for i := start; i <= end; i++ {
-		text := tokenText(program, i)
+		text := functionValueTokenText(program, i)
 		if i < end {
 			if text == "(" || text == "[" || text == "{" {
 				depth++
@@ -280,10 +280,10 @@ func normalizedFunctionValueParams(program unit.Program, start int, end int) (st
 		name := "arg" + functionValueDecimal(i)
 		typ := functionValueTokensText(program, partStarts[i], partEnds[i])
 		if partLen >= 2 && program.Tokens[partStarts[i]].Kind == unit.TokenIdent {
-			name = tokenText(program, partStarts[i])
+			name = functionValueTokenText(program, partStarts[i])
 			typ = functionValueTokensText(program, partStarts[i]+1, partEnds[i])
 		} else if partLen == 1 && i+1 < len(partStarts) && partEnds[i+1]-partStarts[i+1] >= 2 {
-			name = tokenText(program, partStarts[i])
+			name = functionValueTokenText(program, partStarts[i])
 			typ = functionValueTokensText(program, partStarts[i+1]+1, partEnds[i+1])
 		}
 		out = appendFunctionValueString(out, name+" "+typ)
@@ -292,7 +292,7 @@ func normalizedFunctionValueParams(program unit.Program, start int, end int) (st
 	return string(out), names, depth == 0
 }
 
-func lowerFunctionValueAssignment(program unit.Program, op int, signatures []functionValueSignature, fields []functionValueField, edits []functionValueEdit) ([]functionValueEdit, bool) {
+func lowerFunctionValueAssignment(program *unit.Program, op int, signatures []functionValueSignature, fields []functionValueField, edits []functionValueEdit) ([]functionValueEdit, bool) {
 	fieldTok := functionValueSelectorFieldBefore(program, op)
 	fieldIndex := functionValueFieldForSelector(program, fieldTok, fields)
 	if fieldIndex < 0 || op+1 >= len(program.Tokens) {
@@ -300,15 +300,15 @@ func lowerFunctionValueAssignment(program unit.Program, op int, signatures []fun
 	}
 	sigIndex := fields[fieldIndex].sig
 	rhs := op + 1
-	if tokenTextEquals(program, rhs, "nil") {
+	if functionValueTokenEquals(program, rhs, "nil") {
 		edits = append(edits, functionValueTokenEdit(program, rhs, signatures[sigIndex].name+"{}"))
 		return edits, true
 	}
-	if rhs+2 >= len(program.Tokens) || !tokenTextEquals(program, rhs+1, ".") || program.Tokens[rhs].Kind != unit.TokenIdent || program.Tokens[rhs+2].Kind != unit.TokenIdent {
+	if rhs+2 >= len(program.Tokens) || !functionValueTokenEquals(program, rhs+1, ".") || program.Tokens[rhs].Kind != unit.TokenIdent || program.Tokens[rhs+2].Kind != unit.TokenIdent {
 		return edits, true
 	}
-	method := tokenText(program, rhs+2)
-	receiverType := functionValueMethodReceiverTypeForBase(program, op, tokenText(program, rhs), method)
+	method := functionValueTokenText(program, rhs+2)
+	receiverType := functionValueMethodReceiverTypeForBase(program, op, functionValueTokenText(program, rhs), method)
 	if receiverType == "" {
 		return edits, true
 	}
@@ -321,13 +321,13 @@ func lowerFunctionValueAssignment(program unit.Program, op int, signatures []fun
 		signatures[sigIndex].fieldTypes = append(signatures[sigIndex].fieldTypes, receiverType)
 	}
 	impl := signatures[sigIndex].impls[implIndex]
-	replacement := signatures[sigIndex].name + "{kind: " + functionValueDecimal(implIndex+1) + ", " + impl.receiverField + ": " + tokenText(program, rhs) + "}"
+	replacement := signatures[sigIndex].name + "{kind: " + functionValueDecimal(implIndex+1) + ", " + impl.receiverField + ": " + functionValueTokenText(program, rhs) + "}"
 	edits = append(edits, functionValueTokenRangeEdit(program, rhs, rhs+3, replacement))
 	return edits, true
 }
 
-func lowerFunctionValueNilComparison(program unit.Program, op int, fields []functionValueField, edits []functionValueEdit) []functionValueEdit {
-	if op+1 >= len(program.Tokens) || !tokenTextEquals(program, op+1, "nil") {
+func lowerFunctionValueNilComparison(program *unit.Program, op int, fields []functionValueField, edits []functionValueEdit) []functionValueEdit {
+	if op+1 >= len(program.Tokens) || !functionValueTokenEquals(program, op+1, "nil") {
 		return edits
 	}
 	fieldTok := functionValueSelectorFieldBefore(program, op)
@@ -340,9 +340,9 @@ func lowerFunctionValueNilComparison(program unit.Program, op int, fields []func
 	return edits
 }
 
-func lowerFunctionValueCall(program unit.Program, open int, signatures []functionValueSignature, fields []functionValueField, edits []functionValueEdit) []functionValueEdit {
+func lowerFunctionValueCall(program *unit.Program, open int, signatures []functionValueSignature, fields []functionValueField, edits []functionValueEdit) []functionValueEdit {
 	fieldTok := open - 1
-	if fieldTok < 2 || !tokenTextEquals(program, fieldTok-1, ".") {
+	if fieldTok < 2 || !functionValueTokenEquals(program, fieldTok-1, ".") {
 		return edits
 	}
 	fieldIndex := functionValueFieldForSelector(program, fieldTok, fields)
@@ -442,22 +442,22 @@ func functionValueGeneratedText(signatures []functionValueSignature, closures []
 	return out
 }
 
-func lowerFunctionValueLiterals(program unit.Program, signatures []functionValueSignature, fields []functionValueField, closures []functionValueClosure, edits []functionValueEdit) ([]functionValueSignature, []functionValueClosure, []functionValueEdit, bool) {
+func lowerFunctionValueLiterals(program *unit.Program, signatures []functionValueSignature, fields []functionValueField, closures []functionValueClosure, edits []functionValueEdit) ([]functionValueSignature, []functionValueClosure, []functionValueEdit, bool) {
 	for funcTok := 0; funcTok+1 < len(program.Tokens); funcTok++ {
-		if !tokenTextEquals(program, funcTok, "func") || !tokenTextEquals(program, funcTok+1, "(") || functionValueIsDeclaredFunction(program, funcTok) {
+		if !functionValueTokenEquals(program, funcTok, "func") || !functionValueTokenEquals(program, funcTok+1, "(") || functionValueIsDeclaredFunction(program, funcTok) {
 			continue
 		}
 		fieldTok := funcTok - 2
-		if fieldTok < 0 || !tokenTextEquals(program, funcTok-1, ":") {
+		if fieldTok < 0 || !functionValueTokenEquals(program, funcTok-1, ":") {
 			continue
 		}
-		fieldIndex := functionValueFieldByName(fields, tokenText(program, fieldTok))
+		fieldIndex := functionValueFieldByName(fields, functionValueTokenText(program, fieldTok))
 		if fieldIndex < 0 {
 			continue
 		}
 		sigIndex := fields[fieldIndex].sig
 		literalSig, signatureEnd, ok := parseFunctionValueSignature(program, funcTok, signatures[sigIndex].name)
-		if !ok || !tokenTextEquals(program, signatureEnd, "{") {
+		if !ok || !functionValueTokenEquals(program, signatureEnd, "{") {
 			return signatures, closures, edits, false
 		}
 		bodyClose := functionValueFindMatchingBrace(program, signatureEnd)
@@ -493,7 +493,7 @@ func lowerFunctionValueLiterals(program unit.Program, signatures []functionValue
 	return signatures, closures, edits, true
 }
 
-func functionValueIsDeclaredFunction(program unit.Program, funcTok int) bool {
+func functionValueIsDeclaredFunction(program *unit.Program, funcTok int) bool {
 	for i := 0; i < len(program.Funcs); i++ {
 		if program.Funcs[i].StartTok == funcTok {
 			return true
@@ -502,14 +502,14 @@ func functionValueIsDeclaredFunction(program unit.Program, funcTok int) bool {
 	return false
 }
 
-func functionValueCaptures(program unit.Program, literalStart int, bodyOpen int, bodyClose int, params []string) ([]string, []string) {
+func functionValueCaptures(program *unit.Program, literalStart int, bodyOpen int, bodyClose int, params []string) ([]string, []string) {
 	var names []string
 	var types []string
 	for i := bodyOpen + 1; i < bodyClose; i++ {
 		if program.Tokens[i].Kind != unit.TokenIdent {
 			continue
 		}
-		name := tokenText(program, i)
+		name := functionValueTokenText(program, i)
 		if name == "return" || name == "true" || name == "false" || name == "nil" || functionValueNameInList(params, name) || functionValueNameInList(names, name) {
 			continue
 		}
@@ -523,7 +523,7 @@ func functionValueCaptures(program unit.Program, literalStart int, bodyOpen int,
 	return names, types
 }
 
-func functionValueEnclosingLocalType(program unit.Program, before int, name string) string {
+func functionValueEnclosingLocalType(program *unit.Program, before int, name string) string {
 	fnIndex := -1
 	for i := 0; i < len(program.Funcs); i++ {
 		fn := program.Funcs[i]
@@ -539,24 +539,24 @@ func functionValueEnclosingLocalType(program unit.Program, before int, name stri
 	if fn.ReceiverStart < fn.ReceiverEnd {
 		start := fn.ReceiverStart
 		end := fn.ReceiverEnd
-		if tokenTextEquals(program, start, "(") {
+		if functionValueTokenEquals(program, start, "(") {
 			start++
 		}
-		if tokenTextEquals(program, end-1, ")") {
+		if functionValueTokenEquals(program, end-1, ")") {
 			end--
 		}
-		if end-start >= 2 && tokenTextEquals(program, start, name) {
+		if end-start >= 2 && functionValueTokenEquals(program, start, name) {
 			return functionValueTokensText(program, start+1, end)
 		}
 	}
 	for i := fn.BodyStart + 1; i+2 < before; i++ {
-		if !tokenTextEquals(program, i, name) {
+		if !functionValueTokenEquals(program, i, name) {
 			continue
 		}
-		if tokenTextEquals(program, i+1, ":=") {
+		if functionValueTokenEquals(program, i+1, ":=") {
 			rhs := i + 2
-			if tokenTextEquals(program, rhs, "&") && rhs+1 < before && program.Tokens[rhs+1].Kind == unit.TokenIdent {
-				return "*" + tokenText(program, rhs+1)
+			if functionValueTokenEquals(program, rhs, "&") && rhs+1 < before && program.Tokens[rhs+1].Kind == unit.TokenIdent {
+				return "*" + functionValueTokenText(program, rhs+1)
 			}
 			if program.Tokens[rhs].Kind == unit.TokenNumber {
 				return "int"
@@ -566,36 +566,36 @@ func functionValueEnclosingLocalType(program unit.Program, before int, name stri
 			}
 			if program.Tokens[rhs].Kind == unit.TokenIdent {
 				callName := ""
-				if tokenTextEquals(program, rhs+1, "(") {
-					callName = tokenText(program, rhs)
-				} else if tokenTextEquals(program, rhs+1, ".") && rhs+3 < before && tokenTextEquals(program, rhs+3, "(") {
-					callName = tokenText(program, rhs+2)
+				if functionValueTokenEquals(program, rhs+1, "(") {
+					callName = functionValueTokenText(program, rhs)
+				} else if functionValueTokenEquals(program, rhs+1, ".") && rhs+3 < before && functionValueTokenEquals(program, rhs+3, "(") {
+					callName = functionValueTokenText(program, rhs+2)
 				}
 				if callName != "" {
 					if typ := functionValueDeclaredFunctionResultType(program, callName); typ != "" {
 						return typ
 					}
 				}
-				if typ := functionValueFunctionParamType(program, fn, tokenText(program, rhs)); typ != "" {
+				if typ := functionValueFunctionParamType(program, fn, functionValueTokenText(program, rhs)); typ != "" {
 					return typ
 				}
 			}
 		}
-		if i > 0 && tokenTextEquals(program, i-1, "var") && i+1 < before {
-			return tokenText(program, i+1)
+		if i > 0 && functionValueTokenEquals(program, i-1, "var") && i+1 < before {
+			return functionValueTokenText(program, i+1)
 		}
 	}
 	return functionValueFunctionParamType(program, fn, name)
 }
 
-func functionValueDeclaredFunctionResultType(program unit.Program, name string) string {
+func functionValueDeclaredFunctionResultType(program *unit.Program, name string) string {
 	for i := 0; i < len(program.Funcs); i++ {
 		fn := program.Funcs[i]
-		if fn.ReceiverStart < fn.ReceiverEnd || tokenText(program, fn.NameTok) != name {
+		if fn.ReceiverStart < fn.ReceiverEnd || functionValueTokenText(program, fn.NameTok) != name {
 			continue
 		}
 		open := fn.NameTok + 1
-		if !tokenTextEquals(program, open, "(") {
+		if !functionValueTokenEquals(program, open, "(") {
 			continue
 		}
 		close := functionValueFindMatchingParen(program, open)
@@ -603,7 +603,7 @@ func functionValueDeclaredFunctionResultType(program unit.Program, name string) 
 		if resultStart >= fn.BodyStart {
 			return ""
 		}
-		if tokenTextEquals(program, resultStart, "(") {
+		if functionValueTokenEquals(program, resultStart, "(") {
 			resultEnd := functionValueFindMatchingParen(program, resultStart)
 			if resultEnd <= resultStart {
 				return ""
@@ -615,16 +615,16 @@ func functionValueDeclaredFunctionResultType(program unit.Program, name string) 
 	return ""
 }
 
-func functionValueFunctionParamType(program unit.Program, fn unit.Func, name string) string {
+func functionValueFunctionParamType(program *unit.Program, fn unit.Func, name string) string {
 	open := fn.NameTok + 1
-	if !tokenTextEquals(program, open, "(") {
+	if !functionValueTokenEquals(program, open, "(") {
 		return ""
 	}
 	close := functionValueFindMatchingParen(program, open)
 	for i := open + 1; i+1 < close; i++ {
-		if tokenTextEquals(program, i, name) {
+		if functionValueTokenEquals(program, i, name) {
 			end := i + 2
-			for end < close && !tokenTextEquals(program, end, ",") {
+			for end < close && !functionValueTokenEquals(program, end, ",") {
 				end++
 			}
 			return functionValueTokensText(program, i+1, end)
@@ -633,7 +633,7 @@ func functionValueFunctionParamType(program unit.Program, fn unit.Func, name str
 	return ""
 }
 
-func functionValueClosureBody(program unit.Program, bodyOpen int, bodyClose int, captures []string) string {
+func functionValueClosureBody(program *unit.Program, bodyOpen int, bodyClose int, captures []string) string {
 	if bodyOpen+1 >= bodyClose {
 		return ""
 	}
@@ -642,7 +642,7 @@ func functionValueClosureBody(program unit.Program, bodyOpen int, bodyClose int,
 	src := program.Text[start:end]
 	var edits []functionValueEdit
 	for i := bodyOpen + 1; i < bodyClose; i++ {
-		name := tokenText(program, i)
+		name := functionValueTokenText(program, i)
 		if !functionValueNameInList(captures, name) {
 			continue
 		}
@@ -656,10 +656,10 @@ func functionValueClosureBody(program unit.Program, bodyOpen int, bodyClose int,
 	return string(out)
 }
 
-func appendFunctionValuePackageEdits(program unit.Program, edits []functionValueEdit) []functionValueEdit {
+func appendFunctionValuePackageEdits(program *unit.Program, edits []functionValueEdit) []functionValueEdit {
 	seen := false
 	for i := 0; i+1 < len(program.Tokens); i++ {
-		if !tokenTextEquals(program, i, "package") {
+		if !functionValueTokenEquals(program, i, "package") {
 			continue
 		}
 		start := program.Tokens[i].Start
@@ -674,10 +674,10 @@ func appendFunctionValuePackageEdits(program unit.Program, edits []functionValue
 	return edits
 }
 
-func reparseFunctionValueProgram(original unit.Program, text []byte) (unit.Program, bool) {
+func reparseFunctionValueProgram(original *unit.Program, text []byte) bool {
 	file := syntax.ParseFile(text)
 	if !file.Ok {
-		return original, false
+		return false
 	}
 	out := unit.Program{Package: original.Package, ImportPath: original.ImportPath, Text: text}
 	for i := 0; i < len(file.Tokens); i++ {
@@ -701,7 +701,8 @@ func reparseFunctionValueProgram(original unit.Program, text []byte) (unit.Progr
 		}
 		out.Funcs = append(out.Funcs, unit.Func{NameStart: name.Start, NameEnd: name.End, StartTok: fn.StartTok, NameTok: fn.NameTok, ReceiverStart: receiverStart, ReceiverEnd: receiverEnd, BodyStart: fn.BodyStart, BodyEnd: fn.BodyEnd, EndTok: fn.EndTok})
 	}
-	return out, true
+	replaceFunctionValueProgram(original, &out)
+	return true
 }
 
 func functionValueUnitTokenKind(src []byte, tok syntax.Token) int {
@@ -789,18 +790,18 @@ func functionValueDeclKind(kind int) int {
 	return unit.TokenType
 }
 
-func functionValueMethodReceiverType(program unit.Program, method string) string {
+func functionValueMethodReceiverType(program *unit.Program, method string) string {
 	for i := 0; i < len(program.Funcs); i++ {
 		fn := program.Funcs[i]
-		if tokenText(program, fn.NameTok) != method || fn.ReceiverStart >= fn.ReceiverEnd {
+		if functionValueTokenText(program, fn.NameTok) != method || fn.ReceiverStart >= fn.ReceiverEnd {
 			continue
 		}
 		start := fn.ReceiverStart
 		end := fn.ReceiverEnd
-		if tokenTextEquals(program, start, "(") {
+		if functionValueTokenEquals(program, start, "(") {
 			start++
 		}
-		if tokenTextEquals(program, end-1, ")") {
+		if functionValueTokenEquals(program, end-1, ")") {
 			end--
 		}
 		if end-start >= 2 && program.Tokens[start].Kind == unit.TokenIdent {
@@ -811,14 +812,14 @@ func functionValueMethodReceiverType(program unit.Program, method string) string
 	return ""
 }
 
-func functionValueMethodReceiverTypeForBase(program unit.Program, at int, base string, method string) string {
+func functionValueMethodReceiverTypeForBase(program *unit.Program, at int, base string, method string) string {
 	baseType := functionValueEnclosingLocalType(program, at, base)
 	if baseType == "" {
 		return functionValueMethodReceiverType(program, method)
 	}
 	for i := 0; i < len(program.Funcs); i++ {
 		fn := program.Funcs[i]
-		if tokenText(program, fn.NameTok) != method || fn.ReceiverStart >= fn.ReceiverEnd {
+		if functionValueTokenText(program, fn.NameTok) != method || fn.ReceiverStart >= fn.ReceiverEnd {
 			continue
 		}
 		receiverType := functionValueReceiverType(program, fn)
@@ -829,13 +830,13 @@ func functionValueMethodReceiverTypeForBase(program unit.Program, at int, base s
 	return functionValueMethodReceiverType(program, method)
 }
 
-func functionValueReceiverType(program unit.Program, fn unit.Func) string {
+func functionValueReceiverType(program *unit.Program, fn unit.Func) string {
 	start := fn.ReceiverStart
 	end := fn.ReceiverEnd
-	if tokenTextEquals(program, start, "(") {
+	if functionValueTokenEquals(program, start, "(") {
 		start++
 	}
-	if tokenTextEquals(program, end-1, ")") {
+	if functionValueTokenEquals(program, end-1, ")") {
 		end--
 	}
 	if end-start >= 2 && program.Tokens[start].Kind == unit.TokenIdent {
@@ -844,16 +845,16 @@ func functionValueReceiverType(program unit.Program, fn unit.Func) string {
 	return functionValueTokensText(program, start, end)
 }
 
-func functionValueSelectorFieldBefore(program unit.Program, before int) int {
-	if before < 3 || !tokenTextEquals(program, before-2, ".") {
+func functionValueSelectorFieldBefore(program *unit.Program, before int) int {
+	if before < 3 || !functionValueTokenEquals(program, before-2, ".") {
 		return -1
 	}
 	return before - 1
 }
 
-func functionValueSelectorStart(program unit.Program, end int) int {
+func functionValueSelectorStart(program *unit.Program, end int) int {
 	start := end
-	for start >= 2 && tokenTextEquals(program, start-1, ".") && program.Tokens[start-2].Kind == unit.TokenIdent {
+	for start >= 2 && functionValueTokenEquals(program, start-1, ".") && program.Tokens[start-2].Kind == unit.TokenIdent {
 		start -= 2
 	}
 	return start
@@ -877,7 +878,7 @@ func functionValueFieldByOwnerAndName(fields []functionValueField, owner string,
 	return -1
 }
 
-func functionValueFieldForSelector(program unit.Program, fieldTok int, fields []functionValueField) int {
+func functionValueFieldForSelector(program *unit.Program, fieldTok int, fields []functionValueField) int {
 	if fieldTok < 2 {
 		return -1
 	}
@@ -885,11 +886,11 @@ func functionValueFieldForSelector(program unit.Program, fieldTok int, fields []
 	if selectorStart < 0 || selectorStart >= fieldTok {
 		return -1
 	}
-	baseType := functionValueEnclosingLocalType(program, fieldTok, tokenText(program, selectorStart))
+	baseType := functionValueEnclosingLocalType(program, fieldTok, functionValueTokenText(program, selectorStart))
 	baseType = functionValueBareType(baseType)
 	if baseType == "" {
 		match := -1
-		name := tokenText(program, fieldTok)
+		name := functionValueTokenText(program, fieldTok)
 		for i := 0; i < len(fields); i++ {
 			if fields[i].name == name {
 				if match >= 0 {
@@ -901,15 +902,15 @@ func functionValueFieldForSelector(program unit.Program, fieldTok int, fields []
 		return match
 	}
 	for i := selectorStart + 2; i < fieldTok; i += 2 {
-		if !tokenTextEquals(program, i-1, ".") {
+		if !functionValueTokenEquals(program, i-1, ".") {
 			return -1
 		}
-		baseType = functionValueBareType(functionValueStructFieldType(program, baseType, tokenText(program, i)))
+		baseType = functionValueBareType(functionValueStructFieldType(program, baseType, functionValueTokenText(program, i)))
 		if baseType == "" {
 			return -1
 		}
 	}
-	name := tokenText(program, fieldTok)
+	name := functionValueTokenText(program, fieldTok)
 	for i := 0; i < len(fields); i++ {
 		if fields[i].name == name && functionValueTypeEmbeds(program, baseType, fields[i].owner, 0) {
 			return i
@@ -918,7 +919,7 @@ func functionValueFieldForSelector(program unit.Program, fieldTok int, fields []
 	return -1
 }
 
-func functionValueStructFieldType(program unit.Program, owner string, fieldName string) string {
+func functionValueStructFieldType(program *unit.Program, owner string, fieldName string) string {
 	owner = functionValueBareType(owner)
 	for i := 0; i < len(program.Decls); i++ {
 		decl := program.Decls[i]
@@ -926,27 +927,27 @@ func functionValueStructFieldType(program unit.Program, owner string, fieldName 
 			continue
 		}
 		nameTok := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
-		if nameTok < 0 || tokenText(program, nameTok) != owner {
+		if nameTok < 0 || functionValueTokenText(program, nameTok) != owner {
 			continue
 		}
 		start := nameTok + 1
-		if !tokenTextEquals(program, start, "struct") || !tokenTextEquals(program, start+1, "{") {
+		if !functionValueTokenEquals(program, start, "struct") || !functionValueTokenEquals(program, start+1, "{") {
 			return ""
 		}
 		close := functionValueFindMatchingBrace(program, start+1)
 		j := start + 2
 		for j < close {
-			for j < close && tokenTextEquals(program, j, ";") {
+			for j < close && functionValueTokenEquals(program, j, ";") {
 				j++
 			}
 			if j >= close {
 				break
 			}
 			lineEnd := j + 1
-			for lineEnd < close && !tokenTextEquals(program, lineEnd, ";") && program.Tokens[lineEnd].Line == program.Tokens[j].Line {
+			for lineEnd < close && !functionValueTokenEquals(program, lineEnd, ";") && program.Tokens[lineEnd].Line == program.Tokens[j].Line {
 				lineEnd++
 			}
-			if tokenTextEquals(program, j, fieldName) && j+1 < lineEnd {
+			if functionValueTokenEquals(program, j, fieldName) && j+1 < lineEnd {
 				return functionValueTokensText(program, j+1, lineEnd)
 			}
 			j = lineEnd
@@ -972,7 +973,7 @@ func functionValueBareType(typ string) string {
 	return typ
 }
 
-func functionValueTypeEmbeds(program unit.Program, actual string, wanted string, depth int) bool {
+func functionValueTypeEmbeds(program *unit.Program, actual string, wanted string, depth int) bool {
 	actual = functionValueBareType(actual)
 	wanted = functionValueBareType(wanted)
 	if actual == wanted {
@@ -987,30 +988,30 @@ func functionValueTypeEmbeds(program unit.Program, actual string, wanted string,
 			continue
 		}
 		nameTok := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
-		if nameTok < 0 || tokenText(program, nameTok) != actual {
+		if nameTok < 0 || functionValueTokenText(program, nameTok) != actual {
 			continue
 		}
 		start := nameTok + 1
-		if !tokenTextEquals(program, start, "struct") || !tokenTextEquals(program, start+1, "{") {
+		if !functionValueTokenEquals(program, start, "struct") || !functionValueTokenEquals(program, start+1, "{") {
 			return false
 		}
 		close := functionValueFindMatchingBrace(program, start+1)
 		for j := start + 2; j < close; j++ {
-			if j > start+2 && !tokenTextEquals(program, j-1, ";") && program.Tokens[j-1].Line == program.Tokens[j].Line {
+			if j > start+2 && !functionValueTokenEquals(program, j-1, ";") && program.Tokens[j-1].Line == program.Tokens[j].Line {
 				continue
 			}
 			embeddedStart := j
-			if tokenTextEquals(program, j, "*") {
+			if functionValueTokenEquals(program, j, "*") {
 				embeddedStart++
 			}
 			if program.Tokens[embeddedStart].Kind != unit.TokenIdent {
 				continue
 			}
 			embeddedEnd := embeddedStart + 1
-			if tokenTextEquals(program, embeddedEnd, ".") && embeddedEnd+1 < close && program.Tokens[embeddedEnd+1].Kind == unit.TokenIdent {
+			if functionValueTokenEquals(program, embeddedEnd, ".") && embeddedEnd+1 < close && program.Tokens[embeddedEnd+1].Kind == unit.TokenIdent {
 				embeddedEnd += 2
 			}
-			if embeddedEnd < close && !tokenTextEquals(program, embeddedEnd, ";") && program.Tokens[embeddedEnd].Line == program.Tokens[embeddedStart].Line {
+			if embeddedEnd < close && !functionValueTokenEquals(program, embeddedEnd, ";") && program.Tokens[embeddedEnd].Line == program.Tokens[embeddedStart].Line {
 				continue
 			}
 			embeddedType := functionValueBareType(functionValueTokensText(program, j, embeddedEnd))
@@ -1042,15 +1043,15 @@ func functionValueImplIndex(sig functionValueSignature, receiverType string, met
 	return -1
 }
 
-func functionValueTokenCanStartType(program unit.Program, tok int) bool {
+func functionValueTokenCanStartType(program *unit.Program, tok int) bool {
 	if tok < 0 || tok >= len(program.Tokens) {
 		return false
 	}
-	text := tokenText(program, tok)
+	text := functionValueTokenText(program, tok)
 	return program.Tokens[tok].Kind == unit.TokenIdent || text == "*" || text == "[" || text == "struct"
 }
 
-func functionValueTokenAtSpan(program unit.Program, start int, end int) int {
+func functionValueTokenAtSpan(program *unit.Program, start int, end int) int {
 	for i := 0; i < len(program.Tokens); i++ {
 		tok := program.Tokens[i]
 		if tok.Start == start && tok.Start+tok.Size == end {
@@ -1060,7 +1061,7 @@ func functionValueTokenAtSpan(program unit.Program, start int, end int) int {
 	return -1
 }
 
-func functionValueTokensText(program unit.Program, start int, end int) string {
+func functionValueTokensText(program *unit.Program, start int, end int) string {
 	if start < 0 || start >= end || end > len(program.Tokens) {
 		return ""
 	}
@@ -1073,12 +1074,12 @@ func functionValueTokensText(program unit.Program, start int, end int) string {
 	return string(program.Text[byteStart:byteEnd])
 }
 
-func functionValueTokenEdit(program unit.Program, tok int, replacement string) functionValueEdit {
+func functionValueTokenEdit(program *unit.Program, tok int, replacement string) functionValueEdit {
 	item := program.Tokens[tok]
 	return functionValueEdit{start: item.Start, end: item.Start + item.Size, text: replacement}
 }
 
-func functionValueTokenRangeEdit(program unit.Program, start int, end int, replacement string) functionValueEdit {
+func functionValueTokenRangeEdit(program *unit.Program, start int, end int, replacement string) functionValueEdit {
 	first := program.Tokens[start]
 	if end <= start {
 		return functionValueEdit{start: first.Start, end: first.Start, text: replacement}
@@ -1171,15 +1172,15 @@ func functionValueNameInList(list []string, name string) bool {
 	return false
 }
 
-func functionValueFindMatchingParen(program unit.Program, open int) int {
+func functionValueFindMatchingParen(program *unit.Program, open int) int {
 	return functionValueFindMatching(program, open, "(", ")")
 }
 
-func functionValueFindMatchingBrace(program unit.Program, open int) int {
+func functionValueFindMatchingBrace(program *unit.Program, open int) int {
 	return functionValueFindMatching(program, open, "{", "}")
 }
 
-func functionValueFindMatching(program unit.Program, open int, left string, right string) int {
+func functionValueFindMatching(program *unit.Program, open int, left string, right string) int {
 	if !functionValueTokenEquals(program, open, left) {
 		return -1
 	}
@@ -1197,7 +1198,7 @@ func functionValueFindMatching(program unit.Program, open int, left string, righ
 	return -1
 }
 
-func functionValueTokenEquals(program unit.Program, tok int, want string) bool {
+func functionValueTokenEquals(program *unit.Program, tok int, want string) bool {
 	if tok < 0 || tok >= len(program.Tokens) {
 		return false
 	}
@@ -1211,4 +1212,15 @@ func functionValueTokenEquals(program unit.Program, tok int, want string) bool {
 		}
 	}
 	return true
+}
+
+func functionValueTokenText(program *unit.Program, tok int) string {
+	if tok < 0 || tok >= len(program.Tokens) {
+		return ""
+	}
+	token := program.Tokens[tok]
+	if token.Start < 0 || token.Start+token.Size > len(program.Text) {
+		return ""
+	}
+	return string(program.Text[token.Start : token.Start+token.Size])
 }
