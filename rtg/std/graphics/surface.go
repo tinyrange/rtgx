@@ -20,6 +20,8 @@ type Surface struct {
 	clips              []pixelRect
 	dirty              pixelRect
 	dirtyValid         bool
+	dirtyRects         []pixelRect
+	damageDepth        int
 	transformA         Scalar
 	transformB         Scalar
 	transformC         Scalar
@@ -143,6 +145,11 @@ func (s *Surface) reset(width, height int) {
 	s.clip = pixelRect{maxX: width, maxY: height}
 	s.dirty = pixelRect{maxX: width, maxY: height}
 	s.dirtyValid = width > 0 && height > 0
+	s.dirtyRects = s.dirtyRects[:0]
+	if s.dirtyValid {
+		s.dirtyRects = append(s.dirtyRects, s.dirty)
+	}
+	s.damageDepth = 0
 	s.ResetTransform()
 	s.clips = nil
 	s.transforms = nil
@@ -160,12 +167,59 @@ func (s *Surface) DirtyRect() (Rect, bool) {
 	return Rect{MinX: Scalar(s.dirty.minX), MinY: Scalar(s.dirty.minY), MaxX: Scalar(s.dirty.maxX), MaxY: Scalar(s.dirty.maxY)}, true
 }
 
-func (s *Surface) ResetDirty() { s.dirtyValid = false }
+// DirtyRects returns the precise damage regions registered since the previous
+// presentation. Ordinary drawing without a damage scope falls back to one
+// bounding rectangle; retained views use BeginDamage to preserve disjoint
+// regions all the way to native presentation.
+func (s *Surface) DirtyRects() []Rect {
+	if s == nil || !s.dirtyValid {
+		return nil
+	}
+	out := make([]Rect, len(s.dirtyRects))
+	for i := 0; i < len(s.dirtyRects); i++ {
+		region := s.dirtyRects[i]
+		out[i] = Rect{MinX: Scalar(region.minX), MinY: Scalar(region.minY), MaxX: Scalar(region.maxX), MaxY: Scalar(region.maxY)}
+	}
+	return out
+}
+
+// BeginDamage declares the exact clipped area a retained view is about to
+// repaint. Calls may be nested; every BeginDamage must have a matching
+// EndDamage.
+func (s *Surface) BeginDamage(rect Rect) {
+	if s == nil {
+		return
+	}
+	region := pixelRect{minX: scalarFloor(rect.MinX), minY: scalarFloor(rect.MinY), maxX: scalarCeil(rect.MaxX), maxY: scalarCeil(rect.MaxY)}
+	region = intersectPixelRect(pixelRect{maxX: s.Width, maxY: s.Height}, region)
+	if region.maxX > region.minX && region.maxY > region.minY {
+		s.markDirtyRect(region)
+	}
+	s.damageDepth++
+}
+
+func (s *Surface) EndDamage() {
+	if s != nil && s.damageDepth > 0 {
+		s.damageDepth--
+	}
+}
+
+func (s *Surface) ResetDirty() {
+	if s == nil {
+		return
+	}
+	s.dirtyValid = false
+	s.dirtyRects = s.dirtyRects[:0]
+	s.damageDepth = 0
+}
 
 func (s *Surface) markDirty(x, y int) {
 	if !s.dirtyValid {
 		s.dirty = pixelRect{minX: x, minY: y, maxX: x + 1, maxY: y + 1}
 		s.dirtyValid = true
+		if s.damageDepth == 0 {
+			s.dirtyRects = append(s.dirtyRects, s.dirty)
+		}
 		return
 	}
 	if x < s.dirty.minX {
@@ -180,6 +234,61 @@ func (s *Surface) markDirty(x, y int) {
 	if y+1 > s.dirty.maxY {
 		s.dirty.maxY = y + 1
 	}
+	if s.damageDepth == 0 {
+		// Immediate-mode callers do not supply damage boundaries. Retain the
+		// historical bounding rectangle rather than recording one region per
+		// pixel.
+		if len(s.dirtyRects) == 0 {
+			s.dirtyRects = append(s.dirtyRects, s.dirty)
+		} else {
+			s.dirtyRects = s.dirtyRects[:1]
+			s.dirtyRects[0] = s.dirty
+		}
+	}
+}
+
+func (s *Surface) markDirtyRect(region pixelRect) {
+	if !s.dirtyValid {
+		s.dirty = region
+		s.dirtyValid = true
+	} else {
+		s.dirty = unionPixelRect(s.dirty, region)
+	}
+	for i := 0; i < len(s.dirtyRects); i++ {
+		if pixelRectContains(s.dirtyRects[i], region) {
+			return
+		}
+		if pixelRectContains(region, s.dirtyRects[i]) {
+			copy(s.dirtyRects[i:], s.dirtyRects[i+1:])
+			s.dirtyRects = s.dirtyRects[:len(s.dirtyRects)-1]
+			i--
+		}
+	}
+	s.dirtyRects = append(s.dirtyRects, region)
+	if len(s.dirtyRects) > 64 {
+		s.dirtyRects = s.dirtyRects[:1]
+		s.dirtyRects[0] = s.dirty
+	}
+}
+
+func unionPixelRect(a, b pixelRect) pixelRect {
+	if b.minX < a.minX {
+		a.minX = b.minX
+	}
+	if b.minY < a.minY {
+		a.minY = b.minY
+	}
+	if b.maxX > a.maxX {
+		a.maxX = b.maxX
+	}
+	if b.maxY > a.maxY {
+		a.maxY = b.maxY
+	}
+	return a
+}
+
+func pixelRectContains(outer, inner pixelRect) bool {
+	return outer.minX <= inner.minX && outer.minY <= inner.minY && outer.maxX >= inner.maxX && outer.maxY >= inner.maxY
 }
 
 func (s *Surface) SetBlendMode(mode BlendMode) { s.blend = mode }

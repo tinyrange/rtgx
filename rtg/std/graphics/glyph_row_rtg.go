@@ -7,9 +7,6 @@ func packGlyph(a, b, c, d, e, f, g int) int {
 }
 
 func glyphBits(r int) int {
-	if r >= 'a' && r <= 'z' {
-		r -= 'a' - 'A'
-	}
 	switch r {
 	case 'A':
 		return packGlyph(14, 17, 17, 31, 17, 17, 17)
@@ -63,6 +60,58 @@ func glyphBits(r int) int {
 		return packGlyph(17, 17, 10, 4, 4, 4, 4)
 	case 'Z':
 		return packGlyph(31, 1, 2, 4, 8, 16, 31)
+	case 'a':
+		return packGlyph(0, 0, 14, 1, 15, 17, 15)
+	case 'b':
+		return packGlyph(16, 16, 30, 17, 17, 17, 30)
+	case 'c':
+		return packGlyph(0, 0, 14, 17, 16, 17, 14)
+	case 'd':
+		return packGlyph(1, 1, 15, 17, 17, 17, 15)
+	case 'e':
+		return packGlyph(0, 0, 14, 17, 31, 16, 14)
+	case 'f':
+		return packGlyph(6, 8, 8, 28, 8, 8, 8)
+	case 'g':
+		return packGlyph(0, 0, 15, 17, 15, 1, 14)
+	case 'h':
+		return packGlyph(16, 16, 30, 17, 17, 17, 17)
+	case 'i':
+		return packGlyph(4, 0, 12, 4, 4, 4, 14)
+	case 'j':
+		return packGlyph(2, 0, 6, 2, 2, 18, 12)
+	case 'k':
+		return packGlyph(16, 16, 18, 20, 24, 20, 18)
+	case 'l':
+		return packGlyph(12, 4, 4, 4, 4, 4, 14)
+	case 'm':
+		return packGlyph(0, 0, 26, 21, 21, 21, 21)
+	case 'n':
+		return packGlyph(0, 0, 30, 17, 17, 17, 17)
+	case 'o':
+		return packGlyph(0, 0, 14, 17, 17, 17, 14)
+	case 'p':
+		return packGlyph(0, 0, 30, 17, 30, 16, 16)
+	case 'q':
+		return packGlyph(0, 0, 15, 17, 15, 1, 1)
+	case 'r':
+		return packGlyph(0, 0, 22, 25, 16, 16, 16)
+	case 's':
+		return packGlyph(0, 0, 15, 16, 14, 1, 30)
+	case 't':
+		return packGlyph(8, 8, 28, 8, 8, 9, 6)
+	case 'u':
+		return packGlyph(0, 0, 17, 17, 17, 19, 13)
+	case 'v':
+		return packGlyph(0, 0, 17, 17, 17, 10, 4)
+	case 'w':
+		return packGlyph(0, 0, 17, 17, 21, 21, 10)
+	case 'x':
+		return packGlyph(0, 0, 17, 10, 4, 10, 17)
+	case 'y':
+		return packGlyph(0, 0, 17, 17, 15, 1, 14)
+	case 'z':
+		return packGlyph(0, 0, 31, 2, 4, 8, 31)
 	case '0':
 		return packGlyph(14, 17, 19, 21, 25, 17, 14)
 	case '1':

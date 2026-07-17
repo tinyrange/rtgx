@@ -50,6 +50,7 @@ func rtgArmEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.returnStruct = 0
 	g.closureEnvOffset = 0
 	g.stackUsed = 0
+	g.lastRangeReturns = false
 	rtgArmAsmAlign(a)
 	rtgAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 	rtgArmAsmEmit(a, 0xe92d4800)

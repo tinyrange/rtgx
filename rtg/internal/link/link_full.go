@@ -117,6 +117,12 @@ func linkPrograms(programs []unit.Program, root int, rootName string) (unit.Prog
 		Size:  0,
 		Line:  countNewlines(program.Text) + 1,
 	})
+	if coreOnly {
+		program, ok = lowerFunctionValuesCore(program)
+		if !ok {
+			return empty, false
+		}
+	}
 	return program, true
 }
 

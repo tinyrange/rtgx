@@ -249,6 +249,7 @@ const (
 	glRGBA            = 0x1908
 	glUnsignedByte    = 0x1401
 	glUnpackAlignment = 0x0cf5
+	glUnpackRowLength = 0x0cf2
 	glPackAlignment   = 0x0d05
 	glFront           = 0x0404
 	glBack            = 0x0405
@@ -970,7 +971,7 @@ func (w *Window) dispatchWindowsMessage(message *windowsMessage) bool {
 		if typ == windowsMessageKeyUp || typ == windowsMessageSystemKeyUp {
 			eventType = EventKeyUp
 		}
-		w.queue(Event{Type: eventType, Key: message.WParam, Modifiers: modifiers, Repeat: message.LParam&(1<<30) != 0})
+		w.queue(Event{Type: eventType, Key: windowsKeyFromVirtual(message.WParam), Modifiers: modifiers, Repeat: message.LParam&(1<<30) != 0})
 	}
 	if typ == windowsMessageCharacter {
 		w.queueWindowsCharacter(message.WParam&0xffff, modifiers)
@@ -986,11 +987,11 @@ func (w *Window) dispatchWindowsMessage(message *windowsMessage) bool {
 	if typ == windowsMessageMouseWheel || typ == windowsMessageMouseHWheel {
 		point := windowsPoint{X: int32(windowsSignedWord(message.LParam)), Y: int32(windowsSignedWord(message.LParam >> 16))}
 		windowsScreenToClient(w.native, &point)
-		delta := Scalar(windowsSignedWord(message.WParam>>16)) / 120.0
+		delta := wheelDeltaPixels(Scalar(windowsSignedWord(message.WParam>>16))/120.0, false)
 		wheelX := Scalar(0)
 		wheelY := Scalar(0)
 		if typ == windowsMessageMouseHWheel {
-			wheelX = delta
+			wheelX = -delta
 		} else {
 			wheelY = delta
 		}
@@ -1121,29 +1122,55 @@ func (w *Window) Present() bool {
 		return true
 	}
 	row := w.surface.Stride
-	for y := 0; y < w.height; y++ {
-		source := y * row
-		destination := (w.height - y - 1) * row
-		copy(w.bottomUp[destination:destination+row], w.surface.Pixels[source:source+row])
+	for regionIndex := 0; regionIndex < len(w.surface.dirtyRects); regionIndex++ {
+		dirty := intersectPixelRect(pixelRect{maxX: w.width, maxY: w.height}, w.surface.dirtyRects[regionIndex])
+		for y := dirty.minY; y < dirty.maxY; y++ {
+			source := y * row
+			destination := (w.height - y - 1) * row
+			start := dirty.minX * 4
+			end := dirty.maxX * 4
+			copy(w.bottomUp[destination+start:destination+end], w.surface.Pixels[source+start:source+end])
+		}
 	}
 	if windowsWGLMakeCurrent(w.device, w.context) == 0 {
 		return false
 	}
-	glViewport(0, 0, w.width, w.height)
 	glMatrixMode(glProjection)
 	glLoadIdentity()
 	glMatrixMode(glModelView)
 	glLoadIdentity()
-	// Render exclusively into the back buffer. Drawing into GL_FRONT_AND_BACK
-	// exposes glDrawPixels directly to the compositor before SwapBuffers and
-	// produces visible flashing while a frame is being uploaded.
-	glDrawBuffer(glBack)
-	glRasterPos2i(-1, -1)
+	// Update only the damaged pixels in the back buffer. After the swap, apply
+	// the same small update to the new back buffer so both buffers remain in
+	// sync and future partial frames never expose stale pixels.
 	glPixelStorei(glUnpackAlignment, 1)
-	glDrawPixels(w.width, w.height, glRGBA, glUnsignedByte, w.bottomUp)
+	glPixelStorei(glUnpackRowLength, w.width)
+	glDrawBuffer(glBack)
+	for regionIndex := 0; regionIndex < len(w.surface.dirtyRects); regionIndex++ {
+		dirty := intersectPixelRect(pixelRect{maxX: w.width, maxY: w.height}, w.surface.dirtyRects[regionIndex])
+		if dirty.maxX <= dirty.minX || dirty.maxY <= dirty.minY {
+			continue
+		}
+		glViewport(dirty.minX, w.height-dirty.maxY, dirty.maxX-dirty.minX, dirty.maxY-dirty.minY)
+		glRasterPos2i(-1, -1)
+		start := (w.height-dirty.maxY)*row + dirty.minX*4
+		glDrawPixels(dirty.maxX-dirty.minX, dirty.maxY-dirty.minY, glRGBA, glUnsignedByte, w.bottomUp[start:])
+	}
 	if windowsSwapBuffers(w.device) == 0 {
+		glPixelStorei(glUnpackRowLength, 0)
 		return false
 	}
+	glDrawBuffer(glBack)
+	for regionIndex := 0; regionIndex < len(w.surface.dirtyRects); regionIndex++ {
+		dirty := intersectPixelRect(pixelRect{maxX: w.width, maxY: w.height}, w.surface.dirtyRects[regionIndex])
+		if dirty.maxX <= dirty.minX || dirty.maxY <= dirty.minY {
+			continue
+		}
+		glViewport(dirty.minX, w.height-dirty.maxY, dirty.maxX-dirty.minX, dirty.maxY-dirty.minY)
+		glRasterPos2i(-1, -1)
+		start := (w.height-dirty.maxY)*row + dirty.minX*4
+		glDrawPixels(dirty.maxX-dirty.minX, dirty.maxY-dirty.minY, glRGBA, glUnsignedByte, w.bottomUp[start:])
+	}
+	glPixelStorei(glUnpackRowLength, 0)
 	w.surface.ResetDirty()
 	return true
 }

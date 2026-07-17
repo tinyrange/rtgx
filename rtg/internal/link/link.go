@@ -161,6 +161,10 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		Size:  0,
 		Line:  line,
 	})
+	program, ok = lowerFunctionValuesCore(program)
+	if !ok {
+		return empty, false
+	}
 	return program, true
 }
 

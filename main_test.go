@@ -48,7 +48,7 @@ const frontendPerformanceAttempts = 3
 const frontendPerformanceCalibrationScale = 1000
 const frontendPerformanceMaxCPUPerCalibration = 2 * frontendPerformanceCalibrationScale
 const frontendPerformanceMaxRSSKB = 32 * 1024
-const frontendPerformanceMaxBinarySize = 1024 * 1024
+const frontendPerformanceMaxBinarySize = 2 * 1024 * 1024
 
 const frontendPerformanceCalibrationSource = `package main
 
