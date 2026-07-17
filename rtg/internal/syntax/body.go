@@ -41,11 +41,12 @@ const (
 )
 
 type Body struct {
-	Stmts    []Stmt
-	Exprs    []Expr
-	Ok       bool
-	Error    int
-	ErrorTok int
+	Stmts     []Stmt
+	Exprs     []Expr
+	Ok        bool
+	Error     int
+	ErrorTok  int
+	stmtsOnly bool
 }
 
 type Stmt struct {
@@ -68,6 +69,19 @@ type Expr struct {
 
 func ParseFuncBody(file File, fn FuncDecl) Body {
 	body := Body{Ok: true, Error: BodyOK, ErrorTok: -1}
+	return parseFuncBody(body, file, fn)
+}
+
+// ParseFuncBodyStatements validates and records the statement tree without
+// classifying expressions. The compact frontend checker only consumes Stmts;
+// avoiding a second scan of every expression keeps self-hosting proportional
+// to the source token count.
+func ParseFuncBodyStatements(file File, fn FuncDecl) Body {
+	body := Body{Ok: true, Error: BodyOK, ErrorTok: -1, stmtsOnly: true}
+	return parseFuncBody(body, file, fn)
+}
+
+func parseFuncBody(body Body, file File, fn FuncDecl) Body {
 	closeTok := fn.BodyEnd - 1
 	if fn.BodyStart < 0 || closeTok <= fn.BodyStart || !tokCharIs(file.Src, file.Tokens, fn.BodyStart, '{') || !tokCharIs(file.Src, file.Tokens, closeTok, '}') {
 		return bodyFail(body, BodyErrFunc, fn.BodyStart)
@@ -297,7 +311,7 @@ func findIfEnd(file File, start int, limit int) int {
 
 func appendStmtExpr(body Body, file File, stmt Stmt) Body {
 	body.Stmts = append(body.Stmts, stmt)
-	if stmt.ExprStart >= 0 && stmt.ExprEnd > stmt.ExprStart {
+	if !body.stmtsOnly && stmt.ExprStart >= 0 && stmt.ExprEnd > stmt.ExprStart {
 		body.Exprs = append(body.Exprs, Expr{
 			Kind:     classifyExpr(file, stmt.ExprStart, stmt.ExprEnd),
 			StartTok: stmt.ExprStart,
@@ -326,19 +340,24 @@ func findStmtBlockStart(file File, start int, limit int) int {
 	parenDepth := 0
 	bracketDepth := 0
 	for i < limit {
-		if tokCharIs(file.Src, file.Tokens, i, '(') {
+		tok := file.Tokens[i]
+		c := byte(0)
+		if tok.Kind == TokenOperator && tok.End == tok.Start+1 {
+			c = file.Src[tok.Start]
+		}
+		if c == '(' {
 			parenDepth++
-		} else if tokCharIs(file.Src, file.Tokens, i, ')') {
+		} else if c == ')' {
 			if parenDepth > 0 {
 				parenDepth--
 			}
-		} else if tokCharIs(file.Src, file.Tokens, i, '[') {
+		} else if c == '[' {
 			bracketDepth++
-		} else if tokCharIs(file.Src, file.Tokens, i, ']') {
+		} else if c == ']' {
 			if bracketDepth > 0 {
 				bracketDepth--
 			}
-		} else if tokCharIs(file.Src, file.Tokens, i, '{') && parenDepth == 0 && bracketDepth == 0 {
+		} else if c == '{' && parenDepth == 0 && bracketDepth == 0 {
 			return i
 		}
 		i++
@@ -356,29 +375,34 @@ func findStmtEnd(file File, start int, limit int) int {
 	braceDepth := 0
 	prev := start - 1
 	for i < limit {
+		tok := file.Tokens[i]
+		c := byte(0)
+		if tok.Kind == TokenOperator && tok.End == tok.Start+1 {
+			c = file.Src[tok.Start]
+		}
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 {
-			if tokCharIs(file.Src, file.Tokens, i, ';') {
+			if c == ';' {
 				return i + 1
 			}
 			if i > start && file.Tokens[i].Line != file.Tokens[prev].Line && !lineContinues(file, prev, i) {
 				return i
 			}
 		}
-		if tokCharIs(file.Src, file.Tokens, i, '(') {
+		if c == '(' {
 			parenDepth++
-		} else if tokCharIs(file.Src, file.Tokens, i, ')') {
+		} else if c == ')' {
 			if parenDepth > 0 {
 				parenDepth--
 			}
-		} else if tokCharIs(file.Src, file.Tokens, i, '[') {
+		} else if c == '[' {
 			bracketDepth++
-		} else if tokCharIs(file.Src, file.Tokens, i, ']') {
+		} else if c == ']' {
 			if bracketDepth > 0 {
 				bracketDepth--
 			}
-		} else if tokCharIs(file.Src, file.Tokens, i, '{') {
+		} else if c == '{' {
 			braceDepth++
-		} else if tokCharIs(file.Src, file.Tokens, i, '}') {
+		} else if c == '}' {
 			if braceDepth == 0 {
 				return i
 			}
@@ -407,24 +431,29 @@ func findTopLevelChar(file File, start int, limit int, c byte) int {
 	bracketDepth := 0
 	braceDepth := 0
 	for i < limit {
-		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokCharIs(file.Src, file.Tokens, i, c) {
+		tok := file.Tokens[i]
+		tokChar := byte(0)
+		if tok.Kind == TokenOperator && tok.End == tok.Start+1 {
+			tokChar = file.Src[tok.Start]
+		}
+		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokChar == c {
 			return i
 		}
-		if tokCharIs(file.Src, file.Tokens, i, '(') {
+		if tokChar == '(' {
 			parenDepth++
-		} else if tokCharIs(file.Src, file.Tokens, i, ')') {
+		} else if tokChar == ')' {
 			if parenDepth > 0 {
 				parenDepth--
 			}
-		} else if tokCharIs(file.Src, file.Tokens, i, '[') {
+		} else if tokChar == '[' {
 			bracketDepth++
-		} else if tokCharIs(file.Src, file.Tokens, i, ']') {
+		} else if tokChar == ']' {
 			if bracketDepth > 0 {
 				bracketDepth--
 			}
-		} else if tokCharIs(file.Src, file.Tokens, i, '{') {
+		} else if tokChar == '{' {
 			braceDepth++
-		} else if tokCharIs(file.Src, file.Tokens, i, '}') {
+		} else if tokChar == '}' {
 			if braceDepth > 0 {
 				braceDepth--
 			}
@@ -440,15 +469,31 @@ func spanHasAssign(file File, start int, end int) bool {
 
 func findAssign(file File, start int, end int) int {
 	for i := start; i < end; i++ {
-		if tokenTextIs(file.Src, file.Tokens[i], "=") || tokenTextIs(file.Src, file.Tokens[i], ":=") ||
-			tokenTextIs(file.Src, file.Tokens[i], "+=") || tokenTextIs(file.Src, file.Tokens[i], "-=") ||
-			tokenTextIs(file.Src, file.Tokens[i], "*=") || tokenTextIs(file.Src, file.Tokens[i], "/=") ||
-			tokenTextIs(file.Src, file.Tokens[i], "%=") || tokenTextIs(file.Src, file.Tokens[i], "&=") ||
-			tokenTextIs(file.Src, file.Tokens[i], "|=") || tokenTextIs(file.Src, file.Tokens[i], "^=") {
+		if tokenIsAssign(file, file.Tokens[i]) {
 			return i
 		}
 	}
 	return -1
+}
+
+func tokenIsAssign(file File, token Token) bool {
+	if token.Kind != TokenOperator || token.Start < 0 || token.End > len(file.Src) {
+		return false
+	}
+	size := token.End - token.Start
+	if size == 1 {
+		return file.Src[token.Start] == '='
+	}
+	if size == 2 && file.Src[token.Start+1] == '=' {
+		first := file.Src[token.Start]
+		return first == ':' || first == '+' || first == '-' || first == '*' || first == '/' || first == '%' || first == '&' || first == '|' || first == '^'
+	}
+	if size == 3 && file.Src[token.Start+2] == '=' {
+		first := file.Src[token.Start]
+		second := file.Src[token.Start+1]
+		return first == '<' && second == '<' || first == '>' && second == '>' || first == '&' && second == '^'
+	}
+	return false
 }
 
 func classifyExpr(file File, start int, end int) int {
@@ -491,21 +536,26 @@ func hasTopLevelBinary(file File, start int, end int) bool {
 	bracketDepth := 0
 	braceDepth := 0
 	for i := start; i < end; i++ {
-		if tokCharIs(file.Src, file.Tokens, i, '(') {
+		tok := file.Tokens[i]
+		c := byte(0)
+		if tok.Kind == TokenOperator && tok.End == tok.Start+1 {
+			c = file.Src[tok.Start]
+		}
+		if c == '(' {
 			parenDepth++
-		} else if tokCharIs(file.Src, file.Tokens, i, ')') {
+		} else if c == ')' {
 			if parenDepth > 0 {
 				parenDepth--
 			}
-		} else if tokCharIs(file.Src, file.Tokens, i, '[') {
+		} else if c == '[' {
 			bracketDepth++
-		} else if tokCharIs(file.Src, file.Tokens, i, ']') {
+		} else if c == ']' {
 			if bracketDepth > 0 {
 				bracketDepth--
 			}
-		} else if tokCharIs(file.Src, file.Tokens, i, '{') {
+		} else if c == '{' {
 			braceDepth++
-		} else if tokCharIs(file.Src, file.Tokens, i, '}') {
+		} else if c == '}' {
 			if braceDepth > 0 {
 				braceDepth--
 			}
@@ -611,6 +661,12 @@ func lineContinues(file File, prev int, next int) bool {
 func tokenTextIs(src []byte, tok Token, text string) bool {
 	if tok.End-tok.Start != len(text) || tok.Start < 0 || tok.End > len(src) {
 		return false
+	}
+	if len(text) == 1 {
+		return src[tok.Start] == text[0]
+	}
+	if len(text) == 2 {
+		return src[tok.Start] == text[0] && src[tok.Start+1] == text[1]
 	}
 	for i := 0; i < len(text); i++ {
 		if src[tok.Start+i] != text[i] {

@@ -16,6 +16,12 @@ const (
 	CheckErrReturnCount
 	CheckErrType
 	CheckErrExcluded
+	CheckErrUnusedImport
+	CheckErrCall
+	CheckErrAssignTarget
+	CheckErrAssignCount
+	CheckErrBreak
+	CheckErrContinue
 )
 
 const (
@@ -46,6 +52,7 @@ type Program struct {
 type PackageInfo struct {
 	Name           string
 	Symbols        []Symbol
+	CoreSymbolHash []int
 	Imports        []Import
 	Decls          []DeclInfo
 	DeclOrder      []int
@@ -76,6 +83,7 @@ type Import struct {
 	Token      int
 	Dot        bool
 	Blank      bool
+	Used       bool
 }
 
 type DeclInfo struct {
@@ -248,17 +256,32 @@ func LookupFuncBody(info PackageInfo, name string) int {
 
 func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int, int, int) {
 	pkg := graph.Packages[pkgIndex]
-	info := PackageInfo{Name: cloneCheckString(pkg.Name)}
+	symbolCapacity := 0
+	importCapacity := 0
+	for i := 0; i < len(pkg.Files); i++ {
+		symbolCapacity += len(pkg.Files[i].File.Decls) + len(pkg.Files[i].File.Funcs)
+		importCapacity += len(pkg.Files[i].File.Imports)
+	}
+	info := PackageInfo{
+		Name:    cloneCheckString(pkg.Name),
+		Symbols: make([]Symbol, 0, symbolCapacity),
+		Imports: make([]Import, 0, importCapacity),
+	}
+	var symbolHash []int
+	if symbolCapacity > 0 {
+		symbolHash = make([]int, symbolCapacity*2+1)
+	}
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Decls); i++ {
 			decl := file.Decls[i]
 			name := tokenString(file, decl.NameTok)
 			kind := declSymbolKind(decl.Kind)
-			if findSymbol(info.Symbols, name, kind) >= 0 {
+			if findSymbolHashed(info.Symbols, symbolHash, name, kind) >= 0 {
 				return info, false, CheckErrDuplicate, fileIndex, decl.NameTok
 			}
 			info.Symbols = append(info.Symbols, Symbol{Name: name, Kind: kind, Package: pkgIndex, File: fileIndex, Token: decl.NameTok})
+			insertSymbolHash(info.Symbols, symbolHash, len(info.Symbols)-1)
 		}
 		for i := 0; i < len(file.Funcs); i++ {
 			fn := file.Funcs[i]
@@ -275,10 +298,12 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 				name = receiver + "." + name
 				kind = SymbolMethod
 			}
-			if findSymbol(info.Symbols, name, kind) >= 0 {
+			duplicate := findSymbolHashed(info.Symbols, symbolHash, name, kind)
+			if duplicate >= 0 && (name != "init" || info.Symbols[duplicate].Kind != SymbolFunc) {
 				return info, false, CheckErrDuplicate, fileIndex, fn.NameTok
 			}
 			info.Symbols = append(info.Symbols, Symbol{Name: name, Kind: kind, Package: pkgIndex, File: fileIndex, Token: fn.NameTok})
+			insertSymbolHash(info.Symbols, symbolHash, len(info.Symbols)-1)
 		}
 	}
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
@@ -297,6 +322,55 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 	sortSymbols(info.Symbols)
 	sortImports(info.Imports)
 	return info, true, CheckOK, -1, -1
+}
+
+func findSymbolHashed(symbols []Symbol, buckets []int, name string, kind int) int {
+	if len(buckets) == 0 {
+		return findSymbol(symbols, name, kind)
+	}
+	bucket := hashCheckString(name) % len(buckets)
+	for probes := 0; probes < len(buckets); probes++ {
+		entry := buckets[bucket]
+		if entry == 0 {
+			return -1
+		}
+		index := entry - 1
+		if index >= 0 && index < len(symbols) && symbols[index].Name == name {
+			if kind != SymbolMethod && symbols[index].Kind != SymbolMethod || symbols[index].Kind == kind {
+				return index
+			}
+		}
+		bucket++
+		if bucket == len(buckets) {
+			bucket = 0
+		}
+	}
+	return -1
+}
+
+func insertSymbolHash(symbols []Symbol, buckets []int, index int) {
+	if len(buckets) == 0 || index < 0 || index >= len(symbols) {
+		return
+	}
+	bucket := hashCheckString(symbols[index].Name) % len(buckets)
+	for probes := 0; probes < len(buckets); probes++ {
+		if buckets[bucket] == 0 {
+			buckets[bucket] = index + 1
+			return
+		}
+		bucket++
+		if bucket == len(buckets) {
+			bucket = 0
+		}
+	}
+}
+
+func hashCheckString(value string) int {
+	hash := 5381
+	for i := 0; i < len(value); i++ {
+		hash = ((hash << 5) + hash + int(value[i])) & 2147483647
+	}
+	return hash
 }
 
 func checkPackageBody(graph load.Graph, pkgIndex int, info PackageInfo, checked []PackageInfo) (PackageInfo, bool, int, int, int) {
@@ -335,6 +409,9 @@ func checkPackageBody(graph load.Graph, pkgIndex int, info PackageInfo, checked 
 			if !body.Ok {
 				return info, false, CheckErrBody, fileIndex, body.ErrorTok
 			}
+			if statementErr, statementTok := invalidDefiniteStatement(file, body); statementErr != CheckOK {
+				return info, false, statementErr, fileIndex, statementTok
+			}
 			if returnTok := invalidReturnCount(file, fn, signature); returnTok >= 0 {
 				return info, false, CheckErrReturnCount, fileIndex, returnTok
 			}
@@ -358,6 +435,12 @@ func checkPackageBody(graph load.Graph, pkgIndex int, info PackageInfo, checked 
 		}
 	}
 	buildMethodSets(&info, pkg)
+	for i := 0; i < len(info.Imports); i++ {
+		imp := info.Imports[i]
+		if !imp.Blank && !imp.Dot && !imp.Used {
+			return info, false, CheckErrUnusedImport, imp.File, imp.Token
+		}
+	}
 	return info, true, CheckOK, -1, -1
 }
 

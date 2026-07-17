@@ -40,6 +40,7 @@ func CheckGraphHeadersCore(graph load.Graph) Program {
 	prog.Packages = make([]PackageInfo, 0, len(graph.Packages))
 	for i := 0; i < len(graph.Packages); i++ {
 		info, ok, err, file, tok := checkPackageHeader(graph, i)
+		info.CoreSymbolHash = buildCoreSymbolHash(info.Symbols)
 		prog.Packages = append(prog.Packages, info)
 		if !ok {
 			return checkFail(prog, err, i, file, tok)
@@ -98,6 +99,13 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if excludedTok := excludedFeatureToken(file, fn); excludedTok >= 0 {
 				return info, false, CheckErrExcluded, fileIndex, excludedTok
 			}
+			body := syntax.ParseFuncBodyStatements(file, fn)
+			if !body.Ok {
+				return info, false, CheckErrBody, fileIndex, body.ErrorTok
+			}
+			if statementErr, statementTok := invalidDefiniteStatement(file, body); statementErr != CheckOK {
+				return info, false, statementErr, fileIndex, statementTok
+			}
 			signature := buildFuncSignature(file, fn)
 			if returnTok := invalidReturnCount(file, fn, signature); returnTok >= 0 {
 				return info, false, CheckErrReturnCount, fileIndex, returnTok
@@ -123,6 +131,12 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			locals := buildFuncLocalTypeSpansCore(file, fn)
 			out.CoreTypeRefs = buildFuncTypeRefsCore(file, fileIndex, info, checked, signature, locals, scope)
 			info.CoreBodies = append(info.CoreBodies, out)
+		}
+	}
+	for i := 0; i < len(info.Imports); i++ {
+		imp := info.Imports[i]
+		if !imp.Blank && !imp.Dot && !imp.Used {
+			return info, false, CheckErrUnusedImport, imp.File, imp.Token
 		}
 	}
 	return info, true, CheckOK, -1, -1
@@ -213,17 +227,21 @@ func resolutionCapacitiesCore(tokens int) (int, int) {
 
 func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int) ([]CoreNameRef, []CoreSelectorRef) {
 	for i := start; i < end && i < len(file.Tokens); i++ {
+		token := file.Tokens[i]
+		blank := token.Kind == syntax.TokenIdent && token.End == token.Start+1 && file.Src[token.Start] == '_'
 		if file.Tokens[i].Kind == syntax.TokenIdent && !shouldSkipIdentRef(file, i, end) &&
-			!tokenTextIs(file, i, "_") && lookupScopeTokenNameCore(scope, file, i) < 0 &&
+			!blank && lookupScopeTokenNameCore(scope, file, i) < 0 &&
 			lookupImportTokenNameCore(info, fileIndex, file, i) < 0 {
 			symbolIndex := lookupPackageSymbolTokenCore(info, file, fileIndex, i)
 			if symbolIndex >= 0 {
 				refs = append(refs, CoreNameRef{Token: i, Index: symbolIndex, Package: info.Symbols[symbolIndex].Package})
 			}
 		}
-		if i > start && i+1 < end && i+1 < len(file.Tokens) && tokenTextIs(file, i, ".") &&
+		dot := token.Kind == syntax.TokenOperator && token.End == token.Start+1 && file.Src[token.Start] == '.'
+		if i > start && i+1 < end && i+1 < len(file.Tokens) && dot &&
 			file.Tokens[i-1].Kind == syntax.TokenIdent && file.Tokens[i+1].Kind == syntax.TokenIdent &&
-			!tokenTextIs(file, i-1, "_") && !tokenTextIs(file, i+1, "_") {
+			!(file.Tokens[i-1].End == file.Tokens[i-1].Start+1 && file.Src[file.Tokens[i-1].Start] == '_') &&
+			!(file.Tokens[i+1].End == file.Tokens[i+1].Start+1 && file.Src[file.Tokens[i+1].Start] == '_') {
 			selector := resolveImportSelectorCore(fileIndex, info, checked, scope, file, i-1, i, i+1)
 			if selector.Symbol >= 0 {
 				selectors = append(selectors, selector)
@@ -369,6 +387,7 @@ func resolveImportSelectorCore(fileIndex int, info PackageInfo, checked []Packag
 	if importIndex < 0 || info.Imports[importIndex].Blank || info.Imports[importIndex].Dot {
 		return selector
 	}
+	info.Imports[importIndex].Used = true
 	selector.BaseIndex = importIndex
 	selector.BasePackage = info.Imports[importIndex].Package
 	if selector.BasePackage < 0 || selector.BasePackage >= len(checked) {
@@ -393,6 +412,7 @@ func resolveImportSelectorTypeRefCore(fileIndex int, info PackageInfo, checked [
 	if importIndex < 0 || info.Imports[importIndex].Blank || info.Imports[importIndex].Dot {
 		return ref
 	}
+	info.Imports[importIndex].Used = true
 	pkg := info.Imports[importIndex].Package
 	if pkg < 0 || pkg >= len(checked) {
 		return ref
@@ -425,8 +445,11 @@ func lookupScopeTokenNameCore(scope CoreScope, file syntax.File, tok int) int {
 		if name.End-name.Start != size {
 			continue
 		}
+		if size > 0 && file.Src[token.Start] != file.Src[name.Start] {
+			continue
+		}
 		matches := true
-		for j := 0; j < size; j++ {
+		for j := 1; j < size; j++ {
 			if file.Src[token.Start+j] != file.Src[name.Start+j] {
 				matches = false
 				break
@@ -481,6 +504,25 @@ func lookupPackageSymbolTextCore(info PackageInfo, file syntax.File, tok int) in
 	if size < 0 || token.Start < 0 || token.End > len(file.Src) {
 		return -1
 	}
+	if len(info.CoreSymbolHash) > 0 {
+		hash := hashCoreToken(file.Src, token.Start, size)
+		bucket := hash % len(info.CoreSymbolHash)
+		for probes := 0; probes < len(info.CoreSymbolHash); probes++ {
+			entry := info.CoreSymbolHash[bucket]
+			if entry == 0 {
+				return -1
+			}
+			index := entry - 1
+			if index >= 0 && index < len(info.Symbols) && tokenMatchesCoreSymbol(file.Src, token.Start, size, info.Symbols[index].Name) {
+				return index
+			}
+			bucket++
+			if bucket == len(info.CoreSymbolHash) {
+				bucket = 0
+			}
+		}
+		return -1
+	}
 	low := 0
 	high := len(info.Symbols)
 	for low < high {
@@ -497,6 +539,55 @@ func lookupPackageSymbolTextCore(info PackageInfo, file syntax.File, tok int) in
 		}
 	}
 	return -1
+}
+
+func buildCoreSymbolHash(symbols []Symbol) []int {
+	if len(symbols) == 0 {
+		return nil
+	}
+	buckets := make([]int, len(symbols)*2+1)
+	for i := 0; i < len(symbols); i++ {
+		if symbols[i].Kind == SymbolMethod {
+			continue
+		}
+		name := symbols[i].Name
+		bucket := hashCheckString(name) % len(buckets)
+		for probes := 0; probes < len(buckets); probes++ {
+			entry := buckets[bucket]
+			if entry == 0 {
+				buckets[bucket] = i + 1
+				break
+			}
+			if symbols[entry-1].Name == name {
+				break
+			}
+			bucket++
+			if bucket == len(buckets) {
+				bucket = 0
+			}
+		}
+	}
+	return buckets
+}
+
+func hashCoreToken(src []byte, start int, size int) int {
+	hash := 5381
+	for i := 0; i < size; i++ {
+		hash = ((hash << 5) + hash + int(src[start+i])) & 2147483647
+	}
+	return hash
+}
+
+func tokenMatchesCoreSymbol(src []byte, start int, size int, name string) bool {
+	if size != len(name) {
+		return false
+	}
+	for i := 0; i < size; i++ {
+		if src[start+i] != name[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func compareTokenSymbolCore(src []byte, start int, size int, name string) int {
@@ -550,16 +641,17 @@ func buildFuncScopeCore(file syntax.File, fn syntax.FuncDecl) (CoreScope, bool, 
 	start := fn.BodyStart + 1
 	end := fn.BodyEnd - 1
 	for i := start; i < end; i++ {
-		kind := file.Tokens[i].Kind
+		token := file.Tokens[i]
+		kind := token.Kind
 		if kind == syntax.TokenConst || kind == syntax.TokenVar || kind == syntax.TokenType {
 			i = collectCoreDeclScope(file, i, end, &scope)
 			continue
 		}
-		if tokenTextIs(file, i, ":=") {
+		if kind == syntax.TokenOperator && token.End == token.Start+2 && file.Src[token.Start] == ':' && file.Src[token.Start+1] == '=' {
 			collectCoreShortDeclScope(file, coreLHSStart(file, i, start), i, &scope)
 			continue
 		}
-		if coreTokenLooksLikeLabel(file, i, start, end) {
+		if kind == syntax.TokenIdent && coreTokenLooksLikeLabel(file, i, start, end) {
 			if !addCoreScopeName(&scope, file, i, NameLabel, true, true) {
 				return scope, false, i
 			}
@@ -659,7 +751,10 @@ func coreTokensEqual(file syntax.File, left int, right int) bool {
 	if size < 0 || rightTok.End-rightTok.Start != size || leftTok.Start < 0 || rightTok.Start < 0 || leftTok.End > len(file.Src) || rightTok.End > len(file.Src) {
 		return false
 	}
-	for i := 0; i < size; i++ {
+	if size > 0 && file.Src[leftTok.Start] != file.Src[rightTok.Start] {
+		return false
+	}
+	for i := 1; i < size; i++ {
 		if file.Src[leftTok.Start+i] != file.Src[rightTok.Start+i] {
 			return false
 		}

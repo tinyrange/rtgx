@@ -51,6 +51,7 @@ func rtgTryCompileScalarProgramWasm32(p *rtgProgram, meta *rtgMeta) rtgCompileRe
 	}
 	rtgInitFuncQueue(&g, len(meta.funcs))
 	rtgWasm32MarkFunc(&g, appIndex)
+	rtgEmitPersistentArenaReady(&g)
 	if !rtgLinearInitGlobals(&g) {
 		var result rtgCompileResult
 		return result

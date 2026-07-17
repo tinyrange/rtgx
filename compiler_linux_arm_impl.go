@@ -73,6 +73,7 @@ func rtgTryCompileScalarProgramArm(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 	}
 	rtgInitFuncQueue(&g, len(meta.funcs))
 	rtgLinearMarkFunc(&g, appIndex)
+	rtgEmitPersistentArenaReady(&g)
 	if !rtgLinearInitGlobals(&g) {
 		var result rtgCompileResult
 		return result

@@ -6,6 +6,7 @@ import (
 	"j5.nz/rtg/rtg/internal/check"
 	"j5.nz/rtg/rtg/internal/load"
 	"j5.nz/rtg/rtg/internal/lower"
+	"j5.nz/rtg/rtg/internal/semantic"
 	"j5.nz/rtg/rtg/internal/unit"
 )
 
@@ -56,6 +57,7 @@ func BuildProgramsTransient(graph load.Graph) Result {
 }
 
 func buildUnits(graph load.Graph, encodePackages bool) Result {
+	semantic.LowerInterfaces(&graph)
 	prog := check.CheckGraph(graph)
 	result := Result{
 		Check:        prog,

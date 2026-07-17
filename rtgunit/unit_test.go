@@ -75,6 +75,31 @@ func appMain() int { return answer }
 	}
 }
 
+func TestFunctionBodyFollowsCompositeSignatureTypes(t *testing.T) {
+	program := testProgram(t, []byte(`package main
+
+func through(value interface{}) struct{ A int } {
+	return struct{ A int }{A: 1}
+}
+`))
+	if len(program.Funcs) != 1 {
+		t.Fatalf("funcs = %#v, want one function", program.Funcs)
+	}
+	fn := program.Funcs[0]
+	if fn.BodyStart < 0 || fn.BodyStart >= len(program.Tokens)/tokenStride {
+		t.Fatalf("body start = %d", fn.BodyStart)
+	}
+	pos := fn.BodyStart * tokenStride
+	start := readTokenStart(program.Tokens, pos)
+	size := int(program.Tokens[pos+4])
+	if got := string(program.Text[start : start+size]); got != "{" {
+		t.Fatalf("body starts at %q, want opening brace", got)
+	}
+	if !bytes.Contains(program.Text[start:], []byte("return struct")) {
+		t.Fatalf("body starts before signature types were consumed: %q", program.Text[start:])
+	}
+}
+
 func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 	program := testProgram(t, []byte(`package main
 

@@ -261,6 +261,18 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RTG-CHECK-008", "assignment value is not assignable to its destination"
 		case check.CheckErrExcluded:
 			code, message = "RTG-CHECK-009", "feature is excluded from the current frontend scope"
+		case check.CheckErrUnusedImport:
+			code, message = "RTG-CHECK-010", "import is not used"
+		case check.CheckErrCall:
+			code, message = "RTG-CHECK-011", "called expression is not a function"
+		case check.CheckErrAssignTarget:
+			code, message = "RTG-CHECK-012", "left side of assignment is not assignable"
+		case check.CheckErrAssignCount:
+			code, message = "RTG-CHECK-013", "assignment count does not match"
+		case check.CheckErrBreak:
+			code, message = "RTG-CHECK-014", "break is not inside a loop or switch"
+		case check.CheckErrContinue:
+			code, message = "RTG-CHECK-015", "continue is not inside a loop"
 		}
 	} else if built.Build.Error == build.BuildErrLower {
 		phase, code, message = "lowerer", "RTG-LOWER-001", "checked program could not be lowered"

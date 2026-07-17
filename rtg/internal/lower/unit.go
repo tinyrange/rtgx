@@ -213,10 +213,7 @@ func (b *unitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex int,
 }
 
 func appendBytes(out []byte, data []byte) []byte {
-	for i := 0; i < len(data); i++ {
-		out = append(out, data[i])
-	}
-	return out
+	return append(out, data...)
 }
 
 func (b *unitBuilder) finishUnit() bool {
@@ -617,74 +614,36 @@ func (b *unitBuilder) setErr(err int, file int, tok int) {
 }
 
 func unitTokenKind(src []byte, tok syntax.Token) (int, bool) {
-	if tok.Kind == syntax.TokenEOF {
-		return unit.TokenEOF, true
+	kind := tok.Kind
+	if kind >= syntax.TokenEOF && kind <= syntax.TokenIdent {
+		return kind, true
 	}
-	if tok.Kind == syntax.TokenIdent {
-		return unit.TokenIdent, true
-	}
-	if tok.Kind == syntax.TokenNumber {
+	if kind == syntax.TokenNumber {
 		if isFloatNumber(src, tok) {
 			return unit.TokenFloat, true
 		}
 		return unit.TokenNumber, true
 	}
-	if tok.Kind == syntax.TokenString {
-		return unit.TokenString, true
+	if kind >= syntax.TokenString && kind <= syntax.TokenChar {
+		return kind + 1, true
 	}
-	if tok.Kind == syntax.TokenChar {
-		return unit.TokenChar, true
-	}
-	if tok.Kind == syntax.TokenOperator {
+	if kind == syntax.TokenOperator {
 		return unit.TokenOp, true
 	}
-	if tok.Kind == syntax.TokenPackage {
+	if kind == syntax.TokenPackage {
 		return unit.TokenPackage, true
 	}
-	if tok.Kind == syntax.TokenConst {
-		return unit.TokenConst, true
+	if kind >= syntax.TokenConst && kind <= syntax.TokenStruct {
+		return kind - 1, true
 	}
-	if tok.Kind == syntax.TokenVar {
-		return unit.TokenVar, true
+	if kind >= syntax.TokenReturn && kind <= syntax.TokenFor {
+		return kind - 3, true
 	}
-	if tok.Kind == syntax.TokenType {
-		return unit.TokenType, true
+	if kind >= syntax.TokenSwitch && kind <= syntax.TokenDefault {
+		return kind - 1, true
 	}
-	if tok.Kind == syntax.TokenFunc {
-		return unit.TokenFunc, true
-	}
-	if tok.Kind == syntax.TokenStruct {
-		return unit.TokenStruct, true
-	}
-	if tok.Kind == syntax.TokenReturn {
-		return unit.TokenReturn, true
-	}
-	if tok.Kind == syntax.TokenIf {
-		return unit.TokenIf, true
-	}
-	if tok.Kind == syntax.TokenElse {
-		return unit.TokenElse, true
-	}
-	if tok.Kind == syntax.TokenFor {
-		return unit.TokenFor, true
-	}
-	if tok.Kind == syntax.TokenBreak {
-		return unit.TokenBreak, true
-	}
-	if tok.Kind == syntax.TokenContinue {
-		return unit.TokenContinue, true
-	}
-	if tok.Kind == syntax.TokenGoto {
-		return unit.TokenGoto, true
-	}
-	if tok.Kind == syntax.TokenSwitch {
-		return unit.TokenSwitch, true
-	}
-	if tok.Kind == syntax.TokenCase {
-		return unit.TokenCase, true
-	}
-	if tok.Kind == syntax.TokenDefault {
-		return unit.TokenDefault, true
+	if kind >= syntax.TokenBreak && kind <= syntax.TokenGoto {
+		return kind - 7, true
 	}
 	return unit.TokenIdent, true
 }

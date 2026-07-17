@@ -21,7 +21,7 @@ const answer = 42
 var left, right int
 type item struct { value int }
 
-func run() {}
+func run() { core.Value(); helper.Value() }
 func (i item) Score() int { return i.value }
 `)},
 		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package core
@@ -741,6 +741,39 @@ func value() {}
 	}
 }
 
+func TestCheckGraphAllowsMultipleInitFunctions(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/a.go", Src: []byte(`package main
+
+func init() {}
+`)},
+		{Path: "/repo/case/cmd/app/b.go", Src: []byte(`package main
+
+func init() {}
+func main() {}
+`)},
+	})
+	prog := CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("multiple init check failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	initSymbols := 0
+	initBodies := 0
+	for i := 0; i < len(prog.Packages[0].Symbols); i++ {
+		if prog.Packages[0].Symbols[i].Name == "init" {
+			initSymbols++
+		}
+	}
+	for i := 0; i < len(prog.Packages[0].Bodies); i++ {
+		if prog.Packages[0].Bodies[i].Name == "init" {
+			initBodies++
+		}
+	}
+	if initSymbols != 2 || initBodies != 2 {
+		t.Fatalf("multiple init rows = symbols %d bodies %d", initSymbols, initBodies)
+	}
+}
+
 func TestCheckGraphMethodDuplicates(t *testing.T) {
 	okGraph := testGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -822,6 +855,22 @@ import (
 	}
 	if !foundDot || !foundBlank {
 		t.Fatalf("dot/blank imports = %#v", root.Imports)
+	}
+}
+
+func TestCheckGraphRejectsUnusedImport(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/pkg/lib"
+
+func main() {}
+`)},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte("package lib\n")},
+	})
+	prog := CheckGraph(graph)
+	if prog.Ok || prog.Error != CheckErrUnusedImport || prog.ErrorPackage != 1 || prog.ErrorFile != 0 {
+		t.Fatalf("unused import check = %#v", prog)
 	}
 }
 

@@ -287,7 +287,7 @@ func appMain() int {
 	}
 }
 
-func TestLinkUnitsLowersSimpleClosureAdder(t *testing.T) {
+func TestLinkUnitsPreservesClosureAdder(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -313,19 +313,15 @@ func appMain() int {
 	if !ok {
 		t.Fatal("LinkUnits failed")
 	}
-	if bytes.Contains(program.Text, []byte("func(v int)")) || bytes.Contains(program.Text, []byte("func(int) int")) {
-		t.Fatalf("linked text still contains closure syntax:\n%s", string(program.Text))
-	}
-	if !bytes.Contains(program.Text, []byte("func makeAdder(base int) int")) ||
-		!bytes.Contains(program.Text, []byte("return base")) ||
-		!bytes.Contains(program.Text, []byte("add+0 == 0")) {
-		t.Fatalf("linked text missing lowered closure shape:\n%s", string(program.Text))
+	if !bytes.Contains(program.Text, []byte("func makeAdder(base int) func(int) int")) ||
+		!bytes.Contains(program.Text, []byte("return func(v int) int")) ||
+		!bytes.Contains(program.Text, []byte("add(0) == 0")) {
+		t.Fatalf("linked text did not preserve closure semantics:\n%s", string(program.Text))
 	}
 	makeAdder := findLinkedFunc(program, "makeAdder")
 	if makeAdder < 0 {
 		t.Fatalf("makeAdder not found in %#v", program.Funcs)
 	}
-	assertLinkedStatement(t, program, makeAdder, unit.StmtReturn, "base")
 	linked := LinkBuild(result)
 	if !linked.Ok {
 		t.Fatalf("LinkBuild failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
@@ -335,7 +331,7 @@ func appMain() int {
 	}
 }
 
-func TestLinkBuildCoreLowersSimpleFunctionValue(t *testing.T) {
+func TestLinkBuildCorePreservesFunctionValue(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -374,20 +370,15 @@ func appMain() int {
 	if !ok {
 		t.Fatal("linked core unit did not decode")
 	}
-	if bytes.Contains(decoded.Text, []byte("func(int, int) int")) || bytes.Contains(decoded.Text, []byte("fn := add")) || bytes.Contains(decoded.Text, []byte("fn = mul")) {
-		t.Fatalf("linked text still contains function-value syntax:\n%s", string(decoded.Text))
-	}
-	if bytes.Contains(decoded.Text, []byte("choose(fn")) {
-		t.Fatalf("linked text still passes a function value:\n%s", string(decoded.Text))
-	}
-	if !bytes.Contains(decoded.Text, []byte("func choose(")) ||
-		!bytes.Contains(decoded.Text, []byte("return mul(a, b)")) ||
-		!bytes.Contains(decoded.Text, []byte("3, 4) == 12")) {
-		t.Fatalf("linked text missing lowered function-value helper:\n%s", string(decoded.Text))
+	if !bytes.Contains(decoded.Text, []byte("fn func(int, int) int")) ||
+		!bytes.Contains(decoded.Text, []byte("fn := add")) ||
+		!bytes.Contains(decoded.Text, []byte("fn = mul")) ||
+		!bytes.Contains(decoded.Text, []byte("choose(fn, 3, 4)")) {
+		t.Fatalf("linked text did not preserve function-value semantics:\n%s", string(decoded.Text))
 	}
 }
 
-func TestLinkBuildCoreLowersSimpleSearchClosure(t *testing.T) {
+func TestLinkBuildCorePreservesSearchClosure(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
 		{Path: "/repo/case/sort/sort.go", Src: []byte(`package sort
@@ -421,15 +412,10 @@ func main() {
 	if !ok {
 		t.Fatal("linked core unit did not decode")
 	}
-	if bytes.Contains(decoded.Text, []byte("func(i int) bool")) || bytes.Contains(decoded.Text, []byte("return i >= 3")) {
-		t.Fatalf("linked text still contains search closure:\n%s", string(decoded.Text))
-	}
-	if !bytes.Contains(decoded.Text, []byte("Search(5, 3)")) {
-		t.Fatalf("linked text missing lowered Search call:\n%s", string(decoded.Text))
-	}
-	thresholdTok := findLinkedToken(decoded, "3")
-	if thresholdTok < 0 || decoded.Tokens[thresholdTok].Kind != unit.TokenNumber {
-		t.Fatalf("Search threshold token kind = index %d token %#v", thresholdTok, tokenAt(decoded, thresholdTok))
+	if !bytes.Contains(decoded.Text, []byte("func(i int) bool")) ||
+		!bytes.Contains(decoded.Text, []byte("return i >= 3")) ||
+		!bytes.Contains(decoded.Text, []byte("Search(5, func")) {
+		t.Fatalf("linked text did not preserve search closure:\n%s", string(decoded.Text))
 	}
 	searchFn := findLinkedFunc(decoded, "Search")
 	mainFn := findLinkedFunc(decoded, "main")
@@ -573,7 +559,7 @@ func appMain() int {
 	}
 }
 
-func TestLinkBuildCoreLowersSimpleDeferPanicRecover(t *testing.T) {
+func TestLinkBuildCorePreservesDeferPanicRecover(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -608,14 +594,12 @@ func appMain() int {
 	if !ok {
 		t.Fatal("linked core unit did not decode")
 	}
-	if bytes.Contains(decoded.Text, []byte("defer")) || bytes.Contains(decoded.Text, []byte("recover")) || bytes.Contains(decoded.Text, []byte("panic")) || bytes.Contains(decoded.Text, []byte("(ok bool)")) {
-		t.Fatalf("linked text still contains unsupported panic/defer syntax:\n%s", string(decoded.Text))
-	}
-	if !bytes.Contains(decoded.Text, []byte("func guarded(v int)")) ||
-		!bytes.Contains(decoded.Text, []byte("bool")) ||
-		!bytes.Contains(decoded.Text, []byte("return true")) ||
+	if !bytes.Contains(decoded.Text, []byte("func guarded(v int) (ok bool)")) ||
+		!bytes.Contains(decoded.Text, []byte("defer func()")) ||
+		!bytes.Contains(decoded.Text, []byte("recover()")) ||
+		!bytes.Contains(decoded.Text, []byte("panic(\"expected\")")) ||
 		!bytes.Contains(decoded.Text, []byte("return false")) {
-		t.Fatalf("linked text missing lowered boolean control flow:\n%s", string(decoded.Text))
+		t.Fatalf("linked text did not preserve panic/defer semantics:\n%s", string(decoded.Text))
 	}
 }
 
@@ -960,7 +944,10 @@ func TestLinkUnitsPreservesMethodSets(t *testing.T) {
 
 import "example.com/case/pkg/lib"
 
-func appMain() int { return 0 }
+func appMain() int {
+	var item lib.Item
+	return item.Read()
+}
 `)},
 		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
 
@@ -996,7 +983,8 @@ func TestLinkUnitsPreservesFunctionTypes(t *testing.T) {
 
 import "example.com/case/pkg/lib"
 
-func appMain() int { return 0 }
+func use(callback lib.Callback) {}
+func appMain() int { return lib.Value() }
 `)},
 		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
 
