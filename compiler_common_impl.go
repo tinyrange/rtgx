@@ -10787,17 +10787,7 @@ func rtgEmitSliceLiteralBacking(g *rtgLinearGen, ep *rtgExprParse, idx int, slic
 			}
 			continue
 		}
-		if elemResolved.kind == rtgTypeArray {
-			tempOffset := rtgAddUnnamedLocal(g, elemType)
-			if !rtgEmitTypedAssign(g, ep, field.expr, tempOffset) {
-				return false
-			}
-			rtgAsmPrimaryBssAddr(a, backingOff+disp)
-			rtgAsmCopyPrimaryToSecondary(a)
-			rtgEmitCopyStackToMemSecondary(g, tempOffset, 0, elemSize)
-			continue
-		}
-		if elemResolved.kind == rtgTypeMap {
+		if elemResolved.kind == rtgTypeArray || elemResolved.kind == rtgTypeMap || elemResolved.kind == rtgTypeSlice {
 			tempOffset := rtgAddUnnamedLocal(g, elemType)
 			if !rtgEmitTypedAssign(g, ep, field.expr, tempOffset) {
 				return false
