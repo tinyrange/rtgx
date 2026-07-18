@@ -34,6 +34,7 @@ func rtgAarch64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	oldEmittingDefers := g.emittingDefers
 	oldSuppressPanicCheck := g.suppressPanicCheck
 	oldStackUsed := g.stackUsed
+	oldStackPeak := g.stackPeak
 	oldGotoLabels := g.gotoLabels
 	oldLastRangeReturns := g.lastRangeReturns
 	var locals []rtgLocalInfo
@@ -50,18 +51,12 @@ func rtgAarch64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.returnStruct = 0
 	g.closureEnvOffset = 0
 	g.stackUsed = 0
+	g.stackPeak = 0
 	rtgAarch64AsmAlign(a)
 	rtgAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 	rtgAarch64AsmEmit(a, 0xa9bf7bfd)
 	rtgAarch64AsmEmit(a, 0x910003fd)
-	if rtgTargetOS == rtgOSWindows {
-		for i := 0; i < 8; i++ {
-			rtgAarch64AsmEmit(a, 0xd14007ff) // sub sp, sp, #1, lsl #12
-			rtgAarch64AsmEmit(a, 0xf90003ff) // str xzr, [sp]
-		}
-	} else {
-		rtgAarch64AsmEmit(a, 0xd14023ff)
-	}
+	framePatch := rtgAarch64AsmFrameStart(a)
 	if rtgTypeUsesHiddenResult(g.meta, metaFn.resultType) {
 		g.returnStruct = rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 		rtgAarch64AsmStoreRegStack(a, rtgAarch64RegRdi, g.returnStruct)
@@ -92,6 +87,7 @@ func rtgAarch64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		rtgAsmLeave(a)
 		rtgAsmRet(a)
 	}
+	rtgAarch64AsmPatchFrame(a, framePatch, g.stackPeak)
 	g.locals = oldLocals
 	g.localCount = oldLocalCount
 	g.breakDepth = oldBreak
@@ -106,6 +102,7 @@ func rtgAarch64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.emittingDefers = oldEmittingDefers
 	g.suppressPanicCheck = oldSuppressPanicCheck
 	g.stackUsed = oldStackUsed
+	g.stackPeak = oldStackPeak
 	g.gotoLabels = oldGotoLabels
 	g.lastRangeReturns = oldLastRangeReturns
 	return true
@@ -515,6 +512,55 @@ func rtgAarch64AsmAddRegImm(a *rtgAsm, dst int, src int, imm int) {
 		}
 		rtgAarch64AsmEmit(a, op|(shift<<22)|(chunk<<10)|(cur<<5)|dst)
 		cur = dst
+	}
+}
+
+func rtgAarch64AsmFrameStart(a *rtgAsm) int {
+	at := len(a.code)
+	count := 2
+	if rtgTargetOS == rtgOSWindows {
+		// Windows requires every intervening page to be touched when a frame
+		// crosses a guard page. The compact loop patched below handles an
+		// arbitrary calculated frame without reserving one probe per page.
+		count = 8
+	}
+	for i := 0; i < count; i++ {
+		rtgAarch64AsmEmit(a, 0xd503201f) // nop
+	}
+	return at
+}
+
+func rtgAarch64AsmPatchFrame(a *rtgAsm, at int, stackUsed int) {
+	frame := rtgAlignValue(stackUsed, 16)
+	if rtgTargetOS == rtgOSWindows {
+		pages := frame / 4096
+		tail := frame % 4096
+		if frame == 0 {
+			return
+		}
+		// movz x9, #pages
+		rtgPut32At(a.code, at, 0xd2800009|(pages<<5))
+		// cbz x9, tail (five instructions forward)
+		rtgPut32At(a.code, at+4, 0xb40000a9)
+		// loop: sub sp, sp, #1, lsl #12; touch the new page.
+		rtgPut32At(a.code, at+8, 0xd14007ff)
+		rtgPut32At(a.code, at+12, 0xf90003ff)
+		// subs x9, x9, #1; b.ne loop (three instructions back).
+		rtgPut32At(a.code, at+16, 0xf1000529)
+		rtgPut32At(a.code, at+20, 0x54ffffa1)
+		if tail > 0 {
+			rtgPut32At(a.code, at+24, 0xd10003ff|(tail<<10))
+			rtgPut32At(a.code, at+28, 0xf90003ff)
+		}
+		return
+	}
+	high := frame / 4096
+	low := frame % 4096
+	if high > 0 {
+		rtgPut32At(a.code, at, 0xd14003ff|(high<<10))
+	}
+	if low > 0 {
+		rtgPut32At(a.code, at+4, 0xd10003ff|(low<<10))
 	}
 }
 

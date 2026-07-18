@@ -5711,6 +5711,7 @@ func rtgBindClosureCaptures(g *rtgLinearGen, fnIndex int) bool {
 	for i := 0; i < info.captureCount; i++ {
 		capture := &g.meta.captures[info.firstCapture+i]
 		g.stackUsed = rtgAlignTo8(g.stackUsed + rtgBackendValueSlotSize)
+		rtgRecordStackPeak(g)
 		captureOff := g.stackUsed
 		g.bindingClosureCaptures = true
 		rtgAddTypedLocal(g, capture.nameStart, capture.nameEnd, capture.typ)
@@ -6722,6 +6723,7 @@ type rtgLinearGen struct {
 	locals                    []rtgLocalInfo
 	localCount                int
 	stackUsed                 int
+	stackPeak                 int
 	fieldIndex                int
 	fieldOffset               int
 	fieldPointerIndex         int
@@ -8566,6 +8568,7 @@ func rtgLinearInitGlobal(g *rtgLinearGen, index int) bool {
 func rtgLinearInitGlobals(g *rtgLinearGen) bool {
 	g.localCount = 0
 	g.stackUsed = 0
+	g.stackPeak = 0
 	framePatch := rtgEmitGlobalInitFrameStart(g)
 	meta := g.meta
 	// Allocate every global before emitting any initializer. Go permits an
@@ -8598,21 +8601,12 @@ func rtgEmitGlobalInitFrameStart(g *rtgLinearGen) int {
 	if rtgTargetArch == rtgArchAarch64 {
 		rtgAarch64AsmEmit(a, 0xa9bf7bfd)
 		rtgAarch64AsmEmit(a, 0x910003fd)
-		if rtgTargetOS == rtgOSWindows {
-			for i := 0; i < 8; i++ {
-				rtgAarch64AsmEmit(a, 0xd14007ff)
-				rtgAarch64AsmEmit(a, 0xf90003ff)
-			}
-		} else {
-			rtgAarch64AsmEmit(a, 0xd14023ff)
-		}
-		return -1
+		return rtgAarch64AsmFrameStart(a)
 	}
 	if rtgTargetArch == rtgArchArm {
 		rtgArmAsmEmit(a, 0xe92d4800)
 		rtgArmAsmMovRegReg(a, rtgArmRegFp, rtgArmRegSp)
-		rtgArmAsmAddRegImm(a, rtgArmRegSp, rtgArmRegSp, -32768)
-		return -1
+		return rtgArmAsmFrameStart(a)
 	}
 	framePatch := len(a.code)
 	rtgAsmEmit32(a, 0x000000c8)
@@ -8623,13 +8617,18 @@ func rtgEmitGlobalInitFrameEnd(g *rtgLinearGen, framePatch int) {
 	if rtgTargetArch != rtgArchWasm32 {
 		rtgAsmLeave(&g.asm)
 	}
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmPatchFrame(&g.asm, framePatch, g.stackPeak)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmPatchFrame(&g.asm, framePatch, g.stackPeak)
+		return
+	}
 	if framePatch < 0 {
 		return
 	}
-	frame := rtgAlignValue(g.stackUsed+2048, 16)
-	if frame < 2048 {
-		frame = 2048
-	}
+	frame := rtgAlignValue(g.stackPeak, 16)
 	if frame > 65520 {
 		frame = 65520
 	}
@@ -15003,10 +15002,12 @@ func rtgAddTypedLocal(g *rtgLinearGen, nameStart int, nameEnd int, typ int) int 
 	captureOff := 0
 	if rtgLocalCapturedInCurrentFunction(g, nameStart, nameEnd) {
 		g.stackUsed = rtgAlignTo8(g.stackUsed + rtgBackendValueSlotSize)
+		rtgRecordStackPeak(g)
 		captureOff = g.stackUsed
 		rtgAllocateCapturedCell(g, captureOff, size)
 	}
 	g.stackUsed = rtgAlignTo8(g.stackUsed + size)
+	rtgRecordStackPeak(g)
 	offset := g.stackUsed
 	if g.localCount >= len(g.locals) {
 		rtgGrowLocalTable(g)
@@ -15018,6 +15019,15 @@ func rtgAddTypedLocal(g *rtgLinearGen, nameStart int, nameEnd int, typ int) int 
 	g.locals[g.localCount] = rtgLocalInfo{nameStart: nameStart, nameEnd: nameEnd, nameHash: nameHash, offset: offset, captureOff: captureOff, typ: typ, size: size}
 	g.localCount++
 	return offset
+}
+
+func rtgRecordStackPeak(g *rtgLinearGen) {
+	// Retain scoped locals and expression temporaries after stackUsed is
+	// rewound. Balanced hardware push/pop operands live below the persistent
+	// frame and therefore do not contribute to its size.
+	if g.stackUsed > g.stackPeak {
+		g.stackPeak = g.stackUsed
+	}
 }
 
 func rtgAddUnnamedLocal(g *rtgLinearGen, typ int) int {

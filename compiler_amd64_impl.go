@@ -12,6 +12,7 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.pendingControl = 0
 	g.currentFunc = fnInfoIndex
 	g.stackUsed = 0
+	g.stackPeak = 0
 	rtgAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 	framePatch := len(a.code)
 	rtgAsmEmit32(a, 0x000000c8)
@@ -47,7 +48,7 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		rtgAsmLeave(a)
 		rtgAsmRet(a)
 	}
-	frame := rtgAlignValue(g.stackUsed+2048, 16)
+	frame := rtgAlignValue(g.stackPeak, 16)
 	if frame > 65520 {
 		frame = 65520
 	}

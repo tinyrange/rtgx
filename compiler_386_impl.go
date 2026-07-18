@@ -18,6 +18,7 @@ func rtg386EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	oldEmittingDefers := g.emittingDefers
 	oldSuppressPanicCheck := g.suppressPanicCheck
 	oldStackUsed := g.stackUsed
+	oldStackPeak := g.stackPeak
 	oldGotoLabels := g.gotoLabels
 	oldLastRangeReturns := g.lastRangeReturns
 	var locals []rtgLocalInfo
@@ -34,6 +35,7 @@ func rtg386EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.returnStruct = 0
 	g.closureEnvOffset = 0
 	g.stackUsed = 0
+	g.stackPeak = 0
 	rtgAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 	framePatch := len(a.code)
 	rtgAsmEmit32(a, 0x000000c8)
@@ -67,10 +69,7 @@ func rtg386EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		rtgAsmLeave(a)
 		rtgAsmRet(a)
 	}
-	frame := rtgAlignTo8(g.stackUsed + 2048)
-	if frame < 2048 {
-		frame = 2048
-	}
+	frame := rtgAlignTo8(g.stackPeak)
 	if frame > 65528 {
 		frame = 65528
 	}
@@ -90,6 +89,7 @@ func rtg386EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.emittingDefers = oldEmittingDefers
 	g.suppressPanicCheck = oldSuppressPanicCheck
 	g.stackUsed = oldStackUsed
+	g.stackPeak = oldStackPeak
 	g.gotoLabels = oldGotoLabels
 	g.lastRangeReturns = oldLastRangeReturns
 	return true
