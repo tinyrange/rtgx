@@ -1143,6 +1143,7 @@ func rtg386EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			if inner.kind == rtgExprIdent {
 				localIndex := rtgFindLocalIndex(g, inner.nameStart, inner.nameEnd)
 				if localIndex >= 0 {
+					rtgInvalidateCheckedPointerLocal(g, localIndex)
 					rtgAsmStackMem(a, g.locals[localIndex].offset, 0x8d48, 0x45, 0x85)
 					return true
 				}
@@ -1169,6 +1170,7 @@ func rtg386EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			if !rtgEmitIntExpr(g, ep, e.left) {
 				return false
 			}
+			rtgEmitRuntimeNonNilPrimary(g)
 			rtgAsmCopyPrimaryToSecondary(a)
 			targetKind := rtgPointerTargetKind(g, ep, e.left)
 			size := rtgScalarKindSize(targetKind)
@@ -1632,6 +1634,7 @@ func rtg386EmitSelectorAddressRdx(g *rtgLinearGen, ep *rtgExprParse, idx int) bo
 			if !rtgEmitIntExpr(g, ep, e.left) {
 				return false
 			}
+			rtgEmitRuntimeNonNilPrimary(g)
 			rtgAsmCopyPrimaryToSecondary(a)
 			if fieldOffset != 0 {
 				rtgAsmAddSecondaryImm(a, fieldOffset)
@@ -1661,6 +1664,7 @@ func rtg386EmitSelectorAddressRdx(g *rtgLinearGen, ep *rtgExprParse, idx int) bo
 			}
 			if t.kind == rtgTypePointer {
 				rtgAsmLoadPrimaryBss(a, globalOffset)
+				rtgEmitRuntimeNonNilPrimary(g)
 				rtgAsmCopyPrimaryToSecondary(a)
 				if fieldOffset != 0 {
 					rtgAsmAddSecondaryImm(a, fieldOffset)
@@ -1680,6 +1684,7 @@ func rtg386EmitSelectorAddressRdx(g *rtgLinearGen, ep *rtgExprParse, idx int) bo
 		t := rtgResolveType(meta, g.locals[localIndex].typ)
 		if t.kind == rtgTypePointer {
 			rtgAsmLoadSecondaryStack(a, g.locals[localIndex].offset)
+			rtgEmitRuntimeNonNilLocalSecondary(g, localIndex)
 			if fieldOffset != 0 {
 				rtgAsmAddSecondaryImm(a, fieldOffset)
 			}
@@ -1695,6 +1700,7 @@ func rtg386EmitSelectorAddressRdx(g *rtgLinearGen, ep *rtgExprParse, idx int) bo
 		t := rtgResolveType(meta, baseType)
 		if t.kind == rtgTypePointer {
 			rtgAsmEmit16(a, 0x128b)
+			rtgEmitRuntimeNonNilSecondary(g)
 		}
 		if fieldOffset != 0 {
 			rtgAsmAddSecondaryImm(a, fieldOffset)
