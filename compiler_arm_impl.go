@@ -59,9 +59,7 @@ func rtgArmEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		g.returnStruct = rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 		rtgArmAsmStoreRegStack(a, rtgArmRegRdi, g.returnStruct)
 	}
-	if !rtgBindFunctionParams(g, fnInfoIndex) {
-		return false
-	}
+	rtgBindFunctionParams(g, fnInfoIndex)
 	if !rtgBindClosureCaptures(g, fnInfoIndex) {
 		return false
 	}
@@ -106,35 +104,34 @@ func rtgArmEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	return true
 }
 
-func rtgArmStoreParamWord(g *rtgLinearGen, reg int, offset int) bool {
+func rtgArmStoreParamWord(g *rtgLinearGen, reg int, offset int) {
 	a := &g.asm
 	if reg == 0 {
 		rtgArmAsmStoreRegStack(a, rtgArmRegRdi, offset)
-		return true
+		return
 	}
 	if reg == 1 {
 		rtgArmAsmStoreRegStack(a, rtgArmRegRsi, offset)
-		return true
+		return
 	}
 	if reg == 2 {
 		rtgArmAsmStoreRegStack(a, rtgArmRegRdx, offset)
-		return true
+		return
 	}
 	if reg == 3 {
 		rtgArmAsmStoreRegStack(a, rtgArmRegRcx, offset)
-		return true
+		return
 	}
 	if reg == 4 {
 		rtgArmAsmStoreRegStack(a, rtgArmRegR8, offset)
-		return true
+		return
 	}
 	if reg == 5 {
 		rtgArmAsmStoreRegStack(a, rtgArmRegR9, offset)
-		return true
+		return
 	}
 	rtgArmAsmLoadRegMem(a, rtgArmRegRax, rtgArmRegFp, 8+(reg-6)*4, 4)
 	rtgArmAsmStoreRegStack(a, rtgArmRegRax, offset)
-	return true
 }
 
 func rtgArmEmitCallWithWordCount(g *rtgLinearGen, fnIndex int, wordCount int) {

@@ -207,6 +207,15 @@ func rtgDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
 	return out, true
 }
 
+func rtgUnitUsesPanic(p *rtgProgram) bool {
+	for i := 0; i < rtgTokCount(p); i++ {
+		if rtgTokIdentIs(p, i, "defer") || rtgTokIdentIs(p, i, "panic") || rtgTokIdentIs(p, i, "recover") || rtgTokCharIs(p, i, '.') && rtgTokCharIs(p, i+1, '(') {
+			return true
+		}
+	}
+	return false
+}
+
 func rtgDecodeUnitProgram(src []byte) (rtgProgram, bool, bool) {
 	var prog rtgProgram
 	if len(src) < 4 {
@@ -303,6 +312,7 @@ func rtgDecodeUnitProgram(src []byte) (rtgProgram, bool, bool) {
 	}
 	prog.src = text
 	prog.toks.data = tokens
+	prog.toks.panicEnabled = rtgUnitUsesPanic(&prog)
 	declReader := rtgUnitReader{src: declData, end: len(declData), ok: true}
 	declCount := rtgUnitReadVar(&declReader)
 	if !declReader.ok {

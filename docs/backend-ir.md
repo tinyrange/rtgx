@@ -80,6 +80,26 @@ in which function bodies happen to mention `&T`. Linked function and type order
 therefore determines metadata reproducibly for host-built and self-hosted
 compilers.
 
+### Interface assertions and type switches
+
+An assertion evaluates its interface operand once and matches the stored
+dynamic-type tag. A concrete target requires its exact canonical tag. An
+interface target accepts every linked concrete type whose method set and method
+signatures satisfy the target interface, including the distinct pointer method
+set rules.
+
+A successful assertion copies the payload into storage of the asserted type.
+Comma-ok assertions produce that type's zero value and `false` on mismatch. A
+single-result mismatch enters the ordinary panic path and reports an interface
+conversion failure, so a surrounding deferred `recover` observes it just like
+other RTG panics.
+
+Type switches test cases in source order after evaluating the switch operand
+once. They distinguish a nil interface from typed nil pointers, support
+concrete, pointer, and interface cases, and preserve the original interface
+value for multi-type and default clauses. A single-type clause binds its
+narrowed value using the same payload-copy rules as a successful assertion.
+
 ## Calls and returns
 
 Arguments are flattened left to right into numbered call words. The caller

@@ -1,38 +1,16 @@
 package main
 
+const rtgAmd64ParamStoreRecipes = "\x48\x89\x7d\xbd\x48\x89\x75\xb5\x48\x89\x55\x95\x48\x89\x4d\x8d\x4c\x89\x45\x85\x4c\x89\x4d\x8d"
+
 func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	a := &g.asm
 	metaFn := &g.meta.funcs[fnInfoIndex]
 	fn := &g.prog.funcs[metaFn.declIndex]
-	oldLocals := g.locals
-	oldLocalCount := g.localCount
-	oldBreak := g.breakDepth
-	oldContinue := g.continueDepth
-	oldCurrent := g.currentFunc
-	oldReturnStruct := g.returnStruct
-	oldClosureEnvOffset := g.closureEnvOffset
-	oldDeferHeadOffset := g.deferHeadOffset
-	oldDeferReturnLabel := g.deferReturnLabel
-	oldDeferResultOffset := g.deferResultOffset
-	oldDeferSites := g.deferSites
-	oldEmittingDefers := g.emittingDefers
-	oldSuppressPanicCheck := g.suppressPanicCheck
-	oldStackUsed := g.stackUsed
-	oldGotoLabels := g.gotoLabels
-	oldLastRangeReturns := g.lastRangeReturns
-	var locals []rtgLocalInfo
-	var gotoLabels []rtgGlobalInfo
-	locals = make([]rtgLocalInfo, rtgFunctionLocalCap(fn))
-	gotoLabels = make([]rtgGlobalInfo, 0, 0)
-	g.locals = locals
+	g.locals = make([]rtgLocalInfo, rtgFunctionLocalCap(fn))
 	g.localCount = 0
-	g.gotoLabels = gotoLabels
-	g.breakDepth = 0
-	g.continueDepth = 0
+	g.gotoLabels = nil
 	g.pendingControl = 0
 	g.currentFunc = fnInfoIndex
-	g.returnStruct = 0
-	g.closureEnvOffset = 0
 	g.stackUsed = 0
 	rtgAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 	framePatch := len(a.code)
@@ -41,9 +19,7 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		g.returnStruct = rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 		rtgAsmStackMem(a, g.returnStruct, 0x8948, 0x7d, 0xbd)
 	}
-	if !rtgBindFunctionParams(g, fnInfoIndex) {
-		return false
-	}
+	rtgBindFunctionParams(g, fnInfoIndex)
 	if !rtgBindClosureCaptures(g, fnInfoIndex) {
 		return false
 	}
@@ -72,63 +48,24 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		rtgAsmRet(a)
 	}
 	frame := rtgAlignValue(g.stackUsed+2048, 16)
-	if frame < 2048 {
-		frame = 2048
-	}
 	if frame > 65520 {
 		frame = 65520
 	}
-	a.code[framePatch+1] = byte(frame & 255)
-	a.code[framePatch+2] = byte((frame / 256) & 255)
-	g.locals = oldLocals
-	g.localCount = oldLocalCount
-	g.breakDepth = oldBreak
-	g.continueDepth = oldContinue
-	g.currentFunc = oldCurrent
-	g.returnStruct = oldReturnStruct
-	g.closureEnvOffset = oldClosureEnvOffset
-	g.deferHeadOffset = oldDeferHeadOffset
-	g.deferReturnLabel = oldDeferReturnLabel
-	g.deferResultOffset = oldDeferResultOffset
-	g.deferSites = oldDeferSites
-	g.emittingDefers = oldEmittingDefers
-	g.suppressPanicCheck = oldSuppressPanicCheck
-	g.stackUsed = oldStackUsed
-	g.gotoLabels = oldGotoLabels
-	g.lastRangeReturns = oldLastRangeReturns
+	a.code[framePatch+1] = byte(frame)
+	a.code[framePatch+2] = byte(frame >> 8)
 	return true
 }
 
-func rtgAmd64StoreParamWord(g *rtgLinearGen, reg int, offset int) bool {
+func rtgAmd64StoreParamWord(g *rtgLinearGen, reg int, offset int) {
 	a := &g.asm
-	if reg == 0 {
-		rtgAsmStackMem(a, offset, 0x8948, 0x7d, 0xbd)
-		return true
-	}
-	if reg == 1 {
-		rtgAsmStackMem(a, offset, 0x8948, 0x75, 0xb5)
-		return true
-	}
-	if reg == 2 {
-		rtgAsmStoreSecondaryStack(a, offset)
-		return true
-	}
-	if reg == 3 {
-		rtgAsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
-		return true
-	}
-	if reg == 4 {
-		rtgAsmStackMem(a, offset, 0x894c, 0x45, 0x85)
-		return true
-	}
-	if reg == 5 {
-		rtgAsmStackMem(a, offset, 0x894c, 0x4d, 0x8d)
-		return true
+	if reg < 6 {
+		at := reg * 4
+		rtgAsmStackMem(a, offset, int(rtgAmd64ParamStoreRecipes[at])|int(rtgAmd64ParamStoreRecipes[at+1])<<8, int(rtgAmd64ParamStoreRecipes[at+2]), int(rtgAmd64ParamStoreRecipes[at+3]))
+		return
 	}
 	rtgAsmEmit24(a, 0x858b48)
 	rtgAsmEmit32(a, 0x10+(reg-6)*8)
 	rtgAsmStorePrimaryStack(a, offset)
-	return true
 }
 func rtgAmd64AsmMovRaxImm(a *rtgAsm, imm int) {
 	if imm == 0 {
@@ -303,16 +240,21 @@ func rtgAmd64AsmStoreRaxMemRdxDispSize(a *rtgAsm, disp int, size int) {
 	}
 	rtgAsmStorePrimaryMemSecondaryDisp(a, disp)
 }
+func rtgAmd64CodeEnds(a *rtgAsm, suffix string) bool {
+	start := len(a.code) - len(suffix)
+	if start < 0 {
+		return false
+	}
+	for i := 0; i < len(suffix); i++ {
+		if a.code[start+i] != suffix[i] {
+			return false
+		}
+	}
+	return true
+}
 func rtgAmd64AsmNormalizeRaxForKind(a *rtgAsm, kind int) {
 	if kind == rtgTypeByte {
-		n := len(a.code)
-		if n >= 3 && a.code[n-3] == 0x0f && a.code[n-2] == 0xb6 && a.code[n-1] == 0xc0 {
-			return
-		}
-		if n >= 4 && a.code[n-4] == 0x48 && a.code[n-3] == 0x0f && a.code[n-2] == 0xb6 && a.code[n-1] == 0x02 {
-			return
-		}
-		if n >= 5 && a.code[n-5] == 0x48 && a.code[n-4] == 0x0f && a.code[n-3] == 0xb6 && a.code[n-2] == 0x04 && a.code[n-1] == 0x08 {
+		if rtgAmd64CodeEnds(a, "\x0f\xb6\xc0") || rtgAmd64CodeEnds(a, "\x48\x0f\xb6\x02") || rtgAmd64CodeEnds(a, "\x48\x0f\xb6\x04\x08") {
 			return
 		}
 		rtgAsmEmit24(a, 0xc0b60f)
@@ -331,11 +273,7 @@ func rtgAmd64AsmNormalizeRaxForKind(a *rtgAsm, kind int) {
 		return
 	}
 	if kind == rtgTypeInt32 {
-		n := len(a.code)
-		if n >= 3 && a.code[n-3] == 0x48 && a.code[n-2] == 0x63 && a.code[n-1] == 0xc0 {
-			return
-		}
-		if n >= 4 && a.code[n-4] == 0x48 && a.code[n-3] == 0x63 && a.code[n-2] == 0x04 && a.code[n-1] == 0x88 {
+		if rtgAmd64CodeEnds(a, "\x48\x63\xc0") || rtgAmd64CodeEnds(a, "\x48\x63\x04\x88") {
 			return
 		}
 		rtgAsmEmit24(a, 0xc06348)

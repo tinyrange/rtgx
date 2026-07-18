@@ -318,35 +318,34 @@ func rtgWasm32EmitCallLabel(a *rtgAsm, label int, wordCount int) {
 	a.code = rtgAppend32(a.code, wordCount)
 }
 
-func rtgWasm32StoreParamWord(g *rtgLinearGen, reg int, offset int) bool {
+func rtgWasm32StoreParamWord(g *rtgLinearGen, reg int, offset int) {
 	a := &g.asm
 	if reg == 0 {
 		rtgWasm32EmitStack(a, rtgWasm32OpStoreStack, rtgWasm32RegRdi, offset)
-		return true
+		return
 	}
 	if reg == 1 {
 		rtgWasm32EmitStack(a, rtgWasm32OpStoreStack, rtgWasm32RegRsi, offset)
-		return true
+		return
 	}
 	if reg == 2 {
 		rtgWasm32EmitStack(a, rtgWasm32OpStoreStack, rtgWasm32RegRdx, offset)
-		return true
+		return
 	}
 	if reg == 3 {
 		rtgWasm32EmitStack(a, rtgWasm32OpStoreStack, rtgWasm32RegRcx, offset)
-		return true
+		return
 	}
 	if reg == 4 {
 		rtgWasm32EmitStack(a, rtgWasm32OpStoreStack, rtgWasm32RegR8, offset)
-		return true
+		return
 	}
 	if reg == 5 {
 		rtgWasm32EmitStack(a, rtgWasm32OpStoreStack, rtgWasm32RegR9, offset)
-		return true
+		return
 	}
 	rtgWasm32EmitReg(a, rtgWasm32OpPopReg, rtgWasm32RegRax)
 	rtgWasm32EmitStack(a, rtgWasm32OpStoreStack, rtgWasm32RegRax, offset)
-	return true
 }
 
 func rtgWasm32AsmMovRaxImm(a *rtgAsm, imm int) {
@@ -2162,9 +2161,7 @@ func rtgWasm32EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		g.returnStruct = rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 		rtgWasm32EmitStack(a, rtgWasm32OpStoreStack, rtgWasm32RegRdi, g.returnStruct)
 	}
-	if !rtgBindFunctionParams(g, fnInfoIndex) {
-		return false
-	}
+	rtgBindFunctionParams(g, fnInfoIndex)
 	if !rtgBindClosureCaptures(g, fnInfoIndex) {
 		return false
 	}

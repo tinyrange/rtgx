@@ -60,11 +60,11 @@ Required:
 - structs
 - pointers to supported types
 - named aliases or definitions of supported types
+- interfaces and their dynamic type representation
 
 Frontend-in-scope but not directly in the backend subset:
 
 - complex numbers
-- interfaces
 - maps
 - arrays as distinct fixed-length values
 - function values and closures
@@ -134,13 +134,10 @@ Required:
 - conversion from `string` to `[]byte`
 - slice allocation with `make([]T, n)` and `make([]T, n, cap)`
 - slice copying with `copy(dst, src)`
+- single-result and comma-ok interface type assertions
 
 String concatenation with `+` is optional; tests should avoid requiring it
 unless the compiler source needs it.
-
-Frontend-in-scope but not directly in the backend subset:
-
-- type assertions and type switches
 
 ## Statements
 
@@ -159,6 +156,8 @@ Required:
   expressions, without fallthrough
 - `switch` cases with one or more values, optional `default`, `break` that exits
   only the switch, and `continue` when the switch is inside a loop
+- type switches with concrete, pointer, interface, nil, multi-type, and default
+  clauses, including a correctly narrowed bound variable
 - `for` loops in Go's three common forms:
   - `for condition { ... }`
   - `for init; condition; post { ... }`
