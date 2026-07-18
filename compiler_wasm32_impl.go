@@ -2140,6 +2140,7 @@ func rtgWasm32EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	oldEmittingDefers := g.emittingDefers
 	oldSuppressPanicCheck := g.suppressPanicCheck
 	oldStackUsed := g.stackUsed
+	oldStackPeak := g.stackPeak
 	oldGotoLabels := g.gotoLabels
 	oldLastRangeReturns := g.lastRangeReturns
 	var locals []rtgLocalInfo
@@ -2156,6 +2157,7 @@ func rtgWasm32EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.returnStruct = 0
 	g.closureEnvOffset = 0
 	g.stackUsed = 0
+	g.stackPeak = 0
 	rtgAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 	if rtgTypeUsesHiddenResult(g.meta, metaFn.resultType) {
 		g.returnStruct = rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
@@ -2201,6 +2203,7 @@ func rtgWasm32EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.emittingDefers = oldEmittingDefers
 	g.suppressPanicCheck = oldSuppressPanicCheck
 	g.stackUsed = oldStackUsed
+	g.stackPeak = oldStackPeak
 	g.gotoLabels = oldGotoLabels
 	g.lastRangeReturns = oldLastRangeReturns
 	return true

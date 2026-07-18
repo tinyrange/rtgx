@@ -34,6 +34,7 @@ func rtgArmEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	oldEmittingDefers := g.emittingDefers
 	oldSuppressPanicCheck := g.suppressPanicCheck
 	oldStackUsed := g.stackUsed
+	oldStackPeak := g.stackPeak
 	oldGotoLabels := g.gotoLabels
 	oldLastRangeReturns := g.lastRangeReturns
 	var locals []rtgLocalInfo
@@ -50,11 +51,12 @@ func rtgArmEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.returnStruct = 0
 	g.closureEnvOffset = 0
 	g.stackUsed = 0
+	g.stackPeak = 0
 	rtgArmAsmAlign(a)
 	rtgAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 	rtgArmAsmEmit(a, 0xe92d4800)
 	rtgArmAsmMovRegReg(a, rtgArmRegFp, rtgArmRegSp)
-	rtgArmAsmAddRegImm(a, rtgArmRegSp, rtgArmRegSp, -32768)
+	framePatch := rtgArmAsmFrameStart(a)
 	if rtgTypeUsesHiddenResult(g.meta, metaFn.resultType) {
 		g.returnStruct = rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 		rtgArmAsmStoreRegStack(a, rtgArmRegRdi, g.returnStruct)
@@ -85,6 +87,7 @@ func rtgArmEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		rtgAsmLeave(a)
 		rtgAsmRet(a)
 	}
+	rtgArmAsmPatchFrame(a, framePatch, g.stackPeak)
 	g.locals = oldLocals
 	g.localCount = oldLocalCount
 	g.breakDepth = oldBreak
@@ -99,6 +102,7 @@ func rtgArmEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.emittingDefers = oldEmittingDefers
 	g.suppressPanicCheck = oldSuppressPanicCheck
 	g.stackUsed = oldStackUsed
+	g.stackPeak = oldStackPeak
 	g.gotoLabels = oldGotoLabels
 	g.lastRangeReturns = oldLastRangeReturns
 	return true
@@ -501,6 +505,21 @@ func rtgArmAsmAddRegImm(a *rtgAsm, dst int, src int, imm int) {
 	}
 	rtgArmAsmMovRegImm(a, tmp, imm)
 	rtgArmAsmAddRegReg(a, dst, src, tmp)
+}
+
+func rtgArmAsmFrameStart(a *rtgAsm) int {
+	at := len(a.code)
+	rtgArmAsmEmit(a, 0xe3009000) // movw r9, #0
+	rtgArmAsmEmit(a, 0xe04dd009) // sub sp, sp, r9
+	return at
+}
+
+func rtgArmAsmPatchFrame(a *rtgAsm, at int, stackUsed int) {
+	frame := rtgAlignTo8(stackUsed)
+	if frame > 65528 {
+		frame = 65528
+	}
+	rtgPut32At(a.code, at, 0xe3009000|((frame&0xf000)<<4)|(frame&0x0fff))
 }
 
 func rtgArmAsmAddRegSmallImm(a *rtgAsm, dst int, src int, imm int) {
