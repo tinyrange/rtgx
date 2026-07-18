@@ -5,61 +5,56 @@ import (
 	"j5.nz/rtg/rtg/internal/syntax"
 )
 
-func invalidDefiniteAssignmentType(file syntax.File, fn syntax.FuncDecl) int {
-	for i := fn.BodyStart + 2; i+1 < fn.BodyEnd; i++ {
-		if !tokenTextIs(&file, i, "=") || file.Tokens[i-1].Kind != syntax.TokenIdent {
-			continue
-		}
-		valueKind := definiteLiteralKind(file, i+1)
-		if valueKind == "" {
-			continue
-		}
-		name := tokenString(&file, i-1)
-		for j := i - 2; j >= fn.BodyStart+1; j-- {
-			if file.Tokens[j].Kind != syntax.TokenVar || j+2 >= i || file.Tokens[j+1].Kind != syntax.TokenIdent || tokenString(&file, j+1) != name {
-				continue
+func invalidDefiniteAssignmentType(pkg load.Package, info PackageInfo, fileIndex int, fn syntax.FuncDecl) int {
+	file := pkg.Files[fileIndex].File
+	for i := fn.BodyStart + 1; i+1 < fn.BodyEnd; i++ {
+		if tokenTextIs(&file, i, "=") && file.Tokens[i-1].Kind == syntax.TokenIdent {
+			valueKind := definiteLiteralKind(file, i+1)
+			if valueKind != "" {
+				name := tokenString(&file, i-1)
+				for j := i - 2; j >= fn.BodyStart+1; j-- {
+					if file.Tokens[j].Kind != syntax.TokenVar || j+2 >= i || file.Tokens[j+1].Kind != syntax.TokenIdent || tokenString(&file, j+1) != name {
+						continue
+					}
+					declared := tokenString(&file, j+2)
+					if definiteBuiltinType(declared) && declared != valueKind {
+						return i + 1
+					}
+					break
+				}
 			}
-			declared := tokenString(&file, j+2)
-			if definiteBuiltinType(declared) && declared != valueKind {
-				return i + 1
+		}
+		if file.Tokens[i].Kind == syntax.TokenVar && !tokCharIs(&file, i+1, '(') {
+			if invalid := invalidDefiniteInterfaceDecl(pkg, info, fileIndex, fn, i); invalid >= 0 {
+				return invalid
 			}
-			break
 		}
 	}
 	return -1
 }
 
-func invalidDefiniteInterfaceAssignment(pkg load.Package, info PackageInfo, fileIndex int, fn syntax.FuncDecl) int {
+func invalidDefiniteInterfaceDecl(pkg load.Package, info PackageInfo, fileIndex int, fn syntax.FuncDecl, at int) int {
 	file := pkg.Files[fileIndex].File
-	for i := fn.BodyStart + 1; i < fn.BodyEnd; i++ {
-		if file.Tokens[i].Kind != syntax.TokenVar || i+1 >= fn.BodyEnd || tokCharIs(&file, i+1, '(') {
-			continue
-		}
-		end := statementSpecEnd(file, i+1, fn.BodyEnd)
-		names, namesEnd := localDeclNameTokens(file, i+1, end)
-		assign := findDeclAssign(file, namesEnd, end)
-		if len(names) != 1 || assign < 0 {
-			continue
-		}
-		typeStart, typeEnd := trimDeclSpan(file, namesEnd, assign)
-		if typeEnd-typeStart != 1 || file.Tokens[typeStart].Kind != syntax.TokenIdent {
-			continue
-		}
-		interfaceType := LookupType(info, tokenString(&file, typeStart))
-		if interfaceType < 0 || info.Types[interfaceType].Kind != TypeInterface {
-			continue
-		}
-		valueStart, valueEnd := trimExprSpan(file, assign+1, end)
-		concreteName, pointer, ok := definiteCompositeType(file, valueStart, valueEnd)
-		if !ok {
-			continue
-		}
-		concreteType := LookupType(info, concreteName)
-		if concreteType >= 0 && !definiteTypeImplementsInterface(info, concreteType, pointer, interfaceType) {
-			return valueStart
-		}
+	end := statementSpecEnd(file, at+1, fn.BodyEnd)
+	names, namesEnd := localDeclNameTokens(file, at+1, end)
+	assign := findDeclAssign(file, namesEnd, end)
+	if len(names) != 1 || assign < 0 {
+		return -1
 	}
-	return -1
+	typeStart, typeEnd := trimDeclSpan(file, namesEnd, assign)
+	if typeEnd-typeStart != 1 || file.Tokens[typeStart].Kind != syntax.TokenIdent {
+		return -1
+	}
+	interfaceType := LookupType(info, tokenString(&file, typeStart))
+	if interfaceType < 0 || info.Types[interfaceType].Kind != TypeInterface {
+		return -1
+	}
+	valueStart, valueEnd := trimExprSpan(file, assign+1, end)
+	concreteName, pointer, ok := definiteCompositeType(file, valueStart, valueEnd)
+	if !ok || LookupType(info, concreteName) < 0 || definiteTypeImplementsInterface(pkg, info, concreteName, pointer, interfaceType) {
+		return -1
+	}
+	return valueStart
 }
 
 func definiteCompositeType(file syntax.File, start int, end int) (string, bool, bool) {
@@ -74,17 +69,18 @@ func definiteCompositeType(file syntax.File, start int, end int) (string, bool, 
 	return tokenString(&file, start), pointer, true
 }
 
-func definiteTypeImplementsInterface(info PackageInfo, concreteType int, pointer bool, interfaceType int) bool {
-	concrete := info.Types[concreteType]
+func definiteTypeImplementsInterface(pkg load.Package, info PackageInfo, concreteName string, pointer bool, interfaceType int) bool {
 	wanted := info.Types[interfaceType]
 	for i := 0; i < len(wanted.InterfaceMethods); i++ {
-		interfaceMethod := wanted.InterfaceMethods[i]
 		found := false
-		for j := 0; j < len(concrete.Methods); j++ {
-			method := info.Methods[concrete.Methods[j]]
-			if method.Name == interfaceMethod.Name && (pointer || !method.Pointer) {
-				found = true
-				break
+		for fileIndex := 0; fileIndex < len(pkg.Files) && !found; fileIndex++ {
+			file := pkg.Files[fileIndex].File
+			for funcIndex := 0; funcIndex < len(file.Funcs); funcIndex++ {
+				fn := file.Funcs[funcIndex]
+				if fn.ReceiverStart >= 0 && tokenString(&file, fn.NameTok) == wanted.InterfaceMethods[i].Name && definiteReceiverMatches(file, fn, concreteName, pointer) {
+					found = true
+					break
+				}
 			}
 		}
 		if !found {
@@ -92,6 +88,19 @@ func definiteTypeImplementsInterface(info PackageInfo, concreteType int, pointer
 		}
 	}
 	return true
+}
+
+func definiteReceiverMatches(file syntax.File, fn syntax.FuncDecl, concreteName string, pointer bool) bool {
+	receiver := ""
+	receiverPointer := false
+	for i := fn.ReceiverStart; i < fn.ReceiverEnd; i++ {
+		if tokCharIs(&file, i, '*') {
+			receiverPointer = true
+		} else if file.Tokens[i].Kind == syntax.TokenIdent {
+			receiver = tokenString(&file, i)
+		}
+	}
+	return receiver == concreteName && (pointer || !receiverPointer)
 }
 
 func excludedFileFeature(file syntax.File) (int, int) {

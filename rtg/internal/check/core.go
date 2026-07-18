@@ -89,7 +89,6 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 		}
 	}
 	sortTypes(info.Types)
-	buildMethodSetsCore(&info, pkg)
 	info.CoreTypeRefs = buildPackageTypeRefsCore(pkg, info, checked)
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
@@ -110,10 +109,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if returnTok := invalidReturnCount(file, fn, signature); returnTok >= 0 {
 				return info, false, CheckErrReturnCount, fileIndex, returnTok
 			}
-			if typeTok := invalidDefiniteAssignmentType(file, fn); typeTok >= 0 {
-				return info, false, CheckErrType, fileIndex, typeTok
-			}
-			if typeTok := invalidDefiniteInterfaceAssignment(pkg, info, fileIndex, fn); typeTok >= 0 {
+			if typeTok := invalidDefiniteAssignmentType(pkg, info, fileIndex, fn); typeTok >= 0 {
 				return info, false, CheckErrType, fileIndex, typeTok
 			}
 			if sliceTok := invalidDefiniteSliceOperand(pkg, info, fileIndex, fn); sliceTok >= 0 {
