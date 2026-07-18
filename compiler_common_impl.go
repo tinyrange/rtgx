@@ -11666,8 +11666,15 @@ func rtgFunctionValueCalleeType(g *rtgLinearGen, ep *rtgExprParse, idx int) int 
 	e := &ep.exprs[idx]
 	if e.kind == rtgExprSelector {
 		fnIndex, expression := rtgMethodSelectorInfo(g, ep, idx)
-		if fnIndex >= 0 && expression {
-			return rtgFunctionTypeFromInfoStart(g.meta, fnIndex, 0)
+		if fnIndex >= 0 {
+			if expression {
+				return rtgFunctionTypeFromInfoStart(g.meta, fnIndex, 0)
+			}
+			return 0
+		}
+		typ := rtgInferParsedExprType(g, ep, idx)
+		if typ != 0 && rtgResolveType(g.meta, typ).kind == rtgTypeFunc {
+			return typ
 		}
 		return 0
 	}
