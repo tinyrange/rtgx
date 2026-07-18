@@ -11,10 +11,29 @@ import (
 
 type RTGFS struct{}
 
+// Keep one capture buffer outside per-build arena marks. A failed frontend can
+// copy its diagnostic here before resetting all of its transient allocations.
+var rtgCommandDiagnosticBuffer [8192]byte
+
 func RunRTGCommand(args []string, env []string) int {
+	status, output := runRTGCommand(args, env)
+	if output != "" {
+		print(output)
+	}
+	return status
+}
+
+// RunRTGCommandCapture runs the embedded compiler without sending its
+// diagnostic to the parent terminal. GUI callers use the returned text in
+// their own output surface.
+func RunRTGCommandCapture(args []string, env []string) (int, string) {
+	status, output := runRTGCommand(args, env)
+	return status, output
+}
+
+func runRTGCommand(args []string, env []string) (int, string) {
 	if CommandHelpRequested(args) {
-		print(HelpText)
-		return 0
+		return 0, HelpText
 	}
 	commandArgs := args
 	if len(commandArgs) > 0 {
@@ -27,11 +46,7 @@ func RunRTGCommand(args []string, env []string) int {
 	}
 	built := buildFromFSCompactWithModuleCache(commandArgs, rtgWorkDir(env), rtgStdRoot(args, env), rtgEnvValue(env, "RTG_MODCACHE"), RTGFS{})
 	if !built.Ok {
-		printRTGDiagnostic(built.Diagnostic)
-		if resetArena {
-			arena.Reset(mark)
-		}
-		return 1
+		return finishRTGCommandFailure(rtgCommandDiagnosticBuffer[:], built.Diagnostic, resetArena, mark)
 	}
 	unit := built.Unit
 	target := built.Options.Target
@@ -40,20 +55,15 @@ func RunRTGCommand(args []string, env []string) int {
 	windowsGUI := built.Options.WindowsGUI
 	arenaSize := built.Options.ArenaSize
 	if built.Options.EmitUnit {
-		ok := true
 		if output == "-" {
 			print(string(unit))
 		} else if os.WriteFile(output, unit, 0644) != nil {
-			printRTGDiagnostic(Diagnostic{Phase: "unit", Code: "RTG-UNIT-002", Message: "failed to write linked unit"})
-			ok = false
+			return finishRTGCommandFailure(rtgCommandDiagnosticBuffer[:], Diagnostic{Phase: "unit", Code: "RTG-UNIT-002", Message: "failed to write linked unit"}, resetArena, mark)
 		}
 		if resetArena {
 			arena.Reset(mark)
 		}
-		if !ok {
-			return 1
-		}
-		return 0
+		return 0, ""
 	}
 	persistMark := 0
 	if resetArena {
@@ -73,10 +83,27 @@ func RunRTGCommand(args []string, env []string) int {
 		arena.PersistReset(persistMark)
 	}
 	if !ok {
-		printRTGDiagnostic(Diagnostic{Phase: "backend", Code: "RTG-BACKEND-001", Message: "backend compilation failed"})
-		return 1
+		return finishRTGCommandFailure(rtgCommandDiagnosticBuffer[:], Diagnostic{Phase: "backend", Code: "RTG-BACKEND-001", Message: "backend compilation failed"}, false, 0)
 	}
-	return 0
+	return 0, ""
+}
+
+func finishRTGCommandFailure(buffer []byte, diagnostic Diagnostic, resetArena bool, mark int) (int, string) {
+	formatted := FormatDiagnostic(diagnostic)
+	used := len(formatted)
+	if used > len(buffer) {
+		used = len(buffer)
+	}
+	for i := 0; i < used; i++ {
+		buffer[i] = formatted[i]
+	}
+	if used == len(buffer) && used > 0 {
+		buffer[used-1] = '\n'
+	}
+	if resetArena {
+		arena.Reset(mark)
+	}
+	return 1, string(buffer[:used])
 }
 
 func rtgWorkDir(env []string) string {
