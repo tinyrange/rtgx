@@ -1172,51 +1172,31 @@ func rtgAsmPatchWindows(a *rtgAsm, layout rtgWinImportLayout, imageBase int, is6
 	}
 }
 
-func rtgAppendPEHeader64(out []byte, entryRVA int, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
-	return rtgAppendPEHeader64MachineImageBaseStack(out, 0x8664, rtgWinImageBase, entryRVA, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, importRVA, importSize, iatRVA, iatSize, 0x100000, 0x100000)
-}
-
 func rtgAppendPEHeader64MachineImageBaseStack(out []byte, machine int, imageBase int, entryRVA int, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int, stackReserve int, stackCommit int) []byte {
 	sizeOfImage := rtgAlignValue(dataRVA+dataVirtualSize, rtgWinSectionAlign)
 	out = rtgAppendDOSStub(out)
-	out = rtgAppend32(out, 0x4550)
-	out = rtgAppend32(out, 0x00020000|machine)
-	out = rtgAppendUntil(out, len(out)+12)
-	out = rtgAppend32(out, 0x002200f0)
-	out = rtgAppend32(out, 0x0001020b)
-	out = rtgAppend32(out, textRawSize)
-	out = rtgAppend32(out, dataRawSize)
-	out = rtgAppend32(out, 0)
-	out = rtgAppend32(out, entryRVA)
-	out = rtgAppend32(out, rtgWinSectionRVA)
-	out = rtgAppend64(out, imageBase)
-	out = rtgAppend32(out, rtgWinSectionAlign)
-	out = rtgAppend32(out, rtgWinFileAlign)
-	out = rtgAppend64U32(out, 4)
-	out = rtgAppend64U32(out, 4)
-	out = rtgAppend32(out, sizeOfImage)
-	out = rtgAppend32(out, rtgWinHeadersSize)
-	out = rtgAppend32(out, 0)
-	out = rtgAppend32(out, rtgCompilerWindowsSubsystem)
-	out = rtgAppend64U32(out, stackReserve)
-	out = rtgAppend64U32(out, stackCommit)
-	out = rtgAppend64U32(out, 0x100000)
-	out = rtgAppend64U32(out, 0x1000)
-	out = rtgAppend32(out, 0)
-	out = rtgAppend32(out, 16)
-	out = rtgAppendUntil(out, len(out)+8)
-	out = rtgAppend32(out, importRVA)
-	out = rtgAppend32(out, importSize)
-	for i := 2; i < 12; i++ {
-		out = rtgAppend32(out, 0)
-		out = rtgAppend32(out, 0)
-	}
-	out = rtgAppend32(out, iatRVA)
-	out = rtgAppend32(out, iatSize)
-	for i := 13; i < 16; i++ {
-		out = rtgAppend32(out, 0)
-		out = rtgAppend32(out, 0)
-	}
+	pe := len(out)
+	// Start with the invariant COFF and PE32+ fields. The zero placeholders are
+	// patched below; representing the fixed layout as data keeps fixed-target
+	// Windows compilers within the binary-size budget.
+	out = rtgAppendStringZ(out, "\x50\x45\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xf0\x00\x22\x00\x0b\x02\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x02\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00")
+	out = out[:len(out)-1]
+	out = rtgAppendUntil(out, pe+24+240)
+	rtgPut32At(out, pe+4, 0x00020000|machine)
+	opt := pe + 24
+	rtgPut32At(out, opt+4, textRawSize)
+	rtgPut32At(out, opt+8, dataRawSize)
+	rtgPut32At(out, opt+16, entryRVA)
+	rtgPut32At(out, opt+24, imageBase)
+	rtgPut32At(out, opt+28, imageBase>>32)
+	rtgPut32At(out, opt+56, sizeOfImage)
+	rtgPut32At(out, opt+68, rtgCompilerWindowsSubsystem)
+	rtgPut32At(out, opt+72, stackReserve)
+	rtgPut32At(out, opt+80, stackCommit)
+	rtgPut32At(out, opt+120, importRVA)
+	rtgPut32At(out, opt+124, importSize)
+	rtgPut32At(out, opt+208, iatRVA)
+	rtgPut32At(out, opt+212, iatSize)
 	out = rtgAppendPESection(out, ".text", textVirtualSize, rtgWinSectionRVA, textRawSize, rtgWinHeadersSize, 0x60000020)
 	out = rtgAppendPESection(out, ".data", dataVirtualSize, dataRVA, dataRawSize, rtgWinHeadersSize+textRawSize, 0xc0000040)
 	out = rtgAppendUntil(out, rtgWinHeadersSize)
@@ -5619,6 +5599,7 @@ func rtgBindFunctionParams(g *rtgLinearGen, fnIndex int) bool {
 		}
 		callWord++
 	}
+	rtgMoveCapturedLocals(g, true)
 	return true
 }
 
@@ -5633,35 +5614,21 @@ func rtgBindClosureCaptures(g *rtgLinearGen, fnIndex int) bool {
 	}
 	for i := 0; i < info.captureCount; i++ {
 		capture := &g.meta.captures[info.firstCapture+i]
-		resolved := rtgResolveType(g.meta, capture.typ)
-		if !rtgTypeKindIsScalarValue(resolved.kind) && resolved.kind != rtgTypePointer && resolved.kind != rtgTypeMap && resolved.kind != rtgTypeFunc {
-			return false
-		}
-		offset := rtgAddTypedLocal(g, capture.nameStart, capture.nameEnd, capture.typ)
+		g.stackUsed = rtgAlignTo8(g.stackUsed + rtgBackendValueSlotSize)
+		captureOff := g.stackUsed
+		g.bindingClosureCaptures = true
+		rtgAddTypedLocal(g, capture.nameStart, capture.nameEnd, capture.typ)
+		g.bindingClosureCaptures = false
+		g.locals[g.localCount-1].captureOff = captureOff
 		rtgAsmLoadPrimaryStackMemory(&g.asm, g.closureEnvOffset, (i+1)*rtgBackendValueSlotSize)
-		rtgAsmStorePrimaryStack(&g.asm, offset)
+		rtgAsmStorePrimaryStack(&g.asm, captureOff)
+		rtgMoveCapturedLocal(g, g.localCount-1, false)
 	}
 	return true
 }
 
 func rtgEmitClosureCaptureWriteback(g *rtgLinearGen) bool {
-	closureIndex := rtgClosureIndexByFunction(g.meta, g.currentFunc)
-	if closureIndex < 0 {
-		return true
-	}
-	info := &g.meta.closures[closureIndex]
-	if !info.ready || g.closureEnvOffset <= 0 {
-		return false
-	}
-	for i := 0; i < info.captureCount; i++ {
-		capture := &g.meta.captures[info.firstCapture+i]
-		localIndex := rtgFindLocalIndex(g, capture.nameStart, capture.nameEnd)
-		if localIndex < 0 {
-			return false
-		}
-		rtgAsmLoadPrimarySecondaryStack(&g.asm, g.locals[localIndex].offset, g.closureEnvOffset)
-		rtgAsmStorePrimaryMemSecondaryDisp(&g.asm, (i+1)*rtgBackendValueSlotSize)
-	}
+	rtgMoveCapturedLocals(g, true)
 	return true
 }
 
@@ -5687,6 +5654,7 @@ func rtgBindNamedResults(g *rtgLinearGen, fnIndex int) bool {
 		offset := rtgAddTypedLocal(g, result.nameStart, result.nameEnd, result.typ)
 		rtgZeroLocalAtOffset(g, offset)
 	}
+	rtgMoveCapturedLocals(g, true)
 	return true
 }
 
@@ -6589,6 +6557,7 @@ type rtgLocalInfo struct {
 	nameEnd    int
 	nameHash   int
 	offset     int
+	captureOff int
 	typ        int
 	size       int
 	constValue int
@@ -6623,6 +6592,7 @@ type rtgLinearGen struct {
 	currentFunc               int
 	returnStruct              int
 	closureEnvOffset          int
+	bindingClosureCaptures    bool
 	deferHeadOffset           int
 	deferReturnLabel          int
 	deferResultOffset         int
@@ -6786,7 +6756,41 @@ func rtgEmitScopedRange(g *rtgLinearGen, start int, end int) bool {
 	g.stackUsed = oldStackUsed
 	return ok
 }
+func rtgSyncCapturedStmtTargets(g *rtgLinearGen, stmt *rtgStmt) {
+	lhsStart := stmt.startTok
+	lhsEnd := -1
+	if stmt.kind == rtgStmtVar || stmt.kind == rtgStmtShort || stmt.kind == rtgStmtAssign {
+		lhsEnd = rtgFindAssignmentToken(g.prog, stmt.startTok, stmt.endTok)
+		if lhsEnd <= stmt.startTok && stmt.kind == rtgStmtVar {
+			lhsEnd = stmt.endTok
+		}
+	} else if stmt.kind == rtgStmtExpr && stmt.endTok > stmt.startTok && (rtgTok2Is(g.prog, stmt.endTok-1, '+', '+') || rtgTok2Is(g.prog, stmt.endTok-1, '-', '-')) {
+		lhsEnd = stmt.endTok - 1
+	}
+	if lhsEnd <= lhsStart {
+		return
+	}
+	for tok := lhsStart; tok < lhsEnd; tok++ {
+		if !rtgTokIsKind(g.prog, tok, rtgTokIdent) {
+			continue
+		}
+		localIndex := rtgFindLocalIndex(g, int(rtgTokStart(g.prog, tok)), int(rtgTokEnd(g.prog, tok)))
+		if localIndex >= 0 {
+			rtgMoveCapturedLocal(g, localIndex, true)
+		}
+	}
+}
+
 func rtgEmitLinearStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
+	rtgMoveCapturedLocals(g, false)
+	if !rtgEmitLinearStmtCore(g, stmt) {
+		return false
+	}
+	rtgSyncCapturedStmtTargets(g, stmt)
+	return true
+}
+
+func rtgEmitLinearStmtCore(g *rtgLinearGen, stmt *rtgStmt) bool {
 	a := &g.asm
 	p := g.prog
 	if stmt.kind != rtgStmtLabel && stmt.kind != rtgStmtFor && stmt.kind != rtgStmtSwitch {
@@ -7454,6 +7458,7 @@ func rtgEmitLinearRangeForScoped(g *rtgLinearGen, stmt *rtgStmt, rangeTok int) b
 
 	keyOffset := 0
 	valueOffset := 0
+	rangeShort := false
 	if rangeTok > stmt.exprStart {
 		assignTok := rtgFindAssignmentToken(p, stmt.exprStart, rangeTok)
 		if assignTok < stmt.exprStart || assignTok >= rangeTok {
@@ -7463,7 +7468,7 @@ func rtgEmitLinearRangeForScoped(g *rtgLinearGen, stmt *rtgStmt, rangeTok int) b
 		if !ok || len(targets) < 2 || len(targets) > 4 {
 			return false
 		}
-		short := rtgTok2Is(p, assignTok, ':', '=')
+		rangeShort = rtgTok2Is(p, assignTok, ':', '=')
 		keyType := rtgTypeInt
 		valueType := resolved.elem
 		if resolved.kind == rtgTypeMap {
@@ -7471,12 +7476,12 @@ func rtgEmitLinearRangeForScoped(g *rtgLinearGen, stmt *rtgStmt, rangeTok int) b
 		} else if resolved.kind == rtgTypeString {
 			valueType = rtgTypeInt32
 		}
-		keyOffset = rtgRangeTargetOffset(g, targets[0], targets[1], keyType, short)
+		keyOffset = rtgRangeTargetOffset(g, targets[0], targets[1], keyType, rangeShort)
 		if keyOffset < 0 {
 			return false
 		}
 		if len(targets) == 4 {
-			valueOffset = rtgRangeTargetOffset(g, targets[2], targets[3], valueType, short)
+			valueOffset = rtgRangeTargetOffset(g, targets[2], targets[3], valueType, rangeShort)
 			if valueOffset < 0 {
 				return false
 			}
@@ -7498,6 +7503,13 @@ func rtgEmitLinearRangeForScoped(g *rtgLinearGen, stmt *rtgStmt, rangeTok int) b
 	rtgAsmPopTertiary(a)
 	rtgAsmCmpTertiaryPrimarySet(a, 0x9d)
 	rtgAsmJnzPrimary(a, endLabel)
+	if rangeShort {
+		for localIndex := 0; localIndex < g.localCount; localIndex++ {
+			if g.locals[localIndex].offset == keyOffset || g.locals[localIndex].offset == valueOffset {
+				rtgRebindCapturedLocal(g, localIndex)
+			}
+		}
+	}
 	if keyOffset > 0 && resolved.kind != rtgTypeMap {
 		rtgAsmCopyStackSlot(a, indexOffset, keyOffset)
 	}
@@ -7535,6 +7547,11 @@ func rtgEmitLinearRangeForScoped(g *rtgLinearGen, stmt *rtgStmt, rangeTok int) b
 		rtgAsmCopyPrimaryToSecondary(a)
 		rtgAsmAddSecondaryTertiary(a)
 		rtgEmitCopyMemSecondaryToStack(g, valueOffset, elemSize)
+	}
+	for localIndex := 0; localIndex < g.localCount; localIndex++ {
+		if g.locals[localIndex].offset == keyOffset || g.locals[localIndex].offset == valueOffset {
+			rtgMoveCapturedLocal(g, localIndex, true)
+		}
 	}
 	if !rtgEmitScopedRange(g, stmt.bodyStart, stmt.bodyEnd) {
 		return false
@@ -7939,6 +7956,9 @@ func rtgEmitLinearClassicForScoped(g *rtgLinearGen, stmt *rtgStmt, semi1 int) bo
 	if semi2 <= semi1 {
 		return false
 	}
+	loopLocalBase := g.localCount
+	initAssign := rtgFindAssignmentToken(p, stmt.exprStart, semi1)
+	perIterationLocals := initAssign >= stmt.exprStart && rtgTok2Is(p, initAssign, ':', '=')
 	if !rtgEmitLinearSimpleRange(g, stmt.exprStart, semi1) {
 		return false
 	}
@@ -7962,6 +7982,11 @@ func rtgEmitLinearClassicForScoped(g *rtgLinearGen, stmt *rtgStmt, semi1 int) bo
 		return false
 	}
 	rtgAsmMarkLabel(a, postLabel)
+	if perIterationLocals {
+		for localIndex := loopLocalBase; localIndex < g.localCount; localIndex++ {
+			rtgRebindCapturedLocal(g, localIndex)
+		}
+	}
 	if !rtgEmitLinearSimpleRange(g, semi2+1, stmt.exprEnd) {
 		return false
 	}
@@ -7975,6 +8000,7 @@ func rtgEmitLinearSimpleRange(g *rtgLinearGen, start int, end int) bool {
 		return true
 	}
 	if rtgEmitLinearIncDec(g, start, end) {
+		rtgSyncCapturedStmtTargets(g, &rtgStmt{kind: rtgStmtExpr, startTok: start, endTok: end})
 		return true
 	}
 	assignTok := rtgFindAssignmentToken(p, start, end)
@@ -7990,7 +8016,12 @@ func rtgEmitLinearSimpleRange(g *rtgLinearGen, start int, end int) bool {
 			nameEnd = int(rtgTokEnd(p, start))
 		}
 		stmt := rtgStmt{kind: kind, startTok: start, endTok: end, exprStart: assignTok + 1, exprEnd: end, nameStart: nameStart, nameEnd: nameEnd}
-		return rtgEmitLinearAssign(g, &stmt)
+		rtgMoveCapturedLocals(g, false)
+		if !rtgEmitLinearAssign(g, &stmt) {
+			return false
+		}
+		rtgSyncCapturedStmtTargets(g, &stmt)
+		return true
 	}
 	return false
 }
@@ -11532,6 +11563,22 @@ func rtgEmitFunctionValueDispatch(g *rtgLinearGen, funcType int, handleOffset in
 		if !direct && !closure {
 			continue
 		}
+		if mode == rtgFunctionValueClosure {
+			closureIndex := rtgClosureIndexByFunction(g.meta, fnIndex)
+			if closureIndex >= 0 && !g.meta.closures[closureIndex].ready {
+				literalTok := g.meta.funcs[fnIndex].literalTok
+				parentReady := true
+				for parent := 0; parent < len(g.meta.funcs); parent++ {
+					fn := &g.meta.funcs[parent]
+					if parent != fnIndex && literalTok >= fn.bodyStart && literalTok < fn.bodyEnd && (parent >= len(g.funcReachable) || !g.funcReachable[parent]) {
+						parentReady = false
+					}
+				}
+				if !parentReady {
+					continue
+				}
+			}
+		}
 		matched = true
 		compareOffset := handleOffset
 		if closure {
@@ -11572,8 +11619,14 @@ func rtgEmitFunctionValueDispatch(g *rtgLinearGen, funcType int, handleOffset in
 			rtgAsmStorePrimaryBss(&g.asm, g.panicDeferPendingOff)
 		}
 		g.suppressPanicCheck = oldSuppress
-		if mode == rtgFunctionValueClosure && !rtgReloadClosureCaptures(g, fnIndex, handleOffset) {
-			return false
+		if mode == rtgFunctionValueClosure {
+			rtgAsmPushSliceRegs(&g.asm)
+			if !rtgReloadClosureCaptures(g, fnIndex, handleOffset) {
+				return false
+			}
+			rtgAsmPopPrimary(&g.asm)
+			rtgAsmPopSecondary(&g.asm)
+			rtgAsmPopTertiary(&g.asm)
 		}
 		if !g.emittingDefers {
 			rtgEmitPostCallPanicCheck(g)
@@ -11590,7 +11643,7 @@ func rtgEmitFunctionValueDispatch(g *rtgLinearGen, funcType int, handleOffset in
 	return true
 }
 
-func rtgReloadClosureCaptures(g *rtgLinearGen, fnIndex int, handleOffset int) bool {
+func rtgReloadClosureCaptures(g *rtgLinearGen, fnIndex int, _ int) bool {
 	closureIndex := rtgClosureIndexByFunction(g.meta, fnIndex)
 	if closureIndex < 0 {
 		return true
@@ -11609,8 +11662,7 @@ func rtgReloadClosureCaptures(g *rtgLinearGen, fnIndex int, handleOffset int) bo
 		if localIndex < 0 {
 			continue
 		}
-		rtgAsmLoadPrimaryStackMemory(&g.asm, handleOffset, (i+1)*rtgBackendValueSlotSize)
-		rtgAsmStorePrimaryStack(&g.asm, g.locals[localIndex].offset)
+		rtgMoveCapturedLocal(g, localIndex, false)
 	}
 	return true
 }
@@ -14566,10 +14618,37 @@ func rtgFindSmallConstByName(g *rtgLinearGen, nameStart int, nameEnd int) int {
 	}
 	return -129
 }
+
+func rtgLocalCapturedInCurrentFunction(g *rtgLinearGen, nameStart int, nameEnd int) bool {
+	if g.bindingClosureCaptures || nameEnd <= nameStart {
+		return false
+	}
+	outer := &g.meta.funcs[g.currentFunc]
+	for i := 0; i < len(g.meta.closures); i++ {
+		fnIndex := g.meta.closures[i].fnIndex
+		closure := &g.meta.funcs[fnIndex]
+		if closure.literalTok < outer.bodyStart || closure.literalTok >= outer.bodyEnd || rtgClosureNameDeclared(g.meta, closure, nameStart, nameEnd) {
+			continue
+		}
+		for tok := closure.bodyStart; tok < closure.bodyEnd; tok++ {
+			if rtgTokIsKind(g.prog, tok, rtgTokIdent) && rtgBytesEqualRange(g.prog.src, nameStart, nameEnd, int(rtgTokStart(g.prog, tok)), int(rtgTokEnd(g.prog, tok))) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func rtgAddTypedLocal(g *rtgLinearGen, nameStart int, nameEnd int, typ int) int {
 	size := rtgTypeSize(g.meta, typ)
 	if size < rtgBackendValueSlotSize {
 		size = rtgBackendValueSlotSize
+	}
+	captureOff := 0
+	if rtgLocalCapturedInCurrentFunction(g, nameStart, nameEnd) {
+		g.stackUsed = rtgAlignTo8(g.stackUsed + rtgBackendValueSlotSize)
+		captureOff = g.stackUsed
+		rtgAllocateCapturedCell(g, captureOff, size)
 	}
 	g.stackUsed = rtgAlignTo8(g.stackUsed + size)
 	offset := g.stackUsed
@@ -14580,7 +14659,7 @@ func rtgAddTypedLocal(g *rtgLinearGen, nameStart int, nameEnd int, typ int) int 
 	if nameEnd > nameStart {
 		nameHash = rtgHashRange(g.prog.src, nameStart, nameEnd)
 	}
-	g.locals[g.localCount] = rtgLocalInfo{nameStart: nameStart, nameEnd: nameEnd, nameHash: nameHash, offset: offset, typ: typ, size: size}
+	g.locals[g.localCount] = rtgLocalInfo{nameStart: nameStart, nameEnd: nameEnd, nameHash: nameHash, offset: offset, captureOff: captureOff, typ: typ, size: size}
 	g.localCount++
 	return offset
 }
@@ -14599,6 +14678,40 @@ func rtgGrowLocalTable(g *rtgLinearGen) {
 		newLocals[i] = g.locals[i]
 	}
 	g.locals = newLocals
+}
+
+func rtgMoveCapturedLocal(g *rtgLinearGen, localIndex int, toCell bool) {
+	if localIndex < 0 || localIndex >= g.localCount || g.locals[localIndex].captureOff <= 0 {
+		return
+	}
+	local := &g.locals[localIndex]
+	rtgAsmLoadSecondaryStack(&g.asm, local.captureOff)
+	if toCell {
+		rtgEmitCopyStackToMemSecondary(g, local.offset, 0, local.size)
+	} else {
+		rtgEmitCopyMemSecondaryToStack(g, local.offset, local.size)
+	}
+}
+
+func rtgAllocateCapturedCell(g *rtgLinearGen, captureOff int, size int) {
+	rtgAsmStoreStackImm(&g.asm, captureOff, size)
+	rtgEmitPersistentAllocToPrimary(g, captureOff)
+	rtgAsmStorePrimaryStack(&g.asm, captureOff)
+}
+
+func rtgRebindCapturedLocal(g *rtgLinearGen, localIndex int) {
+	if localIndex < 0 || localIndex >= g.localCount || g.locals[localIndex].captureOff <= 0 {
+		return
+	}
+	local := &g.locals[localIndex]
+	rtgAllocateCapturedCell(g, local.captureOff, local.size)
+	rtgMoveCapturedLocal(g, localIndex, true)
+}
+
+func rtgMoveCapturedLocals(g *rtgLinearGen, toCell bool) {
+	for i := 0; i < g.localCount; i++ {
+		rtgMoveCapturedLocal(g, i, toCell)
+	}
 }
 
 func rtgZeroLocalAtOffset(g *rtgLinearGen, offset int) {
@@ -14910,10 +15023,13 @@ func rtgEmitScalarFunctionScratch(g *rtgLinearGen, fnInfoIndex int) bool {
 	persistentCapacity := rtgLinearPersistentCapacity(g)
 	typeCount := len(g.meta.types)
 	fieldCount := len(g.meta.fields)
+	captureCount := len(g.meta.captures)
 	mark := rtg_runtime_ArenaMark()
 	ok := rtgEmitScalarFunction(g, fnInfoIndex)
-	g.meta.types = g.meta.types[:typeCount]
-	g.meta.fields = g.meta.fields[:fieldCount]
+	if len(g.meta.captures) == captureCount {
+		g.meta.types = g.meta.types[:typeCount]
+		g.meta.fields = g.meta.fields[:fieldCount]
+	}
 	if persistentCapacity == rtgLinearPersistentCapacity(g) {
 		rtg_runtime_ArenaReset(mark)
 	}
@@ -16842,10 +16958,11 @@ func rtgEmitClosureValuePrimary(g *rtgLinearGen, literalTok int) bool {
 	for i := 0; i < info.captureCount; i++ {
 		capture := &g.meta.captures[info.firstCapture+i]
 		localIndex := rtgFindLocalIndex(g, capture.nameStart, capture.nameEnd)
-		if localIndex < 0 {
+		if localIndex < 0 || g.locals[localIndex].captureOff <= 0 {
 			return false
 		}
-		rtgAsmLoadPrimarySecondaryStack(&g.asm, g.locals[localIndex].offset, addrOffset)
+		rtgMoveCapturedLocal(g, localIndex, true)
+		rtgAsmLoadPrimarySecondaryStack(&g.asm, g.locals[localIndex].captureOff, addrOffset)
 		rtgAsmStorePrimaryMemSecondaryDisp(&g.asm, (i+1)*rtgBackendValueSlotSize)
 	}
 	rtgAsmLoadPrimaryStack(&g.asm, addrOffset)
@@ -16879,10 +16996,6 @@ func rtgPrepareClosureCaptures(g *rtgLinearGen, closureIndex int) bool {
 		}
 		if !used {
 			continue
-		}
-		resolved := rtgResolveType(g.meta, local.typ)
-		if !rtgTypeKindIsScalarValue(resolved.kind) && resolved.kind != rtgTypePointer && resolved.kind != rtgTypeMap && resolved.kind != rtgTypeFunc {
-			return false
 		}
 		g.meta.captures = append(g.meta.captures, rtgSymbolInfo{nameStart: local.nameStart, nameEnd: local.nameEnd, typ: local.typ})
 	}
