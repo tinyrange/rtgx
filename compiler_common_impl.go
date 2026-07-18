@@ -2225,32 +2225,6 @@ func rtgBytesEqualText(src []byte, start int, end int, text string) bool {
 	return true
 }
 
-func rtgBytesEqualRuntimeName(src []byte, start int, end int, text string) bool {
-	if rtgBytesEqualText(src, start, end, text) {
-		return true
-	}
-	// The frontend prefixes package-owned symbols as rtgp<index>_. Runtime
-	// intrinsics keep their semantics when the compiler/runtime is embedded as
-	// a library rather than built as package main.
-	if start < 0 || end > len(src) || end-start <= len(text)+5 {
-		return false
-	}
-	if src[start] != 'r' || src[start+1] != 't' || src[start+2] != 'g' || src[start+3] != 'p' {
-		return false
-	}
-	i := start + 4
-	if i >= end || src[i] < '0' || src[i] > '9' {
-		return false
-	}
-	for i < end && src[i] >= '0' && src[i] <= '9' {
-		i++
-	}
-	if i >= end || src[i] != '_' || end-(i+1) != len(text) {
-		return false
-	}
-	return rtgBytesEqualText(src, i+1, end, text)
-}
-
 func rtgHexDigitValue(ch byte) int {
 	if ch >= '0' && ch <= '9' {
 		return int(ch - '0')
@@ -10650,7 +10624,7 @@ func rtgReturnedSliceCanReuseDescriptor(g *rtgLinearGen, ep *rtgExprParse, idx i
 		fnIndex := rtgFuncInfoFromCall(g, ep, e.left)
 		if fnIndex >= 0 && fnIndex < len(g.meta.funcs) {
 			fn := &g.meta.funcs[fnIndex]
-			if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistBytes") {
+			if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistBytes") {
 				return true
 			}
 			return rtgCallSliceResultCanReuseDescriptor(g, ep, idx, fnIndex)
@@ -11118,13 +11092,6 @@ func rtgEmitSliceLiteralBacking(g *rtgLinearGen, ep *rtgExprParse, idx int, slic
 			rtgAsmPrimaryBssAddr(a, backingOff)
 			rtgAsmCopyPrimaryToSecondary(a)
 			rtgAsmPopStoreStringMemSecondary(a, disp)
-			continue
-		}
-		if elemResolved.kind == rtgTypeSlice {
-			if !rtgEmitSliceValueRegs(g, ep, field.expr) {
-				return false
-			}
-			rtgAsmStoreSliceBss(a, backingOff+disp)
 			continue
 		}
 		if elemResolved.kind == rtgTypeInterface {
@@ -11697,36 +11664,31 @@ func rtgEmitUserCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 
 func rtgFunctionValueCalleeType(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 	e := &ep.exprs[idx]
+	typ := 0
 	if e.kind == rtgExprSelector {
 		fnIndex, expression := rtgMethodSelectorInfo(g, ep, idx)
 		if fnIndex >= 0 {
-			if expression {
-				return rtgFunctionTypeFromInfoStart(g.meta, fnIndex, 0)
+			if !expression {
+				return 0
 			}
+			return rtgFunctionTypeFromInfoStart(g.meta, fnIndex, 0)
+		}
+		typ = rtgInferParsedExprType(g, ep, idx)
+	} else {
+		if e.kind != rtgExprIdent {
 			return 0
 		}
-		typ := rtgInferParsedExprType(g, ep, idx)
-		if typ != 0 && rtgResolveType(g.meta, typ).kind == rtgTypeFunc {
-			return typ
+		localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
+		if localIndex >= 0 {
+			typ = g.locals[localIndex].typ
+		} else {
+			typ = rtgFindGlobalType(g, e.nameStart, e.nameEnd)
 		}
+	}
+	if rtgResolveType(g.meta, typ).kind != rtgTypeFunc {
 		return 0
 	}
-	if e.kind != rtgExprIdent {
-		return 0
-	}
-	localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
-	if localIndex >= 0 {
-		typ := g.locals[localIndex].typ
-		if rtgResolveType(g.meta, typ).kind == rtgTypeFunc {
-			return typ
-		}
-		return 0
-	}
-	typ := rtgFindGlobalType(g, e.nameStart, e.nameEnd)
-	if typ != 0 && rtgResolveType(g.meta, typ).kind == rtgTypeFunc {
-		return typ
-	}
-	return 0
+	return typ
 }
 
 func rtgMethodSelectorInfo(g *rtgLinearGen, ep *rtgExprParse, idx int) (int, bool) {
@@ -12075,28 +12037,28 @@ func rtgReloadClosureCaptures(g *rtgLinearGen, fnIndex int, _ int) bool {
 }
 
 func rtgEmitRuntimeArenaCall(g *rtgLinearGen, ep *rtgExprParse, idx int, fn *rtgFuncInfo) bool {
-	if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_Exit") {
+	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_Exit") {
 		return rtgEmitRuntimeExit(g, ep, idx)
 	}
-	if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaMark") {
+	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaMark") {
 		return rtgEmitRuntimeArenaMark(g, ep, idx)
 	}
-	if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaReset") {
+	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaReset") {
 		return rtgEmitRuntimeArenaReset(g, ep, idx)
 	}
-	if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistMark") {
+	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistMark") {
 		return rtgEmitRuntimeArenaPersistMark(g, ep, idx)
 	}
-	if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistReset") {
+	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistReset") {
 		return rtgEmitRuntimeArenaPersistReset(g, ep, idx)
 	}
-	if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistString") {
+	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistString") {
 		return rtgEmitRuntimeArenaPersistString(g, ep, idx)
 	}
-	if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistBytes") {
+	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistBytes") {
 		return rtgEmitRuntimeArenaPersistBytes(g, ep, idx)
 	}
-	if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaDiscard") {
+	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaDiscard") {
 		return rtgEmitRuntimeArenaDiscard(g, ep, idx)
 	}
 	return false
@@ -14346,16 +14308,8 @@ func rtgEmitSlicePtrLen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		return true
 	}
 	if e.kind == rtgExprIndex {
-		valueType := rtgInferParsedExprType(g, ep, idx)
-		valueKind := rtgResolveType(meta, valueType).kind
-		if valueKind == rtgTypeSlice {
-			if !rtgEmitSliceValueRegs(g, ep, idx) {
-				return false
-			}
-		} else {
-			if valueKind != rtgTypeString || !rtgEmitStringValueRegs(g, ep, idx) {
-				return false
-			}
+		if !rtgEmitSliceValueRegs(g, ep, idx) && !rtgEmitStringValueRegs(g, ep, idx) {
+			return false
 		}
 		rtgAsmCopySecondaryToTertiary(a)
 		return true
