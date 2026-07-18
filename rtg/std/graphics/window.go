@@ -70,6 +70,7 @@ const (
 	KeyPageDown
 	KeyA
 	KeyC
+	KeyI
 	KeyS
 	KeyV
 	KeyX
@@ -161,6 +162,7 @@ type Window struct {
 	closed         bool
 	active         bool
 	shown          bool
+	wasVisible     bool
 	focused        bool
 	captured       bool
 	pointerInside  bool
@@ -246,6 +248,9 @@ func windowsKeyFromVirtual(key int) Key {
 	if key == 67 {
 		return KeyC
 	}
+	if key == 73 {
+		return KeyI
+	}
 	if key == 83 {
 		return KeyS
 	}
@@ -312,6 +317,9 @@ func darwinKeyFromCode(key int) Key {
 	}
 	if key == 8 {
 		return KeyC
+	}
+	if key == 34 {
+		return KeyI
 	}
 	if key == 1 {
 		return KeyS

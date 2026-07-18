@@ -78,6 +78,19 @@ func TestPaintClipsControlsToInvalidRegions(t *testing.T) {
 	}
 }
 
+func TestFormPaintBackgroundOverridesDefaultDrawing(t *testing.T) {
+	var form Form
+	form.Initialize(80, 50)
+	painted := 0
+	form.PaintBackground = func(surface *graphics.Surface) {
+		painted++
+		surface.FillRect(graphics.R(0, 0, 80, 50), graphics.RGBA(12, 34, 56, 255))
+	}
+	if !form.Paint(graphics.NewSurface(80, 50)) || painted != 1 {
+		t.Fatalf("custom background paint count = %d", painted)
+	}
+}
+
 func TestGeneratedStyleEventWiringDispatchesToFocusedControl(t *testing.T) {
 	var form Form
 	form.Initialize(80, 40)
@@ -94,6 +107,27 @@ func TestGeneratedStyleEventWiringDispatchesToFocusedControl(t *testing.T) {
 	form.Dispatch(graphics.Event{Type: graphics.EventTextInput, Text: "λ"})
 	if clicks != 1 || text != "λ" || !control.Focused() {
 		t.Fatalf("event state = clicks %d, text %q, focused %v", clicks, text, control.Focused())
+	}
+}
+
+func TestPressedControlKeepsPointerCaptureUntilRelease(t *testing.T) {
+	var form Form
+	form.Initialize(100, 50)
+	control := NewControl()
+	control.SetBounds(graphics.R(5, 5, 20, 20))
+	moves := 0
+	releases := 0
+	clicks := 0
+	control.PointerMove = func(x, y graphics.Scalar) { moves++ }
+	control.PointerUp = func(x, y graphics.Scalar) { releases++ }
+	control.Click = func() { clicks++ }
+	form.Add(control)
+
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: 10, Y: 10})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerMove, X: 90, Y: 40})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: 90, Y: 40})
+	if moves != 1 || releases != 1 || clicks != 0 {
+		t.Fatalf("captured events = moves %d releases %d clicks %d", moves, releases, clicks)
 	}
 }
 

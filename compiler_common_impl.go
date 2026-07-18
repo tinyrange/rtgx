@@ -11668,36 +11668,31 @@ func rtgEmitUserCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 
 func rtgFunctionValueCalleeType(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 	e := &ep.exprs[idx]
+	typ := 0
 	if e.kind == rtgExprSelector {
 		fnIndex, expression := rtgMethodSelectorInfo(g, ep, idx)
 		if fnIndex >= 0 {
-			if expression {
-				return rtgFunctionTypeFromInfoStart(g.meta, fnIndex, 0)
+			if !expression {
+				return 0
 			}
+			return rtgFunctionTypeFromInfoStart(g.meta, fnIndex, 0)
+		}
+		typ = rtgInferParsedExprType(g, ep, idx)
+	} else {
+		if e.kind != rtgExprIdent {
 			return 0
 		}
-		typ := rtgInferParsedExprType(g, ep, idx)
-		if typ != 0 && rtgResolveType(g.meta, typ).kind == rtgTypeFunc {
-			return typ
+		localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
+		if localIndex >= 0 {
+			typ = g.locals[localIndex].typ
+		} else {
+			typ = rtgFindGlobalType(g, e.nameStart, e.nameEnd)
 		}
+	}
+	if rtgResolveType(g.meta, typ).kind != rtgTypeFunc {
 		return 0
 	}
-	if e.kind != rtgExprIdent {
-		return 0
-	}
-	localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
-	if localIndex >= 0 {
-		typ := g.locals[localIndex].typ
-		if rtgResolveType(g.meta, typ).kind == rtgTypeFunc {
-			return typ
-		}
-		return 0
-	}
-	typ := rtgFindGlobalType(g, e.nameStart, e.nameEnd)
-	if typ != 0 && rtgResolveType(g.meta, typ).kind == rtgTypeFunc {
-		return typ
-	}
-	return 0
+	return typ
 }
 
 func rtgMethodSelectorInfo(g *rtgLinearGen, ep *rtgExprParse, idx int) (int, bool) {
@@ -14317,16 +14312,8 @@ func rtgEmitSlicePtrLen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		return true
 	}
 	if e.kind == rtgExprIndex {
-		valueType := rtgInferParsedExprType(g, ep, idx)
-		valueKind := rtgResolveType(meta, valueType).kind
-		if valueKind == rtgTypeSlice {
-			if !rtgEmitSliceValueRegs(g, ep, idx) {
-				return false
-			}
-		} else {
-			if valueKind != rtgTypeString || !rtgEmitStringValueRegs(g, ep, idx) {
-				return false
-			}
+		if !rtgEmitSliceValueRegs(g, ep, idx) && !rtgEmitStringValueRegs(g, ep, idx) {
+			return false
 		}
 		rtgAsmCopySecondaryToTertiary(a)
 		return true

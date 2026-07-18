@@ -5,11 +5,11 @@ import (
 	"j5.nz/rtg/rtg/std/graphics"
 )
 
-var explorerBackground = graphics.RGBA(247, 248, 250, 255)
+var explorerBackground = graphics.RGBA(255, 255, 255, 255)
 var editorBackground = graphics.RGBA(255, 255, 255, 255)
 var borderColor = graphics.RGBA(214, 218, 224, 255)
-var selectionColor = graphics.RGBA(215, 231, 255, 255)
-var selectionTextColor = graphics.RGBA(22, 67, 128, 255)
+var selectionColor = graphics.RGBA(226, 239, 255, 255)
+var selectionTextColor = graphics.RGBA(35, 39, 47, 255)
 var textColor = graphics.RGBA(35, 39, 47, 255)
 var lineNumberColor = graphics.RGBA(132, 139, 150, 255)
 var currentLineColor = graphics.RGBA(248, 250, 253, 255)
@@ -53,10 +53,12 @@ func (c *ExplorerControl) SetFont(font *graphics.Font) {
 		font = graphics.NewBuiltinFont(2)
 	}
 	c.Font = font
-	c.rowHeight = fontLineHeight(font) + 4
-	c.baseline = fontPixelCeil(font.Metrics.Ascent) + 2
+	c.rowHeight = fontLineHeight(font) + 6
+	c.baseline = fontPixelCeil(font.Metrics.Ascent) + 3
 	c.Invalidate()
 }
+
+func (c *ExplorerControl) RowHeight() int { return c.rowHeight }
 
 func (c *ExplorerControl) paint(surface *graphics.Surface) {
 	bounds := c.Bounds()
@@ -82,18 +84,64 @@ func (c *ExplorerControl) paint(surface *graphics.Surface) {
 			color = selectionTextColor
 		}
 		node := rows[i].Node
-		x := bounds.MinX + 7 + graphics.Scalar(rows[i].Depth*14)
-		marker := " "
+		x := bounds.MinX + 16 + graphics.Scalar(rows[i].Depth*18)
 		if node.Directory {
-			marker = "+"
-			if node.Expanded {
-				marker = "-"
-			}
+			drawExplorerChevron(surface, x, y+graphics.Scalar(c.rowHeight/2-3), node.Expanded, color)
+			drawExplorerFolder(surface, x+15, y+graphics.Scalar(c.rowHeight/2-7))
+		} else {
+			drawExplorerFile(surface, c.Font, x+15, y+graphics.Scalar(c.rowHeight/2-8), node.Name)
 		}
-		surface.DrawText(c.Font, graphics.Point{X: x, Y: y + graphics.Scalar(c.baseline)}, marker, color)
-		surface.DrawText(c.Font, graphics.Point{X: x + 11, Y: y + graphics.Scalar(c.baseline)}, node.Name, color)
+		surface.DrawText(c.Font, graphics.Point{X: x + 36, Y: y + graphics.Scalar(c.baseline)}, node.Name, color)
 	}
 	surface.FillRect(graphics.R(bounds.MaxX-1, bounds.MinY, 1, bounds.Height()), borderColor)
+}
+
+func drawExplorerChevron(surface *graphics.Surface, x, y graphics.Scalar, expanded bool, color graphics.Color) {
+	if expanded {
+		surface.DrawLine(graphics.Point{X: x, Y: y}, graphics.Point{X: x + 4, Y: y + 4}, 1, color)
+		surface.DrawLine(graphics.Point{X: x + 4, Y: y + 4}, graphics.Point{X: x + 8, Y: y}, 1, color)
+		return
+	}
+	surface.DrawLine(graphics.Point{X: x, Y: y}, graphics.Point{X: x + 4, Y: y + 4}, 1, color)
+	surface.DrawLine(graphics.Point{X: x + 4, Y: y + 4}, graphics.Point{X: x, Y: y + 8}, 1, color)
+}
+
+func drawExplorerFolder(surface *graphics.Surface, x, y graphics.Scalar) {
+	fill := graphics.RGBA(224, 228, 233, 255)
+	stroke := graphics.RGBA(102, 109, 119, 255)
+	surface.FillRect(graphics.R(x+1, y, 7, 3), fill)
+	surface.FillRect(graphics.R(x, y+3, 16, 11), fill)
+	surface.StrokeRect(graphics.R(x, y+3, 16, 11), 1, stroke)
+}
+
+func drawExplorerFile(surface *graphics.Surface, font *graphics.Font, x, y graphics.Scalar, name string) {
+	if ideHasSuffix(name, ".go") {
+		surface.DrawText(font, graphics.Point{X: x, Y: y + font.Metrics.Ascent + 2}, "go", graphics.RGBA(20, 105, 214, 255))
+		return
+	}
+	color := graphics.RGBA(99, 106, 116, 255)
+	if ideHasSuffix(name, ".ui") {
+		color = graphics.RGBA(126, 55, 221, 255)
+	}
+	surface.StrokeRect(graphics.R(x+2, y, 12, 15), 1, color)
+	if ideHasSuffix(name, ".png") || ideHasSuffix(name, ".jpg") {
+		surface.FillEllipse(graphics.R(x+5, y+3, 3, 3), color)
+		surface.DrawLine(graphics.Point{X: x + 4, Y: y + 12}, graphics.Point{X: x + 8, Y: y + 8}, 1, color)
+		surface.DrawLine(graphics.Point{X: x + 8, Y: y + 8}, graphics.Point{X: x + 12, Y: y + 12}, 1, color)
+	}
+}
+
+func ideHasSuffix(text, suffix string) bool {
+	if len(suffix) > len(text) {
+		return false
+	}
+	start := len(text) - len(suffix)
+	for i := 0; i < len(suffix); i++ {
+		if text[start+i] != suffix[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *ExplorerControl) pointerDown(x, y graphics.Scalar) {
@@ -204,21 +252,58 @@ func (c *ExplorerControl) invalidateRow(index int) {
 // wired by generated form code; the editor itself owns no filesystem policy.
 type EditorControl struct {
 	forms.Control
-	Document       *Document
-	Font           *graphics.Font
-	Save           func()
-	scrollY        graphics.Scalar
-	scrollX        graphics.Scalar
-	dragging       bool
-	lineHeight     int
-	characterWidth graphics.Scalar
-	baseline       int
-	syntaxScratch  []syntaxSpan
-	syntaxStates   []goSyntaxState
+	Document        *Document
+	Font            *graphics.Font
+	Save            func()
+	Changed         func()
+	Complete        func(source []byte, caret int) []Completion
+	Signature       func(source []byte, caret int, help *SignatureHelp)
+	scrollY         graphics.Scalar
+	scrollX         graphics.Scalar
+	dragging        bool
+	lineHeight      int
+	characterWidth  graphics.Scalar
+	baseline        int
+	syntaxScratch   []syntaxSpan
+	syntaxStates    []goSyntaxState
+	completions     []Completion
+	completionAt    int
+	completionPick  int
+	completionFirst int
+	signature       SignatureHelp
+	signatureOpen   int
+	diagnostics     []Diagnostic
+}
+
+type Completion struct {
+	Text       string
+	Detail     string
+	Kind       int
+	Signature  string
+	Parameters []SignatureParameter
+}
+
+type SignatureParameter struct {
+	Name string
+	Type string
+}
+
+type SignatureHelp struct {
+	Ok              bool
+	Label           string
+	Parameters      []SignatureParameter
+	ActiveParameter int
+}
+
+type Diagnostic struct {
+	Start   int
+	End     int
+	Message string
+	Error   bool
 }
 
 func NewEditorControl(document *Document) *EditorControl {
-	control := &EditorControl{Document: document}
+	control := &EditorControl{Document: document, signatureOpen: -1}
 	control.Control = *forms.NewControl()
 	control.SetFont(graphics.NewBuiltinFont(2))
 	control.SetBackground(editorBackground)
@@ -237,7 +322,7 @@ func (c *EditorControl) SetFont(font *graphics.Font) {
 		font = graphics.NewBuiltinFont(2)
 	}
 	c.Font = font
-	c.lineHeight = fontLineHeight(font) + 2
+	c.lineHeight = fontLineHeight(font) + 4
 	c.characterWidth = fontCellWidth(font)
 	c.baseline = fontPixelCeil(font.Metrics.Ascent) + 1
 	c.Invalidate()
@@ -251,8 +336,22 @@ func (c *EditorControl) SetDocument(document *Document) {
 	c.scrollY = 0.0
 	c.scrollX = 0.0
 	c.syntaxStates = nil
+	c.diagnostics = nil
+	c.closeCompletion()
+	c.closeSignature()
 	c.rebuildSyntaxStates(0)
 	c.Invalidate()
+}
+
+func (c *EditorControl) SetDiagnostics(diagnostics []Diagnostic) {
+	if c == nil {
+		return
+	}
+	c.invalidateDiagnostics(c.diagnostics)
+	copyOfDiagnostics := make([]Diagnostic, len(diagnostics))
+	copy(copyOfDiagnostics, diagnostics)
+	c.diagnostics = copyOfDiagnostics
+	c.invalidateDiagnostics(c.diagnostics)
 }
 
 func (c *EditorControl) ScrollPosition() (int, int) {
@@ -329,6 +428,7 @@ func (c *EditorControl) paint(surface *graphics.Surface) {
 		textX := bounds.MinX + editorGutterWidth - c.scrollX
 		surface.PushClipRect(textClip)
 		c.drawHighlightedLine(surface, textX, y+graphics.Scalar(c.baseline), lineText, spans)
+		c.drawLineDiagnostics(surface, line, lineStart, lineEnd, y, textX)
 		surface.PopClip()
 		c.syntaxScratch = spans[:0]
 		number := decimal(line + 1)
@@ -342,7 +442,67 @@ func (c *EditorControl) paint(surface *graphics.Surface) {
 		surface.FillRect(graphics.R(x, y+1, 1, graphics.Scalar(c.lineHeight-2)), textColor)
 		surface.PopClip()
 	}
+	c.paintCompletion(surface)
+	c.paintSignature(surface)
 	surface.FillRect(graphics.R(bounds.MinX, bounds.MinY, 1, bounds.Height()), borderColor)
+}
+
+func (c *EditorControl) drawLineDiagnostics(surface *graphics.Surface, line, lineStart, lineEnd int, y, textX graphics.Scalar) {
+	for i := 0; i < len(c.diagnostics); i++ {
+		diagnostic := c.diagnostics[i]
+		start, end := diagnostic.Start, diagnostic.End
+		if end <= start {
+			end = start + 1
+		}
+		if start > lineEnd || end < lineStart {
+			continue
+		}
+		if start < lineStart {
+			start = lineStart
+		}
+		if end > lineEnd {
+			end = lineEnd
+		}
+		_, startColumn := c.Document.VisualPosition(start)
+		_, endColumn := c.Document.VisualPosition(end)
+		if endColumn <= startColumn {
+			endColumn = startColumn + 1
+		}
+		x := textX + graphics.Scalar(startColumn)*c.characterWidth
+		maxX := textX + graphics.Scalar(endColumn)*c.characterWidth
+		underlineY := y + graphics.Scalar(c.lineHeight-2)
+		color := graphics.RGBA(211, 47, 47, 255)
+		if !diagnostic.Error {
+			color = graphics.RGBA(210, 145, 0, 255)
+		}
+		up := false
+		for x < maxX {
+			next := x + 2
+			if next > maxX {
+				next = maxX
+			}
+			fromY, toY := underlineY, underlineY-1
+			if up {
+				fromY, toY = underlineY-1, underlineY
+			}
+			surface.DrawLine(graphics.Point{X: x, Y: fromY}, graphics.Point{X: next, Y: toY}, 1, color)
+			x = next
+			up = !up
+		}
+	}
+}
+
+func (c *EditorControl) invalidateDiagnostics(diagnostics []Diagnostic) {
+	if c == nil || c.Document == nil || c.Form() == nil {
+		return
+	}
+	for i := 0; i < len(diagnostics); i++ {
+		startLine, _ := c.Document.Position(diagnostics[i].Start)
+		endLine, _ := c.Document.Position(diagnostics[i].End)
+		for line := startLine; line <= endLine; line++ {
+			c.invalidateEditorLine(line)
+		}
+	}
 }
 
 func (c *EditorControl) drawHighlightedLine(surface *graphics.Surface, x, baseline graphics.Scalar, line string, spans []syntaxSpan) {
@@ -374,6 +534,8 @@ func syntaxColor(kind syntaxKind) graphics.Color {
 }
 
 func (c *EditorControl) pointerDown(x, y graphics.Scalar) {
+	c.closeCompletion()
+	c.closeSignature()
 	c.dragging = true
 	c.placeCaret(x, y, false)
 }
@@ -419,25 +581,92 @@ func (c *EditorControl) textInput(text string) {
 		value := text[i]
 		if value == '\r' {
 			filtered = append(filtered, '\n')
-		} else if value == '\n' || value == '\t' || value >= 32 {
+		} else if value == '\n' || value >= 32 {
 			filtered = append(filtered, value)
 		}
 	}
 	if len(filtered) == 0 {
 		return
 	}
-	startLine, _ := c.Document.Position(c.Document.Caret)
+	hadCompletion := len(c.completions) > 0
+	if hadCompletion {
+		c.invalidateCompletion()
+	}
+	editStart, _ := c.Document.Selection()
+	startLine, _ := c.Document.Position(editStart)
 	oldLines := c.Document.LineCount()
 	c.Document.Insert(string(filtered))
 	c.afterEdit(startLine, oldLines)
+	if hadCompletion && completionIdentifierText(filtered) {
+		c.refreshCompletion(false, false)
+	} else {
+		c.closeCompletion()
+		if len(filtered) == 1 && filtered[0] == '.' {
+			c.refreshCompletion(false, false)
+		}
+	}
+	if signatureTriggerText(filtered) {
+		c.refreshSignature()
+	} else if c.signature.Ok {
+		c.maintainSignature()
+	}
 }
 
 func (c *EditorControl) keyDown(event graphics.Event) {
 	extend := event.Modifiers&graphics.ModifierShift != 0
-	primary := event.Modifiers&(graphics.ModifierControl|graphics.ModifierCommand) != 0
+	control := event.Modifiers&graphics.ModifierControl != 0
+	command := event.Modifiers&graphics.ModifierCommand != 0
+	primary := control || command
 	oldLine, _ := c.Document.Position(c.Document.Caret)
 	oldLines := c.Document.LineCount()
 	changed := false
+	if len(c.completions) > 0 {
+		if event.Key == graphics.KeyUp {
+			c.completionPick--
+			if c.completionPick < 0 {
+				c.completionPick = len(c.completions) - 1
+			}
+			c.ensureCompletionPickVisible()
+			c.invalidateCompletion()
+			return
+		}
+		if event.Key == graphics.KeyDown {
+			c.completionPick++
+			if c.completionPick >= len(c.completions) {
+				c.completionPick = 0
+			}
+			c.ensureCompletionPickVisible()
+			c.invalidateCompletion()
+			return
+		}
+		if event.Key == graphics.KeyPageUp {
+			c.completionPick -= 8
+			if c.completionPick < 0 {
+				c.completionPick = 0
+			}
+			c.ensureCompletionPickVisible()
+			c.invalidateCompletion()
+			return
+		}
+		if event.Key == graphics.KeyPageDown {
+			c.completionPick += 8
+			if c.completionPick >= len(c.completions) {
+				c.completionPick = len(c.completions) - 1
+			}
+			c.ensureCompletionPickVisible()
+			c.invalidateCompletion()
+			return
+		}
+		if event.Key == graphics.KeyTab || event.Key == graphics.KeyEnter {
+			c.acceptCompletion()
+			return
+		}
+		if event.Key == graphics.KeyEscape {
+			c.closeCompletion()
+			c.closeSignature()
+			return
+		}
+	}
 	if primary && event.Key == graphics.KeyA {
 		c.Document.SelectAll()
 	} else if primary && event.Key == graphics.KeyC {
@@ -467,35 +696,499 @@ func (c *EditorControl) keyDown(event graphics.Event) {
 			c.Save()
 		}
 		return
+	} else if extend && event.Key == graphics.KeySpace && (control || command) {
+		c.refreshSignature()
+		return
+	} else if control && event.Key == graphics.KeySpace || command && event.Key == graphics.KeyI {
+		if c.refreshCompletion(false, true) {
+			return
+		}
+	} else if event.Key == graphics.KeyTab {
+		if c.refreshCompletion(true, false) {
+			return
+		}
+		c.Document.Insert("\t")
+		changed = true
+	} else if event.Key == graphics.KeyEscape {
+		c.closeCompletion()
+		c.closeSignature()
+		return
 	} else if event.Key == graphics.KeyLeft {
+		c.closeCompletion()
 		c.Document.MoveCharacter(-1, extend)
 	} else if event.Key == graphics.KeyRight {
+		c.closeCompletion()
 		c.Document.MoveCharacter(1, extend)
 	} else if event.Key == graphics.KeyUp {
 		c.Document.MoveLine(-1, extend)
 	} else if event.Key == graphics.KeyDown {
 		c.Document.MoveLine(1, extend)
 	} else if event.Key == graphics.KeyHome {
+		c.closeCompletion()
 		c.Document.MoveHome(extend)
 	} else if event.Key == graphics.KeyEnd {
+		c.closeCompletion()
 		c.Document.MoveEnd(extend)
 	} else if event.Key == graphics.KeyBackspace {
-		c.Document.Backspace()
+		if !c.Document.Backspace() {
+			return
+		}
 		changed = true
 	} else if event.Key == graphics.KeyDelete {
-		c.Document.Delete()
+		if !c.Document.Delete() {
+			return
+		}
 		changed = true
 	} else {
 		return
 	}
 	if changed {
-		c.afterEdit(oldLine, oldLines)
+		startLine, _ := c.Document.Position(c.Document.Caret)
+		if oldLine < startLine {
+			startLine = oldLine
+		}
+		c.afterEdit(startLine, oldLines)
+		if len(c.completions) > 0 {
+			c.refreshCompletion(false, false)
+		}
+		if c.signature.Ok {
+			c.refreshSignature()
+		}
 		return
 	}
 	c.ensureCaretVisible()
 	newLine, _ := c.Document.Position(c.Document.Caret)
 	c.invalidateEditorLine(oldLine)
 	c.invalidateEditorLine(newLine)
+	if c.signature.Ok {
+		c.refreshSignature()
+	}
+}
+
+func (c *EditorControl) refreshCompletion(acceptSingle, explicit bool) bool {
+	if len(c.completions) > 0 {
+		c.invalidateCompletion()
+	}
+	if c.Complete == nil || c.Document == nil {
+		c.closeCompletion()
+		return false
+	}
+	if !explicit && (c.Document.Caret <= 0 || completionWhitespace(c.Document.text[c.Document.Caret-1])) {
+		c.closeCompletion()
+		return false
+	}
+	start := completionWordStart(c.Document.text, c.Document.Caret)
+	items := c.Complete(c.Document.text, c.Document.Caret)
+	if len(items) == 0 {
+		c.closeCompletion()
+		return false
+	}
+	c.completionAt = start
+	if c.completionPick < 0 || c.completionPick >= len(items) {
+		c.completionPick = 0
+	}
+	c.ensureCompletionPickVisibleFor(len(items))
+	if acceptSingle && len(items) == 1 {
+		c.completions = items
+		c.acceptCompletion()
+		return true
+	}
+	c.completions = items
+	c.invalidateCompletion()
+	return true
+}
+
+func (c *EditorControl) ensureCompletionPickVisible() {
+	c.ensureCompletionPickVisibleFor(len(c.completions))
+}
+
+func (c *EditorControl) ensureCompletionPickVisibleFor(count int) {
+	const visibleRows = 8
+	if count <= visibleRows {
+		c.completionFirst = 0
+		return
+	}
+	if c.completionPick < c.completionFirst {
+		c.completionFirst = c.completionPick
+	}
+	if c.completionPick >= c.completionFirst+visibleRows {
+		c.completionFirst = c.completionPick - visibleRows + 1
+	}
+	maximum := count - visibleRows
+	if c.completionFirst > maximum {
+		c.completionFirst = maximum
+	}
+	if c.completionFirst < 0 {
+		c.completionFirst = 0
+	}
+}
+
+func (c *EditorControl) refreshSignature() {
+	if c.Signature == nil || c.Document == nil {
+		c.closeSignature()
+		return
+	}
+	old := c.signature
+	if old.Ok {
+		c.invalidateSignature()
+	}
+	var next SignatureHelp
+	c.Signature(c.Document.text, c.Document.Caret, &next)
+	open := signatureOpenBefore(c.Document.text, c.Document.Caret)
+	if next.Ok && open >= 0 {
+		active, ok := signatureContext(c.Document.text, c.Document.Caret, open)
+		if !ok {
+			c.closeSignature()
+			return
+		}
+		next.ActiveParameter = active
+		c.signature = next
+		c.signatureOpen = open
+		c.invalidateSignature()
+		return
+	}
+	if old.Ok {
+		c.signature = old
+		c.maintainSignature()
+		return
+	}
+	c.signature = SignatureHelp{}
+	c.signatureOpen = -1
+}
+
+func (c *EditorControl) maintainSignature() {
+	if !c.signature.Ok || c.Document == nil {
+		return
+	}
+	active, ok := signatureContext(c.Document.text, c.Document.Caret, c.signatureOpen)
+	if !ok {
+		c.closeSignature()
+		return
+	}
+	if active != c.signature.ActiveParameter {
+		c.invalidateSignature()
+		c.signature.ActiveParameter = active
+		c.invalidateSignature()
+	}
+}
+
+func (c *EditorControl) closeSignature() {
+	if !c.signature.Ok {
+		c.signatureOpen = -1
+		return
+	}
+	c.invalidateSignature()
+	c.signature = SignatureHelp{}
+	c.signatureOpen = -1
+}
+
+func (c *EditorControl) acceptCompletion() {
+	if len(c.completions) == 0 || c.completionPick < 0 || c.completionPick >= len(c.completions) {
+		return
+	}
+	c.invalidateCompletion()
+	startLine, _ := c.Document.Position(c.completionAt)
+	oldLines := c.Document.LineCount()
+	text := c.completions[c.completionPick].Text
+	c.Document.SetSelection(c.completionAt, c.Document.Caret)
+	c.Document.Insert(text)
+	c.completions = nil
+	c.completionPick = 0
+	c.completionFirst = 0
+	c.afterEdit(startLine, oldLines)
+}
+
+func (c *EditorControl) closeCompletion() {
+	if len(c.completions) == 0 {
+		return
+	}
+	c.invalidateCompletion()
+	c.completions = nil
+	c.completionPick = 0
+	c.completionFirst = 0
+}
+
+func (c *EditorControl) paintCompletion(surface *graphics.Surface) {
+	if len(c.completions) == 0 || c.Font == nil {
+		return
+	}
+	bounds := c.completionBounds()
+	surface.FillRect(bounds, graphics.RGBA(255, 255, 255, 255))
+	surface.StrokeRect(bounds, 1, borderColor)
+	rowHeight := graphics.Scalar(c.lineHeight + 4)
+	end := c.completionFirst + 8
+	if end > len(c.completions) {
+		end = len(c.completions)
+	}
+	for i := c.completionFirst; i < end; i++ {
+		rowIndex := i - c.completionFirst
+		row := graphics.R(bounds.MinX+1, bounds.MinY+1+graphics.Scalar(rowIndex)*rowHeight, bounds.Width()-2, rowHeight)
+		if i == c.completionPick {
+			surface.FillRect(row, selectionColor)
+		}
+		surface.DrawText(c.Font, graphics.Point{X: row.MinX + 8, Y: row.MinY + graphics.Scalar(c.baseline+2)}, c.completions[i].Text, textColor)
+		detailWidth := graphics.MeasureText(c.Font, c.completions[i].Detail).Width
+		surface.DrawText(c.Font, graphics.Point{X: row.MaxX - detailWidth - 8, Y: row.MinY + graphics.Scalar(c.baseline+2)}, c.completions[i].Detail, lineNumberColor)
+	}
+}
+
+func (c *EditorControl) paintSignature(surface *graphics.Surface) {
+	if !c.signature.Ok || c.Font == nil || c.signature.Label == "" {
+		return
+	}
+	bounds := c.signatureBounds()
+	surface.FillRect(bounds, graphics.RGBA(255, 255, 255, 255))
+	surface.StrokeRect(bounds, 1, borderColor)
+	surface.DrawText(c.Font, graphics.Point{X: bounds.MinX + 8, Y: bounds.MinY + graphics.Scalar(c.baseline+3)}, c.signature.Label, textColor)
+	active := c.signature.ActiveParameter
+	if active >= 0 && active < len(c.signature.Parameters) {
+		parameter := c.signature.Parameters[active]
+		label := "argument " + decimal(active+1) + ": "
+		if parameter.Name != "" {
+			label += parameter.Name + " "
+		}
+		label += parameter.Type
+		surface.DrawText(c.Font, graphics.Point{X: bounds.MinX + 8, Y: bounds.MinY + graphics.Scalar(c.lineHeight+c.baseline+1)}, label, lineNumberColor)
+	}
+}
+
+func (c *EditorControl) signatureBounds() graphics.Rect {
+	line, column := c.Document.VisualPosition(c.Document.Caret)
+	width := graphics.Scalar(480)
+	if width > c.Bounds().Width()-editorGutterWidth-8 {
+		width = c.Bounds().Width() - editorGutterWidth - 8
+	}
+	height := graphics.Scalar(c.lineHeight*2 + 4)
+	x := c.Bounds().MinX + editorGutterWidth + graphics.Scalar(column)*c.characterWidth - c.scrollX
+	y := c.Bounds().MinY + graphics.Scalar((line+1)*c.lineHeight) - c.scrollY
+	if len(c.completions) > 0 {
+		y = c.completionBounds().MinY - height - 2
+	}
+	if x+width > c.Bounds().MaxX-4 {
+		x = c.Bounds().MaxX - width - 4
+	}
+	if y+height > c.Bounds().MaxY-4 {
+		y = c.Bounds().MinY + graphics.Scalar(line*c.lineHeight) - c.scrollY - height
+	}
+	return graphics.R(x, y, width, height)
+}
+
+func (c *EditorControl) invalidateSignature() {
+	if c.Form() != nil && c.signature.Ok {
+		c.Form().Invalidate(c.signatureBounds())
+	}
+}
+
+func (c *EditorControl) completionBounds() graphics.Rect {
+	line, column := c.Document.VisualPosition(c.Document.Caret)
+	width := graphics.Scalar(330)
+	if width > c.Bounds().Width()-editorGutterWidth-8 {
+		width = c.Bounds().Width() - editorGutterWidth - 8
+	}
+	rows := len(c.completions)
+	if rows > 8 {
+		rows = 8
+	}
+	height := graphics.Scalar(rows*(c.lineHeight+4) + 2)
+	x := c.Bounds().MinX + editorGutterWidth + graphics.Scalar(column)*c.characterWidth - c.scrollX
+	y := c.Bounds().MinY + graphics.Scalar((line+1)*c.lineHeight) - c.scrollY
+	if x+width > c.Bounds().MaxX-4 {
+		x = c.Bounds().MaxX - width - 4
+	}
+	if y+height > c.Bounds().MaxY-4 {
+		y = c.Bounds().MinY + graphics.Scalar(line*c.lineHeight) - c.scrollY - height
+	}
+	return graphics.R(x, y, width, height)
+}
+
+func (c *EditorControl) invalidateCompletion() {
+	if c.Form() != nil && len(c.completions) > 0 {
+		c.Form().Invalidate(c.completionBounds())
+	}
+}
+
+func completionWordStart(data []byte, offset int) int {
+	if offset > len(data) {
+		offset = len(data)
+	}
+	for offset > 0 {
+		value := data[offset-1]
+		if value != '_' && (value < 'a' || value > 'z') && (value < 'A' || value > 'Z') && (value < '0' || value > '9') {
+			break
+		}
+		offset--
+	}
+	return offset
+}
+
+func completionWhitespace(value byte) bool {
+	return value == ' ' || value == '\t' || value == '\n' || value == '\r'
+}
+
+func completionIdentifierText(text []byte) bool {
+	if len(text) == 0 {
+		return false
+	}
+	for i := 0; i < len(text); i++ {
+		value := text[i]
+		if value != '_' && (value < 'a' || value > 'z') && (value < 'A' || value > 'Z') && (value < '0' || value > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func signatureTriggerText(text []byte) bool {
+	for i := 0; i < len(text); i++ {
+		if text[i] == '(' || text[i] == ',' || text[i] == ')' {
+			return true
+		}
+	}
+	return false
+}
+
+func signatureOpenBefore(data []byte, caret int) int {
+	if caret > len(data) {
+		caret = len(data)
+	}
+	stack := make([]int, 0, 8)
+	state := byte(0)
+	for i := 0; i < caret; i++ {
+		value := data[i]
+		if state == '/' {
+			if value == '\n' {
+				state = 0
+			}
+			continue
+		}
+		if state == '*' {
+			if value == '*' && i+1 < caret && data[i+1] == '/' {
+				i++
+				state = 0
+			}
+			continue
+		}
+		if state == '`' {
+			if value == '`' {
+				state = 0
+			}
+			continue
+		}
+		if state == '"' || state == '\'' {
+			if value == '\\' {
+				i++
+				continue
+			}
+			if value == state {
+				state = 0
+			}
+			continue
+		}
+		if value == '/' && i+1 < caret {
+			if data[i+1] == '/' {
+				i++
+				state = '/'
+				continue
+			}
+			if data[i+1] == '*' {
+				i++
+				state = '*'
+				continue
+			}
+		}
+		if value == '"' || value == '\'' || value == '`' {
+			state = value
+			continue
+		}
+		if value == '(' {
+			stack = append(stack, i)
+		} else if value == ')' && len(stack) > 0 {
+			stack = stack[:len(stack)-1]
+		}
+	}
+	if len(stack) == 0 {
+		return -1
+	}
+	return stack[len(stack)-1]
+}
+
+func signatureContext(data []byte, caret, open int) (int, bool) {
+	if open < 0 || open >= caret || open >= len(data) || data[open] != '(' {
+		return 0, false
+	}
+	if caret > len(data) {
+		caret = len(data)
+	}
+	active := 0
+	paren, bracket, brace := 0, 0, 0
+	state := byte(0)
+	for i := open + 1; i < caret; i++ {
+		value := data[i]
+		if state == '/' {
+			if value == '\n' {
+				state = 0
+			}
+			continue
+		}
+		if state == '*' {
+			if value == '*' && i+1 < caret && data[i+1] == '/' {
+				i++
+				state = 0
+			}
+			continue
+		}
+		if state == '`' {
+			if value == '`' {
+				state = 0
+			}
+			continue
+		}
+		if state == '"' || state == '\'' {
+			if value == '\\' {
+				i++
+				continue
+			}
+			if value == state {
+				state = 0
+			}
+			continue
+		}
+		if value == '/' && i+1 < caret {
+			if data[i+1] == '/' {
+				i++
+				state = '/'
+				continue
+			}
+			if data[i+1] == '*' {
+				i++
+				state = '*'
+				continue
+			}
+		}
+		if value == '"' || value == '\'' || value == '`' {
+			state = value
+			continue
+		}
+		if value == '(' {
+			paren++
+		} else if value == ')' {
+			if paren == 0 {
+				return active, false
+			}
+			paren--
+		} else if value == '[' {
+			bracket++
+		} else if value == ']' && bracket > 0 {
+			bracket--
+		} else if value == '{' {
+			brace++
+		} else if value == '}' && brace > 0 {
+			brace--
+		} else if value == ',' && paren == 0 && bracket == 0 && brace == 0 {
+			active++
+		}
+	}
+	return active, true
 }
 
 func (c *EditorControl) afterEdit(startLine, oldLines int) {
@@ -512,6 +1205,9 @@ func (c *EditorControl) afterEdit(startLine, oldLines int) {
 		c.invalidateEditorLine(startLine)
 		line, _ := c.Document.Position(c.Document.Caret)
 		c.invalidateEditorLine(line)
+	}
+	if c.Changed != nil {
+		c.Changed()
 	}
 }
 

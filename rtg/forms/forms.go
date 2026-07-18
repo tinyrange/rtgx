@@ -79,6 +79,9 @@ func (c *Control) SetVisible(visible bool) {
 		c.form.Invalidate(c.bounds)
 	}
 	c.visible = visible
+	if !visible && c.form != nil && c.form.focused == c {
+		c.form.focused = nil
+	}
 	if c.form != nil && c.visible {
 		c.form.Invalidate(c.bounds)
 	}
@@ -146,7 +149,8 @@ type Form struct {
 	focused    *Control
 	pressed    *Control
 
-	Resize EventHandler
+	Resize          EventHandler
+	PaintBackground PaintHandler
 }
 
 func (f *Form) Initialize(width, height int) {
@@ -291,7 +295,11 @@ func (f *Form) Paint(surface *graphics.Surface) bool {
 		dirty := invalid[i]
 		surface.BeginDamage(dirty)
 		surface.PushClipRect(dirty)
-		surface.FillRect(dirty, f.background)
+		if f.PaintBackground != nil {
+			f.PaintBackground(surface)
+		} else {
+			surface.FillRect(dirty, f.background)
+		}
 		for j := 0; j < len(f.controls); j++ {
 			control := f.controls[j]
 			if control.visible && control.Paint != nil && rectIntersects(control.bounds, dirty) {
@@ -333,18 +341,25 @@ func (f *Form) Dispatch(event graphics.Event) {
 		return
 	}
 	if event.Type == graphics.EventPointerUp {
-		control := f.hitTest(event.X, event.Y)
+		hit := f.hitTest(event.X, event.Y)
+		control := f.pressed
+		if control == nil {
+			control = hit
+		}
 		if control != nil && control.PointerUp != nil {
 			control.PointerUp(event.X-control.bounds.MinX, event.Y-control.bounds.MinY)
 		}
-		if control != nil && control == f.pressed && control.Click != nil {
+		if control != nil && control == hit && control == f.pressed && control.Click != nil {
 			control.Click()
 		}
 		f.pressed = nil
 		return
 	}
 	if event.Type == graphics.EventPointerMove {
-		control := f.hitTest(event.X, event.Y)
+		control := f.pressed
+		if control == nil {
+			control = f.hitTest(event.X, event.Y)
+		}
 		if control != nil && control.PointerMove != nil {
 			control.PointerMove(event.X-control.bounds.MinX, event.Y-control.bounds.MinY)
 		}

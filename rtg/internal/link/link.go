@@ -875,7 +875,18 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 }
 
 func coreSymbolKeepsRuntimeName(name string) bool {
-	return name == "rtg_runtime_ArenaMark" || name == "rtg_runtime_ArenaReset"
+	switch name {
+	case "rtg_runtime_Exit",
+		"rtg_runtime_ArenaMark",
+		"rtg_runtime_ArenaReset",
+		"rtg_runtime_ArenaPersistMark",
+		"rtg_runtime_ArenaPersistReset",
+		"rtg_runtime_ArenaPersistString",
+		"rtg_runtime_ArenaPersistBytes",
+		"rtg_runtime_ArenaDiscard":
+		return true
+	}
+	return false
 }
 
 func coreSymbolAliasHash(name string) int {
