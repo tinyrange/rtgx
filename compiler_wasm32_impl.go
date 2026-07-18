@@ -2185,9 +2185,7 @@ func rtgWasm32EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 			return false
 		}
 	} else if !g.lastRangeReturns {
-		if !rtgEmitClosureCaptureWriteback(g) {
-			return false
-		}
+		rtgMoveCapturedLocals(g, true)
 		rtgAsmPrimaryImm(a, 0)
 		rtgAsmLeave(a)
 		rtgAsmRet(a)

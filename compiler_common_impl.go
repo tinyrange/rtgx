@@ -5627,11 +5627,6 @@ func rtgBindClosureCaptures(g *rtgLinearGen, fnIndex int) bool {
 	return true
 }
 
-func rtgEmitClosureCaptureWriteback(g *rtgLinearGen) bool {
-	rtgMoveCapturedLocals(g, true)
-	return true
-}
-
 func rtgClosureIndexByFunction(meta *rtgMeta, fnIndex int) int {
 	for i := 0; i < len(meta.closures); i++ {
 		if meta.closures[i].fnIndex == fnIndex {
