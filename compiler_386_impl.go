@@ -41,9 +41,7 @@ func rtg386EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		g.returnStruct = rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 		rtgAsmStackMem(a, g.returnStruct, 0x89, 0x5d, 0x9d)
 	}
-	if !rtgBindFunctionParams(g, fnInfoIndex) {
-		return false
-	}
+	rtgBindFunctionParams(g, fnInfoIndex)
 	if !rtgBindClosureCaptures(g, fnInfoIndex) {
 		return false
 	}
@@ -97,36 +95,35 @@ func rtg386EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	return true
 }
 
-func rtg386StoreParamWord(g *rtgLinearGen, reg int, offset int) bool {
+func rtg386StoreParamWord(g *rtgLinearGen, reg int, offset int) {
 	a := &g.asm
 	if reg == 0 {
 		rtgAsmStackMem(a, offset, 0x89, 0x5d, 0x9d)
-		return true
+		return
 	}
 	if reg == 1 {
 		rtgAsmStackMem(a, offset, 0x8948, 0x75, 0xb5)
-		return true
+		return
 	}
 	if reg == 2 {
 		rtgAsmStoreSecondaryStack(a, offset)
-		return true
+		return
 	}
 	if reg == 3 {
 		rtgAsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
-		return true
+		return
 	}
 	if reg == 4 {
 		rtgAsmStorePrimaryStack(a, offset)
-		return true
+		return
 	}
 	if reg == 5 {
 		rtgAsmStackMem(a, offset, 0x89, 0x7d, 0xbd)
-		return true
+		return
 	}
 	rtgAsmEmit16(a, 0x858b)
 	rtgAsmEmit32(a, 8+(reg-6)*4)
 	rtgAsmStorePrimaryStack(a, offset)
-	return true
 }
 
 func rtg386AsmMovRaxImm(a *rtgAsm, imm int) {

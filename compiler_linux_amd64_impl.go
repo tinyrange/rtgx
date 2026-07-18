@@ -341,9 +341,9 @@ func rtgAsmImageWindowsAmd64(a *rtgAsm) []byte {
 	a.dataOffset = dataRVA
 	var imports rtgWinImportLayout
 	if rtgAsmHasWinImportRelocs(a) {
-		imports = rtgAppendWinImports(a, true)
+		imports = rtgAppendWinImports(a)
 	}
-	rtgAsmPatchWindows(a, imports, rtgWinImageBase, true)
+	rtgAsmPatchWindows(a, imports)
 	dataRawSize := rtgAlignValue(len(a.data), rtgWinFileAlign)
 	dataVirtualSize := len(a.data) + a.bssSize
 	iatSize := 0
@@ -351,7 +351,7 @@ func rtgAsmImageWindowsAmd64(a *rtgAsm) []byte {
 		iatSize = (rtgWinImportFixedCount + 1) * imports.thunkSize
 	}
 	var out []byte
-	out = rtgAppendPEHeader64MachineImageBaseStack(out, 0x8664, rtgWinImageBase, a.codeOffset, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, imports.importRVA, imports.importSize, imports.kernelIATRVA, iatSize, 0x100000, 0x100000)
+	out = rtgAppendPEHeader64(out, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, imports.importRVA, imports.importSize, imports.kernelIATRVA, iatSize)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
 	}

@@ -421,7 +421,7 @@ func rtgAsmImageWindowsArm64(a *rtgAsm) []byte {
 	a.dataOffset = dataRVA
 	var imports rtgWinImportLayout
 	if rtgAsmHasWinImportRelocs(a) {
-		imports = rtgAppendWinImports(a, true)
+		imports = rtgAppendWinImports(a)
 	}
 	rtgAsmPatchWindowsArm64(a, imports)
 	dataRawSize := rtgAlignValue(len(a.data), rtgWinFileAlign)
@@ -431,7 +431,7 @@ func rtgAsmImageWindowsArm64(a *rtgAsm) []byte {
 		iatSize = (rtgWinImportFixedCount + 1) * imports.thunkSize
 	}
 	var out []byte
-	out = rtgAppendPEHeader64MachineImageBaseStack(out, rtgWinArm64Machine, rtgWinArm64ImageBase, a.codeOffset, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, imports.importRVA, imports.importSize, imports.kernelIATRVA, iatSize, 0x800000, 0x1000)
+	out = rtgAppendPEHeader64(out, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, imports.importRVA, imports.importSize, imports.kernelIATRVA, iatSize)
 	// Windows on ARM64 requires the modern PE subsystem contract; unlike the
 	// x86 targets, there is no legacy Windows 4.x loader to preserve.
 	out[0xc0] = 6

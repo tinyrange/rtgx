@@ -484,9 +484,9 @@ func rtgAsmImageWindows386(a *rtgAsm) []byte {
 	a.dataOffset = dataRVA
 	var imports rtgWinImportLayout
 	if rtgAsmHasWinImportRelocs(a) {
-		imports = rtgAppendWinImports(a, false)
+		imports = rtgAppendWinImports(a)
 	}
-	rtgAsmPatchWindows(a, imports, rtgWinImageBase, false)
+	rtgAsmPatchWindows(a, imports)
 	dataRawSize := rtgAlignValue(len(a.data), rtgWinFileAlign)
 	dataVirtualSize := len(a.data) + a.bssSize
 	iatSize := 0
