@@ -446,145 +446,67 @@ func rtgWin386LoadEaxBss(a *rtgAsm, bssOff int) {
 	rtgAsmAddAbsReloc(a, at, bssOff, rtgAbsBssReloc)
 }
 
+func rtgWinAmd64EmitText(a *rtgAsm, code string) {
+	for i := 0; i < len(code); i++ {
+		a.code = append(a.code, code[i])
+	}
+}
+
 func rtgWinAmd64EmitReadWriteHelper(g *rtgLinearGen, isWrite bool) int {
+	// The template is the relaxed form of the instruction sequence previously
+	// assembled one operation at a time. Explicit relocations record the BSS and
+	// import operands that still vary between compiler invocations and self-host.
 	a := &g.asm
 	if isWrite {
 		if g.winWriteEmitted {
 			return g.winWriteLabel
 		}
+	} else if g.winReadEmitted {
+		return g.winReadLabel
+	}
+	label := rtgAsmNewLabel(a)
+	if isWrite {
 		g.winWriteEmitted = true
-		g.winWriteLabel = rtgAsmNewLabel(a)
+		g.winWriteLabel = label
 	} else {
-		if g.winReadEmitted {
-			return g.winReadLabel
-		}
 		g.winReadEmitted = true
-		g.winReadLabel = rtgAsmNewLabel(a)
+		g.winReadLabel = label
 	}
 	countOff := a.bssSize
 	a.bssSize += 8
 	posOff := a.bssSize
 	a.bssSize += 8
-	label := g.winReadLabel
 	importID := rtgWinImportReadFile
+	prefix := "\xe9\x32\x01\x00\x00\x57\x56\x52\x51\x48\x83\x7c\x24\x18\x00\x74\x02\xeb\x18\xb9\xf6"
 	if isWrite {
-		label = g.winWriteLabel
 		importID = rtgWinImportWriteFile
+		prefix = "\xe9\x54\x01\x00\x00\x57\x56\x52\x51\x48\x83\x7c\x24\x18\x01\x74\x0a\x48\x83\x7c\x24\x18\x02\x74\x1c\xeb\x32\xb9\xf5\xff\xff\xff\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x44\x24\x18\xeb\x18\xb9\xf4"
 	}
-	afterLabel := rtgAsmNewLabel(a)
-	seqLabel := rtgAsmNewLabel(a)
-	failLabel := rtgAsmNewLabel(a)
-	seqFailLabel := rtgAsmNewLabel(a)
-	doneLabel := rtgAsmNewLabel(a)
-	rtgAsmJmpMarkLabel(a, afterLabel, label)
-	rtgAsmEmit8(a, 0x57)
-	rtgAsmEmit8(a, 0x56)
-	rtgAsmEmit8(a, 0x52)
-	rtgAsmEmit8(a, 0x51)
+	base := len(a.code)
+	rtgWinAmd64EmitText(a, prefix)
+	a.labelPos[label] = base + 5
+	a.labelSet[label] = true
+	a.lastPrimaryStoreEnd = -1
+	commonBase := len(a.code)
+	rtgWinAmd64EmitText(a, "\xff\xff\xff\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x44\x24\x18\x48\x83\x3c\x24\x00\x0f\x8c\x80\x00\x00\x00\x48\x8b\x4c\x24\x18\x31\xd2\x45\x31\xc0\x41\xb9\x01\x00\x00\x00\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x14\x24\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x52\x48\x8b\x05\x00\x00\x00\x00\xeb\x4c\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x0c\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x05\x00\x00\x00\x00\x50\x5a\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3")
 	if isWrite {
-		stdOutLabel := rtgAsmNewLabel(a)
-		stdErrLabel := rtgAsmNewLabel(a)
-		afterStdLabel := rtgAsmNewLabel(a)
-		rtgAsmEmit5(a, 0x48, 0x83, 0x7c, 0x24, 24)
-		rtgAsmEmit8(a, 1)
-		rtgAsmJzLabel(a, stdOutLabel)
-		rtgAsmEmit5(a, 0x48, 0x83, 0x7c, 0x24, 24)
-		rtgAsmEmit8(a, 2)
-		rtgAsmJzLabel(a, stdErrLabel)
-		rtgAsmJmpMarkLabel(a, afterStdLabel, stdOutLabel)
-		rtgWinAmd64SetStdHandle(a, -11)
-		rtgAsmJmpMarkLabel(a, afterStdLabel, stdErrLabel)
-		rtgWinAmd64SetStdHandle(a, -12)
-		rtgAsmMarkLabel(a, afterStdLabel)
-	} else {
-		stdInLabel := rtgAsmNewLabel(a)
-		afterStdLabel := rtgAsmNewLabel(a)
-		rtgAsmEmit5(a, 0x48, 0x83, 0x7c, 0x24, 24)
-		rtgAsmEmit8(a, 0)
-		rtgAsmJzLabel(a, stdInLabel)
-		rtgAsmJmpMarkLabel(a, afterStdLabel, stdInLabel)
-		rtgWinAmd64SetStdHandle(a, -10)
-		rtgAsmMarkLabel(a, afterStdLabel)
+		rtgAsmAddWinImportReloc(a, base+38, rtgWinImportGetStdHandle)
 	}
-	rtgAsmEmit5(a, 0x48, 0x83, 0x3c, 0x24, 0)
-	rtgAsmJlLabel(a, seqLabel)
-
-	rtgWinAmd64LoadSavedHandle(a)
-	rtgAsmEmit16(a, 0xd231)
-	rtgAsmEmit24(a, 0xc03145)
-	rtgAsmEmit8(a, 0x41)
-	rtgAsmEmit8(a, 0xb9)
-	rtgAsmEmit32(a, 1)
-	rtgWinAmd64CallImport(a, rtgWinImportSetFilePointer, 40)
-	rtgAsmStorePrimaryBss(a, posOff)
-
-	rtgWinAmd64LoadSavedHandle(a)
-	rtgAsmEmit32(a, 0x24148b48)
-	rtgAsmEmit24(a, 0xc03145)
-	rtgAsmEmit24(a, 0xc93145)
-	rtgWinAmd64CallImport(a, rtgWinImportSetFilePointer, 40)
-	rtgWinAmd64EmitKernelReadWriteCall(a, importID, countOff)
-	rtgAsmEmit3(a, 0x83, 0xf8, 0)
-	rtgAsmJzLabel(a, failLabel)
-	rtgAsmLoadPrimaryBss(a, countOff)
-	rtgAsmJmpLabel(a, doneLabel)
-
-	rtgAsmMarkLabel(a, seqLabel)
-	rtgWinAmd64EmitKernelReadWriteCall(a, importID, countOff)
-	rtgAsmEmit3(a, 0x83, 0xf8, 0)
-	rtgAsmJzLabel(a, seqFailLabel)
-	rtgAsmLoadPrimaryBss(a, countOff)
-	rtgAsmEmit4(a, 0x48, 0x83, 0xc4, 32)
-	rtgAsmRet(a)
-
-	rtgAsmMarkLabel(a, seqFailLabel)
-	rtgAsmPrimaryImm(a, -1)
-	rtgAsmEmit4(a, 0x48, 0x83, 0xc4, 32)
-	rtgAsmRet(a)
-
-	rtgAsmMarkLabel(a, failLabel)
-	rtgAsmPrimaryImm(a, -1)
-
-	rtgAsmMarkLabel(a, doneLabel)
-	rtgAsmStorePrimaryBss(a, countOff)
-	rtgWinAmd64LoadSavedHandle(a)
-	rtgAsmLoadPrimaryBss(a, posOff)
-	rtgAsmCopyPrimaryToSecondary(a)
-	rtgAsmEmit24(a, 0xc03145)
-	rtgAsmEmit24(a, 0xc93145)
-	rtgWinAmd64CallImport(a, rtgWinImportSetFilePointer, 40)
-	rtgAsmLoadPrimaryBss(a, countOff)
-	rtgAsmEmit4(a, 0x48, 0x83, 0xc4, 32)
-	rtgAsmRet(a)
-	rtgAsmMarkLabel(a, afterLabel)
+	rtgAsmAddWinImportReloc(a, commonBase+9, rtgWinImportGetStdHandle)
+	rtgAsmAddWinImportReloc(a, commonBase+55, rtgWinImportSetFilePointer)
+	rtgAsmAddAbsReloc(a, commonBase+66, posOff, rtgAbsBssReloc)
+	rtgAsmAddWinImportReloc(a, commonBase+91, rtgWinImportSetFilePointer)
+	rtgAsmAddAbsReloc(a, commonBase+117, countOff, rtgAbsBssReloc)
+	rtgAsmAddWinImportReloc(a, commonBase+139, importID)
+	rtgAsmAddAbsReloc(a, commonBase+155, countOff, rtgAbsBssReloc)
+	rtgAsmAddAbsReloc(a, commonBase+179, countOff, rtgAbsBssReloc)
+	rtgAsmAddWinImportReloc(a, commonBase+201, importID)
+	rtgAsmAddAbsReloc(a, commonBase+217, countOff, rtgAbsBssReloc)
+	rtgAsmAddAbsReloc(a, commonBase+240, countOff, rtgAbsBssReloc)
+	rtgAsmAddAbsReloc(a, commonBase+252, posOff, rtgAbsBssReloc)
+	rtgAsmAddWinImportReloc(a, commonBase+270, rtgWinImportSetFilePointer)
+	rtgAsmAddAbsReloc(a, commonBase+281, countOff, rtgAbsBssReloc)
 	return label
-}
-
-func rtgWinAmd64SetStdHandle(a *rtgAsm, stdHandle int) {
-	rtgAsmEmit8(a, 0xb9)
-	rtgAsmEmit32(a, stdHandle)
-	rtgWinAmd64CallImport(a, rtgWinImportGetStdHandle, 40)
-	rtgAsmEmit5(a, 0x48, 0x89, 0x44, 0x24, 24)
-}
-
-func rtgWinAmd64LoadSavedHandle(a *rtgAsm) {
-	rtgAsmEmit5(a, 0x48, 0x8b, 0x4c, 0x24, 24)
-}
-
-func rtgWinAmd64EmitKernelReadWriteCall(a *rtgAsm, importID int, countOff int) {
-	rtgWinAmd64LoadSavedHandle(a)
-	rtgAsmEmit5(a, 0x48, 0x8b, 0x54, 0x24, 16)
-	rtgAsmEmit5(a, 0x4c, 0x8b, 0x44, 0x24, 8)
-	rtgAsmPrimaryBssAddr(a, countOff)
-	rtgAsmCopyPrimaryToCallWord5(a)
-	rtgAsmEmit4(a, 0x48, 0x83, 0xec, 40)
-	rtgAsmEmit5(a, 0x48, 0xc7, 0x44, 0x24, 32)
-	rtgAsmEmit32(a, 0)
-	rtgAsmEmit16(a, 0x15ff)
-	at := len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddWinImportReloc(a, at, importID)
-	rtgAsmEmit4(a, 0x48, 0x83, 0xc4, 40)
 }
 
 func rtgWin386EmitReadWriteHelper(g *rtgLinearGen, isWrite bool) int {
