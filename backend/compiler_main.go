@@ -245,6 +245,8 @@ func renvoDecodeUnitProgram(src []byte) (renvoProgram, bool, bool) {
 		return prog, true, false
 	}
 	var text []byte
+	textStart := 0
+	textEnd := 0
 	var tokenData []byte
 	var declData []byte
 	var funcData []byte
@@ -282,6 +284,8 @@ func renvoDecodeUnitProgram(src []byte) (renvoProgram, bool, bool) {
 		}
 		if tag == renvoUnitTagText {
 			text = src[pos:next]
+			textStart = pos
+			textEnd = next
 		}
 		if tag == renvoUnitTagTokens {
 			tokenData = src[pos:next]
@@ -385,6 +389,8 @@ func renvoDecodeUnitProgram(src []byte) (renvoProgram, bool, bool) {
 	if funcReader.pos != funcReader.end {
 		return prog, true, false
 	}
+	renvo_runtime_ArenaDiscardBytes(src[:textStart])
+	renvo_runtime_ArenaDiscardBytes(src[textEnd:])
 	prog.ok = true
 	return prog, true, true
 }

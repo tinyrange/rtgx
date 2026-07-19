@@ -99,21 +99,21 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Funcs); i++ {
 			fn := file.Funcs[i]
-			bodyArenaStart := arena.Mark()
+			functionArenaStart := arena.Mark()
 			body := syntax.ParseFuncBodyStatements(file, fn)
 			if !body.Ok {
-				arena.Reset(bodyArenaStart)
+				arena.Reset(functionArenaStart)
 				return info, false, CheckErrBody, fileIndex, body.ErrorTok
 			}
 			if statementErr, statementTok := invalidDefiniteStatement(file, body); statementErr != CheckOK {
-				arena.Reset(bodyArenaStart)
+				arena.Reset(functionArenaStart)
 				return info, false, statementErr, fileIndex, statementTok
 			}
 			if indexTok := invalidConstantArrayIndex(&pkg, &info, fileIndex, fn, &body); indexTok >= 0 {
-				arena.Reset(bodyArenaStart)
+				arena.Reset(functionArenaStart)
 				return info, false, CheckErrArrayIndex, fileIndex, indexTok
 			}
-			arena.Reset(bodyArenaStart)
+			arena.Reset(functionArenaStart)
 			signature := buildFuncSignature(file, fn)
 			if returnTok := invalidReturnCount(file, fn, signature); returnTok >= 0 {
 				return info, false, CheckErrReturnCount, fileIndex, returnTok
@@ -151,6 +151,10 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			}
 			locals := buildFuncLocalTypeSpansCore(file, fn)
 			out.CoreTypeRefs = buildFuncTypeRefsCore(file, fileIndex, info, checked, signature, locals, scope)
+			out.CoreRefs = renvo_runtime_ArenaPersistCheckNameRefs(out.CoreRefs)
+			out.CoreSelectors = renvo_runtime_ArenaPersistCheckSelectorRefs(out.CoreSelectors)
+			out.CoreTypeRefs = renvo_runtime_ArenaPersistCheckTypeRefs(out.CoreTypeRefs)
+			arena.Reset(functionArenaStart)
 			info.CoreBodies = append(info.CoreBodies, out)
 		}
 	}
@@ -267,7 +271,7 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 			lookupImportTokenNameCore(info, fileIndex, file, i) < 0 {
 			symbolIndex := lookupPackageSymbolTokenCore(info, file, fileIndex, i)
 			if symbolIndex >= 0 {
-				refs = append(refs, CoreNameRef{Token: i, Index: symbolIndex, Package: info.Symbols[symbolIndex].Package})
+				refs = append(refs, CoreNameRef{Token: i, Index: symbolIndex})
 			}
 		}
 		dot := token.Kind == syntax.TokenOperator && token.End == token.Start+1 && file.Src[token.Start] == '.'

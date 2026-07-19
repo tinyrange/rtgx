@@ -173,9 +173,8 @@ type FuncBody struct {
 }
 
 type CoreNameRef struct {
-	Token   int
-	Index   int
-	Package int
+	Token int
+	Index int
 }
 
 type CoreSelectorRef struct {

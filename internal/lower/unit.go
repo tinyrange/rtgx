@@ -8,6 +8,10 @@ import (
 	"renvo.dev/internal/unit"
 )
 
+const transientLowerChunk = 8192
+
+func renvo_runtime_ArenaDiscardLowerTokens(tokens []syntax.Token) {}
+
 // EmitCheckedPackageCore lowers the compact checked-package metadata used by
 // both host-built and self-hosted frontend pipelines.
 func EmitCheckedPackageCore(pkg load.Package, info check.PackageInfo, transient bool) Result {
@@ -46,7 +50,7 @@ func EmitCheckedPackageCore(pkg load.Package, info check.PackageInfo, transient 
 	}
 	for i := 0; i < len(pkg.Files); i++ {
 		file := pkg.Files[i].File
-		if _, ok := builder.addFileTokens(file, pkg.Files[i].Src, i, i+1 < len(pkg.Files)); !ok {
+		if _, ok := builder.addFileTokens(file, pkg.Files[i].Src, i, i+1 < len(pkg.Files), transient); !ok {
 			return emitFail(result, builder.err, builder.errFile, builder.errToken)
 		}
 	}
@@ -147,7 +151,7 @@ func (b *coreUnitBuilder) reserveCheckedPackage(pkg load.Package, info check.Pac
 	b.program.Selectors = make([]unit.Selector, 0, selectorCap)
 }
 
-func (b *coreUnitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex int, hasNext bool) (coreTokenMap, bool) {
+func (b *coreUnitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex int, hasNext bool, transient bool) (coreTokenMap, bool) {
 	base := len(b.program.Text)
 	tokenBase := len(b.program.Tokens)
 	lineOffset := b.lineOffset
@@ -168,7 +172,19 @@ func (b *coreUnitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex 
 			Line:  lineOffset + tok.Line,
 		})
 	}
-	b.program.Text = appendCoreBytes(b.program.Text, src)
+	if transient {
+		renvo_runtime_ArenaDiscardLowerTokens(file.Tokens)
+		for start := 0; start < len(src); start += transientLowerChunk {
+			end := start + transientLowerChunk
+			if end > len(src) {
+				end = len(src)
+			}
+			b.program.Text = appendCoreBytes(b.program.Text, src[start:end])
+			arena.DiscardBytes(src[start:end])
+		}
+	} else {
+		b.program.Text = appendCoreBytes(b.program.Text, src)
+	}
 	b.lineOffset += countCoreNewlines(src)
 	if hasNext && (len(src) == 0 || src[len(src)-1] != '\n') {
 		b.program.Text = append(b.program.Text, '\n')
@@ -311,7 +327,7 @@ func (b *coreUnitBuilder) addCheckedDecls(info check.PackageInfo, files []coreFi
 		if !b.addDeclCalls(declInfo, files[declInfo.File].tokens, ownerIndex) {
 			return false
 		}
-		if !b.addDeclResolution(declInfo, files[declInfo.File].tokens, ownerIndex) {
+		if !b.addDeclResolution(declInfo, files[declInfo.File].tokens, ownerIndex, info.Symbols) {
 			return false
 		}
 	}
@@ -321,17 +337,20 @@ func (b *coreUnitBuilder) addCheckedDecls(info check.PackageInfo, files []coreFi
 func (b *coreUnitBuilder) addCheckedTypeRefs(info check.PackageInfo, files []coreFileTokens) bool {
 	for i := 0; i < len(info.CoreTypeRefs); i++ {
 		ref := info.CoreTypeRefs[i]
-		if ref.File < 0 || ref.File >= len(files) {
-			b.setErr(EmitErrCheck, -1, ref.Token)
+		fileIndex := ref.File
+		ownerDecl := ref.OwnerDecl
+		token := ref.Token
+		if fileIndex < 0 || fileIndex >= len(files) {
+			b.setErr(EmitErrCheck, -1, token)
 			return false
 		}
-		if ref.OwnerDecl < 0 || ref.OwnerDecl >= len(b.declRows) || b.declRows[ref.OwnerDecl] < 0 {
-			b.setErr(EmitErrCheck, ref.File, ref.Token)
+		if ownerDecl < 0 || ownerDecl >= len(b.declRows) || b.declRows[ownerDecl] < 0 {
+			b.setErr(EmitErrCheck, fileIndex, token)
 			return false
 		}
-		mapped, ok := mapCoreTypeRef(ref, files[ref.File].tokens, b.finalEOF, b.declRows[ref.OwnerDecl])
+		mapped, ok := mapCoreTypeRef(ref, files[fileIndex].tokens, b.finalEOF, b.declRows[ownerDecl])
 		if !ok {
-			b.setErr(EmitErrCheck, ref.File, ref.Token)
+			b.setErr(EmitErrCheck, fileIndex, token)
 			return false
 		}
 		b.program.TypeRefs = append(b.program.TypeRefs, mapped)
@@ -368,7 +387,7 @@ func (b *coreUnitBuilder) addCheckedFuncs(info check.PackageInfo, files []coreFi
 		if !b.addBodyCalls(body, files[body.File].tokens, ownerIndex) {
 			return false
 		}
-		if !b.addBodyResolution(body, files[body.File].tokens, ownerIndex) {
+		if !b.addBodyResolution(body, files[body.File].tokens, ownerIndex, info.Symbols) {
 			return false
 		}
 		if !b.addBodyTypeRefs(body, files[body.File].tokens, ownerIndex) {
@@ -411,9 +430,9 @@ func (b *coreUnitBuilder) addDeclCalls(decl check.DeclInfo, mapping coreTokenMap
 	return true
 }
 
-func (b *coreUnitBuilder) addDeclResolution(decl check.DeclInfo, mapping coreTokenMap, ownerIndex int) bool {
+func (b *coreUnitBuilder) addDeclResolution(decl check.DeclInfo, mapping coreTokenMap, ownerIndex int, symbols []check.Symbol) bool {
 	for i := 0; i < len(decl.CoreRefs); i++ {
-		ref, ok := mapCoreNameRef(decl.CoreRefs[i], mapping, b.finalEOF, ownerIndex)
+		ref, ok := mapCoreNameRef(decl.CoreRefs[i], mapping, b.finalEOF, ownerIndex, symbols)
 		if !ok {
 			b.setErr(EmitErrCheck, decl.File, decl.Token)
 			return false
@@ -431,9 +450,9 @@ func (b *coreUnitBuilder) addDeclResolution(decl check.DeclInfo, mapping coreTok
 	return true
 }
 
-func (b *coreUnitBuilder) addBodyResolution(body check.CoreFuncBody, mapping coreTokenMap, ownerIndex int) bool {
+func (b *coreUnitBuilder) addBodyResolution(body check.CoreFuncBody, mapping coreTokenMap, ownerIndex int, symbols []check.Symbol) bool {
 	for i := 0; i < len(body.CoreRefs); i++ {
-		ref, ok := mapCoreNameRef(body.CoreRefs[i], mapping, b.finalEOF, ownerIndex)
+		ref, ok := mapCoreNameRef(body.CoreRefs[i], mapping, b.finalEOF, ownerIndex, symbols)
 		if !ok {
 			b.setErr(EmitErrCheck, body.File, body.ErrorToken)
 			return false
@@ -522,12 +541,15 @@ func mapCoreCallRef(call check.CallRef, mapping coreTokenMap, eof int) (unit.Cal
 	return out, true
 }
 
-func mapCoreNameRef(ref check.CoreNameRef, mapping coreTokenMap, eof int, ownerIndex int) (unit.NameRef, bool) {
+func mapCoreNameRef(ref check.CoreNameRef, mapping coreTokenMap, eof int, ownerIndex int, symbols []check.Symbol) (unit.NameRef, bool) {
+	if ref.Index < 0 || ref.Index >= len(symbols) {
+		return unit.NameRef{}, false
+	}
 	out := unit.NameRef{
 		Kind:    unit.RefPackage,
 		Token:   mapCoreToken(mapping, ref.Token, eof),
 		Index:   ref.Index,
-		Package: ref.Package,
+		Package: symbols[ref.Index].Package,
 	}
 	if ownerIndex < 0 || out.Token < 0 || out.Index < -1 || out.Package < -1 {
 		return out, false
