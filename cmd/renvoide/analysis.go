@@ -100,7 +100,7 @@ func analysisReplaceSource(session *editorAnalysisSession, source []byte) {
 }
 
 func (f *MainForm) collectEditorAnalysisFiles(path string, source []byte) []load.SourceFile {
-	fs := completionOverlayFS{base: completionSourceFS(), path: path, data: source}
+	fs := completionOverlayFS{path: path, data: source}
 	sources := driver.CollectSourcesForTargetTagsWithModuleCache(f.root, completionStdRoot(f.env), ".", f.selectedTarget, nil, completionModuleCache(f.env), fs)
 	if !sources.Ok && sources.Error != driver.SourceErrParse {
 		return nil

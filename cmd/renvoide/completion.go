@@ -8,20 +8,19 @@ import (
 )
 
 type completionOverlayFS struct {
-	base driver.SourceFS
 	path string
 	data []byte
 }
 
 func (fs completionOverlayFS) ReadDir(path string) ([]driver.DirEntry, bool) {
-	return fs.base.ReadDir(path)
+	return completionReadDir(path)
 }
 
 func (fs completionOverlayFS) ReadFile(path string) ([]byte, bool) {
 	if load.CleanPath(path) == fs.path {
 		return fs.data, true
 	}
-	return fs.base.ReadFile(path)
+	return completionReadFile(path)
 }
 
 func (f *MainForm) completeEditor(source []byte, caret int) []ide.Completion {

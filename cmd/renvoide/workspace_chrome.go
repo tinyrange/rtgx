@@ -99,15 +99,15 @@ func newWorkspaceAppBar(font *graphics.Font) *workspaceAppBar {
 }
 
 func (c *workspaceAppBar) pointerDown(x, y graphics.Scalar) {
-	if x >= 170 && x < 326 && c.OpenTargets != nil {
+	if x >= 290 && x < 446 && c.OpenTargets != nil {
 		c.OpenTargets()
 		return
 	}
-	if x >= 334 && x < 406 && c.Build != nil {
+	if x >= 454 && x < 526 && c.Build != nil {
 		c.Build()
 		return
 	}
-	if x >= 414 && x < 480 && c.Run != nil {
+	if x >= 534 && x < 600 && c.Run != nil {
 		c.Run()
 	}
 }
@@ -129,20 +129,15 @@ func (c *workspaceAppBar) paint(surface *graphics.Surface) {
 	surface.DrawLine(graphics.Point{X: logo.MinX + 4, Y: logo.MaxY - 4}, graphics.Point{X: logo.MinX + 9, Y: logo.MinY + 4}, 2, workspaceWhite)
 	surface.DrawLine(graphics.Point{X: logo.MinX + 9, Y: logo.MinY + 4}, graphics.Point{X: logo.MaxX - 4, Y: logo.MaxY - 4}, 2, workspaceWhite)
 	drawWorkspaceText(surface, c.font, bounds.MinX+45, bounds.MinY+29, "MiniIDE", workspaceText)
-	menuX := bounds.MinX + 124
-	for i := 0; i < 3; i++ {
-		y := bounds.MinY + 18 + graphics.Scalar(i*5)
-		surface.DrawLine(graphics.Point{X: menuX, Y: y}, graphics.Point{X: menuX + 13, Y: y}, 1, workspaceMuted)
-	}
-	targetBounds := graphics.R(bounds.MinX+170, bounds.MinY+9, 156, 28)
+	targetBounds := graphics.R(bounds.MinX+290, bounds.MinY+9, 156, 28)
 	surface.FillRect(targetBounds, workspaceField)
 	surface.StrokeRect(targetBounds, 1, workspaceBorder)
 	drawWorkspaceText(surface, c.font, targetBounds.MinX+10, targetBounds.MinY+19, c.target, workspaceText)
 	drawChevron(surface, targetBounds.MaxX-18, targetBounds.MinY+12, true, workspaceMuted)
-	buildBounds := graphics.R(bounds.MinX+334, bounds.MinY+9, 72, 28)
+	buildBounds := graphics.R(bounds.MinX+454, bounds.MinY+9, 72, 28)
 	surface.FillRect(buildBounds, workspaceBlueLight)
 	drawWorkspaceText(surface, c.font, buildBounds.MinX+15, buildBounds.MinY+19, "BUILD", workspaceBlue)
-	runBounds := graphics.R(bounds.MinX+414, bounds.MinY+9, 66, 28)
+	runBounds := graphics.R(bounds.MinX+534, bounds.MinY+9, 66, 28)
 	surface.FillRect(runBounds, workspaceBlue)
 	drawRunIcon(surface, runBounds.MinX+11, runBounds.MinY+8, workspaceWhite)
 	drawWorkspaceText(surface, c.font, runBounds.MinX+28, runBounds.MinY+19, "RUN", workspaceWhite)

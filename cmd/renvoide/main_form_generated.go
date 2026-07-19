@@ -3,6 +3,7 @@
 package main
 
 import (
+	"renvo.dev/forms"
 	"renvo.dev/ide"
 	"renvo.dev/std/graphics"
 )
@@ -24,6 +25,41 @@ func (f *MainForm) initializeComponent(root string) {
 	f.output = newWorkspaceOutput(uiFont)
 	f.appBar.Build = f.buildProject
 	f.appBar.Run = f.runProject
+	f.menuBar = forms.NewMenuBar()
+	f.menuBar.SetFont(uiFont)
+	fileMenu := forms.NewMenu("File")
+	newProjectItem := forms.NewMenuItem("New Project...")
+	newProjectItem.SetShortcut(forms.Shortcut{Key: graphics.KeyN, Modifiers: graphics.ModifierShift, Primary: true, Text: "Ctrl/Cmd+Shift+N"})
+	newProjectItem.Activate = f.chooseNewProject
+	fileMenu.Add(newProjectItem)
+	openProjectItem := forms.NewMenuItem("Open Project...")
+	openProjectItem.SetShortcut(forms.Shortcut{Key: graphics.KeyO, Modifiers: graphics.ModifierShift, Primary: true, Text: "Ctrl/Cmd+Shift+O"})
+	openProjectItem.Activate = f.chooseOpenProject
+	fileMenu.Add(openProjectItem)
+	fileMenu.Add(forms.NewMenuSeparator())
+	openFileItem := forms.NewMenuItem("Open File...")
+	openFileItem.SetShortcut(forms.Shortcut{Key: graphics.KeyO, Primary: true, Text: "Ctrl/Cmd+O"})
+	openFileItem.Activate = f.chooseOpenFile
+	fileMenu.Add(openFileItem)
+	saveItem := forms.NewMenuItem("Save")
+	saveItem.SetShortcut(forms.Shortcut{Key: graphics.KeyS, Primary: true, Text: "Ctrl/Cmd+S"})
+	saveItem.Activate = f.saveCurrentFile
+	fileMenu.Add(saveItem)
+	saveAsItem := forms.NewMenuItem("Save As...")
+	saveAsItem.SetShortcut(forms.Shortcut{Key: graphics.KeyS, Modifiers: graphics.ModifierShift, Primary: true, Text: "Ctrl/Cmd+Shift+S"})
+	saveAsItem.Activate = f.saveCurrentFileAs
+	fileMenu.Add(saveAsItem)
+	f.menuBar.Add(fileMenu)
+	buildMenu := forms.NewMenu("Build")
+	buildItem := forms.NewMenuItem("Build Project")
+	buildItem.SetShortcut(forms.Shortcut{Key: graphics.KeyB, Primary: true, Text: "Ctrl/Cmd+B"})
+	buildItem.Activate = f.buildProject
+	buildMenu.Add(buildItem)
+	runItem := forms.NewMenuItem("Run Project")
+	runItem.Activate = f.runProject
+	buildMenu.Add(runItem)
+	f.menuBar.Add(buildMenu)
+	f.Form.SetMenuBar(f.menuBar)
 	f.editorFrame.ShowDesigner = f.showDesigner
 	f.designer.ShowCode = f.showCode
 	f.designer.SetDesign(&f.design)
@@ -56,6 +92,7 @@ func (f *MainForm) initializeComponent(root string) {
 	f.Add(&f.explorer.Control)
 	f.Add(&f.editor.Control)
 	f.Add(&f.targetMenu.Control)
+	f.Add(&f.menuBar.Control)
 	f.designer.SetVisible(false)
 	f.inspector.SetVisible(false)
 	f.targetMenu.SetVisible(false)

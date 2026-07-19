@@ -148,6 +148,7 @@ type Form struct {
 	invalid    []graphics.Rect
 	focused    *Control
 	pressed    *Control
+	menuBar    *MenuBar
 
 	Resize          EventHandler
 	PaintBackground PaintHandler
@@ -167,6 +168,7 @@ func (f *Form) Initialize(width, height int) {
 	f.invalid = nil
 	f.focused = nil
 	f.pressed = nil
+	f.menuBar = nil
 	f.Invalidate(f.clientRect())
 }
 
@@ -228,6 +230,9 @@ func (f *Form) Remove(control *Control) {
 		if f.pressed == control {
 			f.pressed = nil
 		}
+		if f.menuBar != nil && control == &f.menuBar.Control {
+			f.menuBar = nil
+		}
 		return
 	}
 }
@@ -239,6 +244,15 @@ func (f *Form) Controls() []*Control {
 	controls := make([]*Control, len(f.controls))
 	copy(controls, f.controls)
 	return controls
+}
+
+// SetMenuBar registers the form's application menu for global shortcut and
+// outside-click routing. Generated code still adds its Control explicitly so
+// z-order remains visible in the generated component list.
+func (f *Form) SetMenuBar(menuBar *MenuBar) {
+	if f != nil {
+		f.menuBar = menuBar
+	}
 }
 
 // Invalidate queues an exact client-space rectangle. Contained rectangles are
@@ -331,6 +345,9 @@ func (f *Form) Dispatch(event graphics.Event) {
 	}
 	if event.Type == graphics.EventPointerDown {
 		control := f.hitTest(event.X, event.Y)
+		if f.menuBar != nil && control != &f.menuBar.Control {
+			f.menuBar.dismiss()
+		}
 		f.pressed = control
 		if control != nil {
 			control.Focus()
@@ -371,6 +388,11 @@ func (f *Form) Dispatch(event graphics.Event) {
 			control.PointerWheel(event.WheelX, event.WheelY)
 		}
 		return
+	}
+	if event.Type == graphics.EventKeyDown {
+		if f.menuBar != nil && f.menuBar.Visible() && f.menuBar.Enabled() && f.menuBar.commandKey(event) {
+			return
+		}
 	}
 	if f.focused == nil {
 		return

@@ -69,8 +69,12 @@ const (
 	KeyPageUp
 	KeyPageDown
 	KeyA
+	KeyB
 	KeyC
 	KeyI
+	KeyN
+	KeyO
+	KeyQ
 	KeyS
 	KeyV
 	KeyX
@@ -245,11 +249,23 @@ func windowsKeyFromVirtual(key int) Key {
 	if key == 65 {
 		return KeyA
 	}
+	if key == 66 {
+		return KeyB
+	}
 	if key == 67 {
 		return KeyC
 	}
 	if key == 73 {
 		return KeyI
+	}
+	if key == 78 {
+		return KeyN
+	}
+	if key == 79 {
+		return KeyO
+	}
+	if key == 81 {
+		return KeyQ
 	}
 	if key == 83 {
 		return KeyS
@@ -315,11 +331,23 @@ func darwinKeyFromCode(key int) Key {
 	if key == 0 {
 		return KeyA
 	}
+	if key == 11 {
+		return KeyB
+	}
 	if key == 8 {
 		return KeyC
 	}
 	if key == 34 {
 		return KeyI
+	}
+	if key == 45 {
+		return KeyN
+	}
+	if key == 31 {
+		return KeyO
+	}
+	if key == 12 {
+		return KeyQ
 	}
 	if key == 1 {
 		return KeyS
