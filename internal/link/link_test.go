@@ -917,6 +917,31 @@ func appMain() int {
 	}
 }
 
+func TestLinkBuildCoreLowersDeferredPrintBuiltin(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func argument(value string) string { return value }
+
+func main() {
+	value := "done"
+	defer print(argument(value), "\n")
+	defer panic("expected")
+	defer recover()
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	text := linked.Program.Text
+	if bytes.Contains(text, []byte("defer print(")) || bytes.Contains(text, []byte("defer panic(")) || bytes.Contains(text, []byte("defer recover(")) || !bytes.Contains(text, []byte("argument(value)")) || !bytes.Contains(text, []byte("__renvo_defer_")) {
+		t.Fatalf("linked text did not lower deferred print through registration-time arguments:\n%s", text)
+	}
+}
+
 func TestLinkBuildCorePreservesPackageInitVarDeps(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

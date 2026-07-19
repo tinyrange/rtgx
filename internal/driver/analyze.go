@@ -101,6 +101,8 @@ func analysisCheckDiagnostic(graph load.Graph, program check.Program) Diagnostic
 		code, message = "RENVO-CHECK-016", "call argument is not assignable to its parameter"
 	case check.CheckErrArrayIndex:
 		code, message = "RENVO-CHECK-025", "constant array index is out of bounds"
+	case check.CheckErrDeferBuiltin:
+		code, message = "RENVO-CHECK-026", "deferred builtin call discards a result"
 	}
 	diagnostic := Diagnostic{Phase: "checker", Code: code, Message: message}
 	if program.ErrorPackage < 0 || program.ErrorPackage >= len(graph.Packages) {
