@@ -19,7 +19,9 @@ func TestGeneratedHelloFormIsGoSourceWithDesignerOwnedStructAndWiring(t *testing
 		"type MainForm struct",
 		"f.uiFont = gofont.New(15)",
 		"f.messageLabel = forms.NewLabel()",
+		`f.messageLabel.SetAccessibilityID("MainForm.messageLabel")`,
 		"f.helloButton = forms.NewButton()",
+		`f.helloButton.SetAccessibilityID("MainForm.helloButton")`,
 		"f.helloButton.Click = f.helloButtonClick",
 	} {
 		if !strings.Contains(text, want) {

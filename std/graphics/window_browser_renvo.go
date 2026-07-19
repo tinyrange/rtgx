@@ -3,7 +3,7 @@
 package graphics
 
 var browserClipboard string
-var browserEventBuffer [4136]byte
+var browserEventBuffer [40]byte
 var browserFrameHeader [20]byte
 var browserNextWindowID = 1
 
@@ -46,11 +46,12 @@ func (w *Window) Wait() (Event, bool) {
 	}
 	event.TimerID = browserInt32(buf, 20)
 	textLen := browserInt32(buf, 36)
-	if textLen > n-40 {
-		textLen = n - 40
-	}
 	if textLen > 0 {
-		event.Text = string(buf[40 : 40+textLen])
+		text := make([]byte, textLen)
+		if read(0, text, -1) != textLen {
+			return Event{}, false
+		}
+		event.Text = string(text)
 	}
 	if event.Type == EventWindowResize {
 		width, height := int(event.X), int(event.Y)
@@ -90,6 +91,20 @@ func (w *Window) Present() bool {
 	}
 	w.surface.ResetDirty()
 	return true
+}
+
+// PresentAccessibility sends an incremental semantic-tree patch alongside the
+// WebGL frame stream. It is browser-only so native and embedded hosts pay no
+// adapter cost until they opt into one.
+func (w *Window) PresentAccessibility(data []byte) bool {
+	if w == nil || w.closed {
+		return false
+	}
+	header := browserFrameHeader[:12]
+	copy(header, []byte("RNVA"))
+	browserPut32(header, 4, w.native)
+	browserPut32(header, 8, len(data))
+	return write(3, header, -1) == len(header) && write(3, data, -1) == len(data)
 }
 
 func (w *Window) ReadPixels() *Image {

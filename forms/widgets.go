@@ -13,6 +13,7 @@ func NewLabel() *Label {
 	label := &Label{}
 	label.Control = *NewControl()
 	label.SetTabStop(false)
+	label.SetAccessibilityRole(AccessibilityRoleLabel)
 	label.SetBackground(graphics.RGBA(255, 255, 255, 0))
 	label.Paint = label.paint
 	return label
@@ -50,6 +51,7 @@ func NewButton() *Button {
 	button.Control = *NewControl()
 	button.SetBackground(graphics.RGBA(25, 118, 210, 255))
 	button.SetForeground(graphics.White)
+	button.SetAccessibilityRole(AccessibilityRoleButton)
 	button.Paint = button.paint
 	button.PointerDown = button.pointerDown
 	button.PointerUp = button.pointerUp
@@ -125,6 +127,7 @@ func NewTextBox() *TextBox {
 	box.Control = *NewControl()
 	box.SetBackground(graphics.White)
 	box.SetForeground(graphics.RGBA(32, 36, 42, 255))
+	box.SetAccessibilityRole(AccessibilityRoleTextBox)
 	box.Paint = box.paint
 	box.TextInput = box.textInput
 	box.KeyDown = box.keyDown
@@ -171,6 +174,8 @@ func NewTextArea() *TextArea {
 	area.Control = *NewControl()
 	area.SetBackground(graphics.White)
 	area.SetForeground(graphics.RGBA(32, 36, 42, 255))
+	area.SetAccessibilityRole(AccessibilityRoleTextBox)
+	area.SetAccessibilityMultiline(true)
 	area.Paint = area.paint
 	area.TextInput = area.textInput
 	area.KeyDown = area.keyDown
@@ -255,6 +260,10 @@ func NewCheckBox() *CheckBox {
 	box := &CheckBox{}
 	box.Control = *NewControl()
 	box.SetBackground(graphics.RGBA(255, 255, 255, 0))
+	box.SetAccessibilityRole(AccessibilityRoleCheckBox)
+	box.AccessibilityCheckable = true
+	box.AccessibilityChecked = box.accessibilityChecked
+	box.AccessibilityInvoke = box.accessibilityInvoke
 	box.Paint = box.paint
 	box.PointerUp = box.pointerUp
 	return box
@@ -273,7 +282,17 @@ func (b *CheckBox) SetFont(font *graphics.Font) {
 func (b *CheckBox) SetChecked(checked bool) {
 	if b != nil && b.checked != checked {
 		b.checked = checked
+		b.AccessibilityChanged()
 		b.Invalidate()
+	}
+}
+
+func (b *CheckBox) accessibilityChecked() bool { return b.checked }
+
+func (b *CheckBox) accessibilityInvoke() {
+	b.SetChecked(!b.checked)
+	if b.Click != nil {
+		b.Click()
 	}
 }
 
@@ -308,6 +327,10 @@ func NewRadioButton() *RadioButton {
 	button := &RadioButton{}
 	button.Control = *NewControl()
 	button.SetBackground(graphics.RGBA(255, 255, 255, 0))
+	button.SetAccessibilityRole(AccessibilityRoleRadioButton)
+	button.AccessibilityCheckable = true
+	button.AccessibilityChecked = button.accessibilityChecked
+	button.AccessibilityInvoke = button.accessibilityInvoke
 	button.Paint = button.paint
 	button.PointerUp = button.pointerUp
 	return button
@@ -326,7 +349,17 @@ func (b *RadioButton) SetFont(font *graphics.Font) {
 func (b *RadioButton) SetChecked(checked bool) {
 	if b != nil && b.checked != checked {
 		b.checked = checked
+		b.AccessibilityChanged()
 		b.Invalidate()
+	}
+}
+
+func (b *RadioButton) accessibilityChecked() bool { return b.checked }
+
+func (b *RadioButton) accessibilityInvoke() {
+	b.SetChecked(true)
+	if b.Click != nil {
+		b.Click()
 	}
 }
 
@@ -364,6 +397,7 @@ func NewPictureBox() *PictureBox {
 	box := &PictureBox{}
 	box.Control = *NewControl()
 	box.SetTabStop(false)
+	box.SetAccessibilityRole(AccessibilityRoleImage)
 	box.SetBackground(graphics.RGBA(241, 243, 246, 255))
 	box.Paint = box.paint
 	return box

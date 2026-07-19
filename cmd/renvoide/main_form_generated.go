@@ -14,18 +14,28 @@ func (f *MainForm) initializeComponent(root string) {
 	codeFont := ide.NewUIFont()
 
 	f.appBar = newWorkspaceAppBar(uiFont)
+	f.appBar.SetAccessibilityID("app-bar")
 	f.appBar.SetTarget(f.selectedTarget)
 	f.appBar.OpenTargets = f.toggleTargetMenu
 	f.targetMenu = newWorkspaceTargetMenu(uiFont, workspaceTargets())
+	f.targetMenu.SetAccessibilityID("target-menu")
 	f.targetMenu.Select = f.selectBuildTarget
 	f.explorerFrame = newWorkspaceExplorerFrame(uiFont)
+	f.explorerFrame.SetAccessibilityID("explorer-pane")
 	f.editorFrame = newWorkspaceEditorFrame(uiFont)
+	f.editorFrame.SetAccessibilityID("editor-pane")
 	f.designer = newWorkspaceDesigner(uiFont)
+	f.designer.SetAccessibilityID("form-designer")
+	f.designer.SetAccessibilityName("Form designer")
 	f.inspector = newWorkspaceInspector(uiFont)
+	f.inspector.SetAccessibilityID("properties")
+	f.inspector.SetAccessibilityName("Properties")
 	f.output = newWorkspaceOutput(uiFont)
+	f.output.SetAccessibilityID("build-output")
 	f.appBar.Build = f.buildProject
 	f.appBar.Run = f.runProject
 	f.menuBar = forms.NewMenuBar()
+	f.menuBar.SetAccessibilityID("main-menu")
 	f.menuBar.SetFont(uiFont)
 	fileMenu := forms.NewMenu("File")
 	newProjectItem := forms.NewMenuItem("New Project...")
@@ -72,10 +82,12 @@ func (f *MainForm) initializeComponent(root string) {
 	f.inspector.CreateEvent = f.createDesignerEvent
 
 	f.explorer = ide.NewExplorerControl(ide.OpenExplorer(root))
+	f.explorer.SetAccessibilityID("project-explorer")
 	f.explorer.SetFont(uiFont)
 	f.explorer.OpenFile = f.explorerOpenFile
 
 	f.editor = ide.NewEditorControl(ide.NewDocument(nil))
+	f.editor.SetAccessibilityID("code-editor")
 	f.editor.SetFont(codeFont)
 	f.editor.Save = f.saveCurrentFile
 	f.editor.Changed = f.editorChanged

@@ -74,6 +74,7 @@ func TestMenuBarKeyboardNavigationActivatesSelectedItem(t *testing.T) {
 	var form Form
 	form.Initialize(360, 180)
 	menu := NewMenuBar()
+	menu.SetAccessibilityID("main-menu")
 	menu.SetBounds(graphics.R(0, 0, 220, 34))
 	menu.SetFont(graphics.NewBuiltinFont(1))
 	file := NewMenu("File")
@@ -91,5 +92,12 @@ func TestMenuBarKeyboardNavigationActivatesSelectedItem(t *testing.T) {
 	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeyEnter})
 	if called != 1 || menu.Open() {
 		t.Fatalf("keyboard selection = called %d open %v", called, menu.Open())
+	}
+	driver := NewAutomationDriver(&form)
+	if !driver.Invoke("main-menu-menu-1") || !menu.Open() {
+		t.Fatal("semantic menu invocation did not open File")
+	}
+	if !driver.Invoke("main-menu-menu-1-item-2") || called != 2 || menu.Open() {
+		t.Fatalf("semantic item state = called %d open %v", called, menu.Open())
 	}
 }

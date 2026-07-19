@@ -75,6 +75,7 @@ func (item *MenuItem) SetShortcut(shortcut Shortcut) {
 func (item *MenuItem) invalidate() {
 	if item != nil && item.menu != nil && item.menu.bar != nil {
 		item.menu.bar.refreshBounds()
+		item.menu.bar.AccessibilityChildrenChanged()
 		item.menu.bar.Invalidate()
 	}
 }
@@ -95,6 +96,7 @@ func (menu *Menu) SetText(text string) {
 	menu.text = text
 	if menu.bar != nil {
 		menu.bar.refreshBounds()
+		menu.bar.AccessibilityChildrenChanged()
 		menu.bar.Invalidate()
 	}
 }
@@ -110,6 +112,7 @@ func (menu *Menu) Add(item *MenuItem) {
 	menu.items = append(menu.items, item)
 	if menu.bar != nil {
 		menu.bar.refreshBounds()
+		menu.bar.AccessibilityChildrenChanged()
 		menu.bar.Invalidate()
 	}
 }
@@ -129,6 +132,10 @@ func NewMenuBar() *MenuBar {
 	bar := &MenuBar{openMenu: -1, selectedItem: -1}
 	bar.Control = *NewControl()
 	bar.SetTabStop(false)
+	bar.SetAccessibilityRole(AccessibilityRoleMenuBar)
+	bar.SetAccessibilityName("Application menu")
+	bar.AccessibilityChildren = bar.accessibilityChildren
+	bar.AccessibilityPerform = bar.accessibilityPerform
 	bar.SetBackground(menuBarBackground)
 	bar.SetForeground(menuBarText)
 	bar.Paint = bar.paint
@@ -167,6 +174,7 @@ func (bar *MenuBar) Add(menu *Menu) {
 	menu.bar = bar
 	bar.menus = append(bar.menus, menu)
 	bar.refreshBounds()
+	bar.AccessibilityChildrenChanged()
 	bar.Invalidate()
 }
 
@@ -194,6 +202,7 @@ func (bar *MenuBar) dismiss() {
 	bar.openMenu = -1
 	bar.selectedItem = -1
 	bar.refreshBounds()
+	bar.AccessibilityChildrenChanged()
 	bar.Invalidate()
 }
 
@@ -308,6 +317,7 @@ func (bar *MenuBar) pointerDown(x, y graphics.Scalar) {
 		bar.openMenu = menuIndex
 		bar.selectedItem = bar.firstEnabledItem(bar.menus[menuIndex])
 		bar.refreshBounds()
+		bar.AccessibilityChildrenChanged()
 		bar.Invalidate()
 		return
 	}
@@ -336,12 +346,14 @@ func (bar *MenuBar) pointerMove(x, y graphics.Scalar) {
 		bar.openMenu = menuIndex
 		bar.selectedItem = bar.firstEnabledItem(bar.menus[menuIndex])
 		bar.refreshBounds()
+		bar.AccessibilityChildrenChanged()
 		bar.Invalidate()
 		return
 	}
 	index := bar.itemAt(globalY)
 	if index >= 0 && bar.menus[bar.openMenu].items[index].enabled && index != bar.selectedItem {
 		bar.selectedItem = index
+		bar.AccessibilityChildrenChanged()
 		bar.Invalidate()
 	}
 }
@@ -378,6 +390,7 @@ func (bar *MenuBar) commandKey(event graphics.Event) bool {
 			bar.openMenu = (bar.openMenu + direction + len(bar.menus)) % len(bar.menus)
 			bar.selectedItem = bar.firstEnabledItem(bar.menus[bar.openMenu])
 			bar.refreshBounds()
+			bar.AccessibilityChildrenChanged()
 			bar.Invalidate()
 			return true
 		}
@@ -433,10 +446,130 @@ func (bar *MenuBar) moveSelection(forward bool) {
 		index = (index + direction + len(items)) % len(items)
 		if items[index].enabled && !items[index].separator {
 			bar.selectedItem = index
+			bar.AccessibilityChildrenChanged()
 			bar.Invalidate()
 			return
 		}
 	}
+}
+
+func (bar *MenuBar) accessibilityChildren() []AccessibilityNode {
+	if bar == nil {
+		return nil
+	}
+	nodes := make([]AccessibilityNode, 0, len(bar.menus)+8)
+	baseID := bar.AccessibilityID()
+	for i := 0; i < len(bar.menus); i++ {
+		menuID := baseID + "-menu-" + accessibilityDecimal(i+1)
+		nodes = append(nodes, AccessibilityNode{
+			ID:         menuID,
+			Role:       AccessibilityRoleMenuItem,
+			Name:       bar.menus[i].text,
+			Bounds:     graphics.R(bar.menuX(i), bar.barBounds.MinY, bar.menuWidth(bar.menus[i]), bar.barBounds.Height()),
+			Actions:    AccessibilitySupportsInvoke,
+			Selectable: true,
+			Selected:   i == bar.openMenu,
+		})
+		if i != bar.openMenu {
+			continue
+		}
+		y := bar.barBounds.MaxY + menuDropPadding
+		width := bar.dropWidth(bar.menus[i])
+		for j := 0; j < len(bar.menus[i].items); j++ {
+			item := bar.menus[i].items[j]
+			height := graphics.Scalar(menuItemHeight)
+			role := AccessibilityRoleMenuItem
+			if item.separator {
+				height = menuSeparatorHeight
+				role = AccessibilityRoleSeparator
+			}
+			actions := 0
+			if item.enabled && !item.separator {
+				actions = AccessibilitySupportsInvoke
+			}
+			nodes = append(nodes, AccessibilityNode{
+				ID:          menuID + "-item-" + accessibilityDecimal(j+1),
+				ParentID:    menuID,
+				Role:        role,
+				Name:        item.text,
+				Description: item.shortcut.Text,
+				Bounds:      graphics.R(bar.menuX(i), y, width, height),
+				Actions:     actions,
+				Disabled:    !item.enabled,
+				Selectable:  !item.separator,
+				Selected:    j == bar.selectedItem,
+			})
+			y += height
+		}
+	}
+	return nodes
+}
+
+func (bar *MenuBar) accessibilityPerform(id string, action AccessibilityAction, value string) bool {
+	if bar == nil || action != AccessibilityActionInvoke {
+		return false
+	}
+	menuIndex, itemIndex, ok := menuAccessibilityIndices(id, bar.AccessibilityID()+"-menu-")
+	if !ok || menuIndex < 0 || menuIndex >= len(bar.menus) {
+		return false
+	}
+	if itemIndex < 0 {
+		if bar.openMenu == menuIndex {
+			bar.dismiss()
+		} else {
+			bar.openMenu = menuIndex
+			bar.selectedItem = bar.firstEnabledItem(bar.menus[menuIndex])
+			bar.refreshBounds()
+			bar.Invalidate()
+		}
+		return true
+	}
+	if bar.openMenu != menuIndex {
+		return false
+	}
+	bar.activate(itemIndex)
+	return true
+}
+
+func menuAccessibilityIndices(id, prefix string) (int, int, bool) {
+	if len(id) <= len(prefix) || !accessibilityHasPrefix(id, prefix) {
+		return -1, -1, false
+	}
+	at := len(prefix)
+	menu := 0
+	for at < len(id) && id[at] >= '0' && id[at] <= '9' {
+		menu = menu*10 + int(id[at]-'0')
+		at++
+	}
+	if menu == 0 {
+		return -1, -1, false
+	}
+	if at == len(id) {
+		return menu - 1, -1, true
+	}
+	itemPrefix := "-item-"
+	if !accessibilityHasPrefix(id[at:], itemPrefix) {
+		return -1, -1, false
+	}
+	at += len(itemPrefix)
+	item := 0
+	for at < len(id) && id[at] >= '0' && id[at] <= '9' {
+		item = item*10 + int(id[at]-'0')
+		at++
+	}
+	return menu - 1, item - 1, item > 0 && at == len(id)
+}
+
+func accessibilityHasPrefix(text, prefix string) bool {
+	if len(text) < len(prefix) {
+		return false
+	}
+	for i := 0; i < len(prefix); i++ {
+		if text[i] != prefix[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func shortcutMatches(shortcut Shortcut, event graphics.Event) bool {

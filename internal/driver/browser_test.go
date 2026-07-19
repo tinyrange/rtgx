@@ -20,6 +20,9 @@ func TestPackageBrowserHTMLIsSelfContained(t *testing.T) {
 		[]byte("ResizeObserver"),
 		[]byte("/workspace"),
 		[]byte("setWindowTimer"),
+		[]byte("RNVA"),
+		[]byte("semanticRoles"),
+		[]byte("aria-label"),
 	} {
 		if !bytes.Contains(html, fragment) {
 			t.Fatalf("browser HTML is missing %q", string(fragment))

@@ -119,6 +119,7 @@ func TestEditorTabCompletionSelectsAndReplacesPrefix(t *testing.T) {
 	document := NewDocument([]byte("f.SetT"))
 	document.MoveDocumentEnd(false)
 	control := NewEditorControl(document)
+	control.SetAccessibilityID("code-editor")
 	control.SetBounds(graphics.R(0, 0, 500, 200))
 	control.Complete = func(source []byte, caret int) []Completion {
 		return []Completion{{Text: "SetText", Detail: "method"}, {Text: "SetTitle", Detail: "method"}}
@@ -126,13 +127,27 @@ func TestEditorTabCompletionSelectsAndReplacesPrefix(t *testing.T) {
 	var form forms.Form
 	form.Initialize(500, 200)
 	form.Add(&control.Control)
+	form.TakeAccessibilityUpdate()
 	control.Focus()
 	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeyTab})
 	form.Dispatch(graphics.Event{Type: graphics.EventTextInput, Text: "\t"})
 	if len(control.completions) != 2 {
 		t.Fatalf("completion popup = %#v", control.completions)
 	}
+	driver := forms.NewAutomationDriver(&form)
+	items := driver.Find(forms.AccessibilityRoleListItem, "")
+	if len(items) != 2 || items[0].Name != "SetText" || items[1].Name != "SetTitle" {
+		t.Fatalf("completion semantics = %#v", items)
+	}
+	opened, ok := form.TakeAccessibilityUpdate()
+	if !ok || len(opened.ReplaceChildren) != 1 {
+		t.Fatalf("completion-open update = %#v, %v", opened, ok)
+	}
 	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeyDown})
+	selection, ok := form.TakeAccessibilityUpdate()
+	if !ok || len(selection.ReplaceChildren) != 0 {
+		t.Fatalf("completion selection rebuilt its semantic children: %#v, %v", selection, ok)
+	}
 	surface := graphics.NewSurface(500, 200)
 	form.Paint(surface)
 	popup := control.completionBounds()

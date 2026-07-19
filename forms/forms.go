@@ -17,14 +17,19 @@ type KeyHandler func(event graphics.Event)
 // through setters so the owning form can invalidate the precise old and new
 // areas affected by a change.
 type Control struct {
-	form       *Form
-	bounds     graphics.Rect
-	visible    bool
-	enabled    bool
-	tabStop    bool
-	background graphics.Color
-	foreground graphics.Color
-	text       string
+	form                     *Form
+	bounds                   graphics.Rect
+	visible                  bool
+	enabled                  bool
+	tabStop                  bool
+	background               graphics.Color
+	foreground               graphics.Color
+	text                     string
+	accessibilityID          string
+	accessibilityRole        AccessibilityRole
+	accessibilityName        string
+	accessibilityDescription string
+	accessibilityMultiline   bool
 
 	Paint        PaintHandler
 	Click        EventHandler
@@ -35,6 +40,19 @@ type Control struct {
 	TextInput    TextInputHandler
 	KeyDown      KeyHandler
 	KeyUp        KeyHandler
+
+	AccessibilityValue          func() string
+	AccessibilityCheckable      bool
+	AccessibilityChecked        func() bool
+	AccessibilitySelectable     bool
+	AccessibilitySelected       func() bool
+	AccessibilityInvoke         EventHandler
+	AccessibilitySetValue       TextInputHandler
+	AccessibilityChildren       func() []AccessibilityNode
+	AccessibilityPerform        func(id string, action AccessibilityAction, value string) bool
+	AccessibilitySelectionStart func() int
+	AccessibilitySelectionEnd   func() int
+	AccessibilitySetSelection   func(start, end int)
 }
 
 func NewControl() *Control {
@@ -65,6 +83,8 @@ func (c *Control) SetBounds(bounds graphics.Rect) {
 	}
 	old := c.bounds
 	c.bounds = bounds
+	c.AccessibilityChanged()
+	c.AccessibilityChildrenChanged()
 	if c.form != nil && c.visible {
 		c.form.Invalidate(old)
 		c.form.Invalidate(bounds)
@@ -79,6 +99,8 @@ func (c *Control) SetVisible(visible bool) {
 		c.form.Invalidate(c.bounds)
 	}
 	c.visible = visible
+	c.AccessibilityChanged()
+	c.AccessibilityChildrenChanged()
 	if !visible && c.form != nil && c.form.focused == c {
 		c.form.focused = nil
 	}
@@ -92,13 +114,17 @@ func (c *Control) SetEnabled(enabled bool) {
 		return
 	}
 	c.enabled = enabled
+	c.AccessibilityChanged()
+	c.AccessibilityChildrenChanged()
 	c.Invalidate()
 }
 
 func (c *Control) SetTabStop(tabStop bool) {
-	if c != nil {
-		c.tabStop = tabStop
+	if c == nil || c.tabStop == tabStop {
+		return
 	}
+	c.tabStop = tabStop
+	c.AccessibilityChanged()
 }
 
 func (c *Control) SetBackground(color graphics.Color) {
@@ -122,6 +148,7 @@ func (c *Control) SetText(text string) {
 		return
 	}
 	c.text = text
+	c.AccessibilityChanged()
 	c.Invalidate()
 }
 
@@ -141,14 +168,22 @@ func (c *Control) Invalidate() {
 // creates controls, assigns properties, wires callbacks, and adds controls;
 // user code implements those callbacks on the containing form struct.
 type Form struct {
-	width      int
-	height     int
-	background graphics.Color
-	controls   []*Control
-	invalid    []graphics.Rect
-	focused    *Control
-	pressed    *Control
-	menuBar    *MenuBar
+	width                           int
+	height                          int
+	background                      graphics.Color
+	controls                        []*Control
+	invalid                         []graphics.Rect
+	focused                         *Control
+	pressed                         *Control
+	menuBar                         *MenuBar
+	accessibilityRevision           int
+	accessibilityNextID             int
+	accessibilityReset              bool
+	accessibilityDirty              []*Control
+	accessibilityChildrenDirty      []*Control
+	accessibilityChildrenPatchDirty []*Control
+	accessibilitySelectionDirty     []*Control
+	accessibilityRemoved            []string
 
 	Resize          EventHandler
 	PaintBackground PaintHandler
@@ -169,6 +204,14 @@ func (f *Form) Initialize(width, height int) {
 	f.focused = nil
 	f.pressed = nil
 	f.menuBar = nil
+	f.accessibilityRevision = 0
+	f.accessibilityNextID = 1
+	f.accessibilityReset = true
+	f.accessibilityDirty = nil
+	f.accessibilityChildrenDirty = nil
+	f.accessibilityChildrenPatchDirty = nil
+	f.accessibilitySelectionDirty = nil
+	f.accessibilityRemoved = nil
 	f.Invalidate(f.clientRect())
 }
 
@@ -204,7 +247,9 @@ func (f *Form) Add(control *Control) {
 		control.form.Remove(control)
 	}
 	control.form = f
+	control.accessibilityID = f.uniqueAccessibilityID(control, control.accessibilityID)
 	f.controls = append(f.controls, control)
+	f.markAccessibilityChanged(control)
 	if control.visible {
 		f.Invalidate(control.bounds)
 	}
@@ -223,6 +268,9 @@ func (f *Form) Remove(control *Control) {
 		}
 		copy(f.controls[i:], f.controls[i+1:])
 		f.controls = f.controls[:len(f.controls)-1]
+		if control.accessibilityID != "" {
+			f.accessibilityRemoved = append(f.accessibilityRemoved, control.accessibilityID)
+		}
 		control.form = nil
 		if f.focused == control {
 			f.focused = nil
@@ -332,6 +380,11 @@ func (f *Form) Dispatch(event graphics.Event) {
 	if f == nil {
 		return
 	}
+	if event.Type == graphics.EventAccessibilityAction {
+		id, value := accessibilityActionPayload(event.Text)
+		f.performAccessibilityAction(id, AccessibilityAction(event.Key), value)
+		return
+	}
 	if event.Type == graphics.EventWindowResize {
 		f.SetClientSize(int(event.Dirty.Width()), int(event.Dirty.Height()))
 		if f.Resize != nil {
@@ -417,6 +470,12 @@ func (f *Form) setFocused(control *Control) {
 	}
 	old := f.focused
 	f.focused = control
+	if old != nil {
+		f.markAccessibilityChanged(old)
+	}
+	if control != nil {
+		f.markAccessibilityChanged(control)
+	}
 	if old != nil {
 		old.Invalidate()
 	}

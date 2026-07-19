@@ -6,10 +6,37 @@ import (
 	"strings"
 	"testing"
 
+	"renvo.dev/forms"
 	"renvo.dev/ide"
 	"renvo.dev/std/graphics"
 	"renvo.dev/std/graphics/gofont"
 )
+
+func TestMainFormSemanticAutomationExposesPrimaryIDEActions(t *testing.T) {
+	form := NewMainForm(t.TempDir())
+	driver := forms.NewAutomationDriver(&form.Form)
+	build := driver.Find(forms.AccessibilityRoleButton, "Build project")
+	run := driver.Find(forms.AccessibilityRoleButton, "Run project")
+	editor := driver.Find(forms.AccessibilityRoleTextBox, "Code editor")
+	explorer := driver.Find(forms.AccessibilityRoleTree, "Project explorer")
+	if len(build) != 1 || len(run) != 1 || len(editor) != 1 || len(explorer) != 1 {
+		t.Fatalf("primary semantics = build %d run %d editor %d explorer %d", len(build), len(run), len(editor), len(explorer))
+	}
+	built, ran := 0, 0
+	form.appBar.Build = func() { built++ }
+	form.appBar.Run = func() { ran++ }
+	if !driver.Invoke(build[0].ID) || !driver.Invoke(run[0].ID) || built != 1 || ran != 1 {
+		t.Fatalf("semantic toolbar actions = build %d run %d", built, ran)
+	}
+	form.showDesigner()
+	form.designer.SetSelection(0)
+	form.inspector.SetSelection(0)
+	palette := driver.Find(forms.AccessibilityRoleButton, "Add Button")
+	properties := driver.Find(forms.AccessibilityRoleTextBox, "Name")
+	if len(palette) != 1 || len(properties) != 1 || palette[0].Hidden || properties[0].Hidden {
+		t.Fatalf("designer semantics = palette %#v properties %#v", palette, properties)
+	}
+}
 
 func TestMainFormGeneratedLayoutAndOpenSaveCallbacks(t *testing.T) {
 	root := t.TempDir()

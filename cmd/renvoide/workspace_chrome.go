@@ -93,6 +93,10 @@ func newWorkspaceAppBar(font *graphics.Font) *workspaceAppBar {
 	control.Control = *forms.NewControl()
 	control.SetTabStop(false)
 	control.SetBackground(workspaceWhite)
+	control.SetAccessibilityRole(forms.AccessibilityRoleGroup)
+	control.SetAccessibilityName("Build toolbar")
+	control.AccessibilityChildren = control.accessibilityChildren
+	control.AccessibilityPerform = control.accessibilityPerform
 	control.Paint = control.paint
 	control.PointerDown = control.pointerDown
 	return control
@@ -117,7 +121,37 @@ func (c *workspaceAppBar) SetTarget(target string) {
 		return
 	}
 	c.target = target
+	c.AccessibilityChildrenChanged()
 	c.Invalidate()
+}
+
+func (c *workspaceAppBar) accessibilityChildren() []forms.AccessibilityNode {
+	bounds := c.Bounds()
+	baseID := c.AccessibilityID()
+	return []forms.AccessibilityNode{
+		{ID: baseID + "-target", Role: forms.AccessibilityRoleButton, Name: "Build target", Value: c.target, Bounds: graphics.R(bounds.MinX+290, bounds.MinY+9, 156, 28), Actions: forms.AccessibilitySupportsInvoke},
+		{ID: baseID + "-build", Role: forms.AccessibilityRoleButton, Name: "Build project", Bounds: graphics.R(bounds.MinX+454, bounds.MinY+9, 72, 28), Actions: forms.AccessibilitySupportsInvoke},
+		{ID: baseID + "-run", Role: forms.AccessibilityRoleButton, Name: "Run project", Bounds: graphics.R(bounds.MinX+534, bounds.MinY+9, 66, 28), Actions: forms.AccessibilitySupportsInvoke},
+	}
+}
+
+func (c *workspaceAppBar) accessibilityPerform(id string, action forms.AccessibilityAction, value string) bool {
+	if action != forms.AccessibilityActionInvoke {
+		return false
+	}
+	if id == c.AccessibilityID()+"-target" && c.OpenTargets != nil {
+		c.OpenTargets()
+		return true
+	}
+	if id == c.AccessibilityID()+"-build" && c.Build != nil {
+		c.Build()
+		return true
+	}
+	if id == c.AccessibilityID()+"-run" && c.Run != nil {
+		c.Run()
+		return true
+	}
+	return false
 }
 
 func (c *workspaceAppBar) paint(surface *graphics.Surface) {
@@ -161,9 +195,37 @@ func newWorkspaceTargetMenu(font *graphics.Font, targets []string) *workspaceTar
 	menu.Control = *forms.NewControl()
 	menu.SetTabStop(false)
 	menu.SetBackground(workspaceWhite)
+	menu.SetAccessibilityRole(forms.AccessibilityRoleList)
+	menu.SetAccessibilityName("Build targets")
+	menu.AccessibilityChildren = menu.accessibilityChildren
+	menu.AccessibilityPerform = menu.accessibilityPerform
 	menu.Paint = menu.paint
 	menu.PointerDown = menu.pointerDown
 	return menu
+}
+
+func (c *workspaceTargetMenu) accessibilityChildren() []forms.AccessibilityNode {
+	nodes := make([]forms.AccessibilityNode, 0, len(c.targets))
+	bounds := c.Bounds()
+	for i := 0; i < len(c.targets); i++ {
+		nodes = append(nodes, forms.AccessibilityNode{
+			ID:      c.AccessibilityID() + "-target-" + workspaceDecimal(i+1),
+			Role:    forms.AccessibilityRoleListItem,
+			Name:    c.targets[i],
+			Bounds:  graphics.R(bounds.MinX, bounds.MinY+5+graphics.Scalar(i*27), bounds.Width(), 27),
+			Actions: forms.AccessibilitySupportsInvoke,
+		})
+	}
+	return nodes
+}
+
+func (c *workspaceTargetMenu) accessibilityPerform(id string, action forms.AccessibilityAction, value string) bool {
+	index, ok := workspaceAccessibilityIndex(id, c.AccessibilityID()+"-target-")
+	if !ok || action != forms.AccessibilityActionInvoke || index < 0 || index >= len(c.targets) || c.Select == nil {
+		return false
+	}
+	c.Select(c.targets[index])
+	return true
 }
 
 func (c *workspaceTargetMenu) pointerDown(x, y graphics.Scalar) {
@@ -193,6 +255,7 @@ func newWorkspaceExplorerFrame(font *graphics.Font) *workspaceExplorerFrame {
 	control.Control = *forms.NewControl()
 	control.SetTabStop(false)
 	control.SetBackground(workspaceWhite)
+	control.SetAccessibilityName("Explorer pane")
 	control.Paint = control.paint
 	return control
 }
@@ -239,6 +302,7 @@ func newWorkspaceEditorFrame(font *graphics.Font) *workspaceEditorFrame {
 	control.Control = *forms.NewControl()
 	control.SetTabStop(false)
 	control.SetBackground(workspaceWhite)
+	control.SetAccessibilityName("Editor pane")
 	control.Paint = control.paint
 	control.PointerDown = control.pointerDown
 	return control
@@ -322,6 +386,10 @@ func newWorkspaceDesigner(font *graphics.Font) *workspaceDesigner {
 	control.Control = *forms.NewControl()
 	control.SetTabStop(true)
 	control.SetBackground(workspaceCanvas)
+	control.SetAccessibilityRole(forms.AccessibilityRoleGroup)
+	control.SetAccessibilityName("Form designer")
+	control.AccessibilityChildren = control.accessibilityChildren
+	control.AccessibilityPerform = control.accessibilityPerform
 	control.Paint = control.paint
 	control.PointerDown = control.pointerDown
 	control.PointerMove = control.pointerMove
@@ -335,6 +403,7 @@ func (c *workspaceDesigner) SetDesign(design *formDesign) {
 	if design == nil || c.selected >= len(design.controls) {
 		c.selected = -1
 	}
+	c.AccessibilityChildrenChanged()
 	c.Invalidate()
 }
 
@@ -352,6 +421,7 @@ func (c *workspaceDesigner) SetSelection(index int) {
 	}
 	c.invalidateSelection(c.selected)
 	c.selected = index
+	c.AccessibilityChildrenChanged()
 	c.invalidateSelection(c.selected)
 }
 
@@ -464,8 +534,115 @@ func (c *workspaceDesigner) pointerMove(x, y graphics.Scalar) {
 	}
 	oldBounds := designerControlBounds(layout, old)
 	c.design.controls[c.selected] = next
+	c.AccessibilityChildrenChanged()
 	newBounds := designerControlBounds(layout, next)
 	c.invalidateLocal(workspaceExpandRect(workspaceUnionRect(oldBounds, newBounds), 6))
+}
+
+func (c *workspaceDesigner) accessibilityChildren() []forms.AccessibilityNode {
+	baseID := c.AccessibilityID()
+	bounds := c.Bounds()
+	nodes := make([]forms.AccessibilityNode, 0, 12)
+	nodes = append(nodes, forms.AccessibilityNode{ID: baseID + "-code", Role: forms.AccessibilityRoleButton, Name: "Code view", Bounds: graphics.R(bounds.MinX, bounds.MinY, 170, workspacePaneHeaderHeight), Actions: forms.AccessibilitySupportsInvoke})
+	kinds := []string{designerLabel, designerButton, designerTextBox, designerTextArea, designerCheckBox, designerRadioButton, designerPictureBox, designerPanel}
+	names := []string{"Label", "Button", "Text box", "Text area", "Check box", "Radio button", "Image", "Panel"}
+	columns := designerPaletteColumns(bounds.Width())
+	for i := 0; i < len(kinds); i++ {
+		column, row := i%columns, i/columns
+		nodes = append(nodes, forms.AccessibilityNode{
+			ID:      baseID + "-palette-" + workspaceDecimal(i+1),
+			Role:    forms.AccessibilityRoleButton,
+			Name:    "Add " + names[i],
+			Value:   kinds[i],
+			Bounds:  graphics.R(bounds.MinX+48+graphics.Scalar(column*88), bounds.MinY+workspacePaneHeaderHeight+5+graphics.Scalar(row*33), 88, 28),
+			Actions: forms.AccessibilitySupportsInvoke,
+		})
+	}
+	if c.design != nil {
+		canvas := graphics.R(bounds.MinX, bounds.MinY+workspacePaneHeaderHeight+workspaceDesignerToolbarHeight, bounds.Width(), bounds.Height()-workspacePaneHeaderHeight-workspaceDesignerToolbarHeight-workspaceStatusHeight)
+		layout := calculateDesignerPreview(canvas, c.design)
+		for i := 0; i < len(c.design.controls); i++ {
+			control := c.design.controls[i]
+			name := control.text
+			if name == "" {
+				name = control.name
+			}
+			value := ""
+			if control.kind == designerTextBox || control.kind == designerTextArea {
+				value = control.text
+			}
+			checkable := control.kind == designerCheckBox || control.kind == designerRadioButton
+			nodes = append(nodes, forms.AccessibilityNode{
+				ID:          baseID + "-control-" + workspaceDecimal(i+1),
+				Role:        designerAccessibilityRole(control.kind),
+				Name:        name,
+				Description: "Designer control " + control.name,
+				Value:       value,
+				Bounds:      designerControlBounds(layout, control),
+				Actions:     forms.AccessibilitySupportsInvoke,
+				Checkable:   checkable,
+				Checked:     checkable && control.checked,
+				Selectable:  true,
+				Selected:    i == c.selected,
+			})
+		}
+	}
+	if c.selected >= 0 && bounds.Width() >= 780 {
+		nodes = append(nodes, forms.AccessibilityNode{ID: baseID + "-delete", Role: forms.AccessibilityRoleButton, Name: "Delete selected control", Bounds: graphics.R(bounds.MaxX-72, bounds.MinY+workspacePaneHeaderHeight+6, 62, 27), Actions: forms.AccessibilitySupportsInvoke})
+	}
+	return nodes
+}
+
+func (c *workspaceDesigner) accessibilityPerform(id string, action forms.AccessibilityAction, value string) bool {
+	if action != forms.AccessibilityActionInvoke {
+		return false
+	}
+	baseID := c.AccessibilityID()
+	if id == baseID+"-code" && c.ShowCode != nil {
+		c.ShowCode()
+		return true
+	}
+	if id == baseID+"-delete" {
+		c.deleteSelection()
+		return true
+	}
+	if index, ok := workspaceAccessibilityIndex(id, baseID+"-palette-"); ok {
+		kinds := []string{designerLabel, designerButton, designerTextBox, designerTextArea, designerCheckBox, designerRadioButton, designerPictureBox, designerPanel}
+		if index >= 0 && index < len(kinds) && c.AddControl != nil {
+			c.AddControl(kinds[index])
+			return true
+		}
+	}
+	if index, ok := workspaceAccessibilityIndex(id, baseID+"-control-"); ok && c.design != nil && index >= 0 && index < len(c.design.controls) {
+		c.SetSelection(index)
+		if c.SelectionChanged != nil {
+			c.SelectionChanged(index)
+		}
+		return true
+	}
+	return false
+}
+
+func designerAccessibilityRole(kind string) forms.AccessibilityRole {
+	if kind == designerButton {
+		return forms.AccessibilityRoleButton
+	}
+	if kind == designerTextBox || kind == designerTextArea {
+		return forms.AccessibilityRoleTextBox
+	}
+	if kind == designerCheckBox {
+		return forms.AccessibilityRoleCheckBox
+	}
+	if kind == designerRadioButton {
+		return forms.AccessibilityRoleRadioButton
+	}
+	if kind == designerPictureBox {
+		return forms.AccessibilityRoleImage
+	}
+	if kind == designerLabel {
+		return forms.AccessibilityRoleLabel
+	}
+	return forms.AccessibilityRoleGroup
 }
 
 func (c *workspaceDesigner) pointerUp(x, y graphics.Scalar) {
@@ -514,6 +691,9 @@ func newWorkspaceOutput(font *graphics.Font) *workspaceOutput {
 	control.Control = *forms.NewControl()
 	control.SetTabStop(false)
 	control.SetBackground(workspaceWhite)
+	control.SetAccessibilityRole(forms.AccessibilityRoleStatus)
+	control.SetAccessibilityName("Build output")
+	control.AccessibilityValue = control.accessibilityValue
 	control.Paint = control.paint
 	return control
 }
@@ -524,8 +704,11 @@ func (c *workspaceOutput) SetMessage(message string, ok bool) {
 	}
 	c.message = message
 	c.ok = ok
+	c.AccessibilityChanged()
 	c.Invalidate()
 }
+
+func (c *workspaceOutput) accessibilityValue() string { return c.message }
 
 func (c *workspaceOutput) paint(surface *graphics.Surface) {
 	bounds := c.Bounds()
@@ -786,6 +969,10 @@ func newWorkspaceInspector(font *graphics.Font) *workspaceInspector {
 	control := &workspaceInspector{font: font, selected: -1}
 	control.Control = *forms.NewControl()
 	control.SetBackground(workspaceWhite)
+	control.SetAccessibilityRole(forms.AccessibilityRoleGroup)
+	control.SetAccessibilityName("Properties")
+	control.AccessibilityChildren = control.accessibilityChildren
+	control.AccessibilityPerform = control.accessibilityPerform
 	control.Paint = control.paint
 	control.PointerDown = control.pointerDown
 	control.TextInput = control.textInput
@@ -799,6 +986,7 @@ func (c *workspaceInspector) SetDesign(design *formDesign) {
 		c.selected = -1
 	}
 	c.active = ""
+	c.AccessibilityChildrenChanged()
 	c.Invalidate()
 }
 
@@ -809,6 +997,7 @@ func (c *workspaceInspector) SetSelection(index int) {
 	c.commitEdit()
 	c.selected = index
 	c.active = ""
+	c.AccessibilityChildrenChanged()
 	c.Invalidate()
 }
 
@@ -817,7 +1006,74 @@ func (c *workspaceInspector) InvalidateProperties() {
 		return
 	}
 	bounds := c.Bounds()
+	c.AccessibilityChildrenChanged()
 	c.Form().Invalidate(bounds)
+}
+
+func (c *workspaceInspector) accessibilityChildren() []forms.AccessibilityNode {
+	properties := c.propertyNames()
+	nodes := make([]forms.AccessibilityNode, 0, len(properties))
+	bounds := c.Bounds()
+	for i := 0; i < len(properties); i++ {
+		name := properties[i]
+		value := c.propertyValue(name)
+		if c.active == name {
+			value = c.editBuffer
+		}
+		role := forms.AccessibilityRoleTextBox
+		actions := forms.AccessibilitySupportsFocus | forms.AccessibilitySupportsSetValue
+		checkable, checked := false, false
+		if name == "Checked" {
+			role = forms.AccessibilityRoleCheckBox
+			actions = forms.AccessibilitySupportsInvoke
+			checkable, checked = true, value == "true"
+		}
+		nodes = append(nodes, forms.AccessibilityNode{
+			ID:        c.AccessibilityID() + "-property-" + workspaceDecimal(i+1),
+			Role:      role,
+			Name:      name,
+			Value:     value,
+			Bounds:    graphics.R(bounds.MinX+78, bounds.MinY+workspacePaneHeaderHeight+48+graphics.Scalar(i*40), bounds.Width()-93, 27),
+			Actions:   actions,
+			Checkable: checkable,
+			Checked:   checked,
+		})
+	}
+	return nodes
+}
+
+func (c *workspaceInspector) accessibilityPerform(id string, action forms.AccessibilityAction, value string) bool {
+	index, ok := workspaceAccessibilityIndex(id, c.AccessibilityID()+"-property-")
+	properties := c.propertyNames()
+	if !ok || index < 0 || index >= len(properties) {
+		return false
+	}
+	c.active = properties[index]
+	c.editBuffer = c.propertyValue(c.active)
+	c.selectValue = true
+	if action == forms.AccessibilityActionFocus {
+		c.Focus()
+		c.InvalidateProperties()
+		return true
+	}
+	if action == forms.AccessibilityActionInvoke && c.active == "Checked" {
+		if c.editBuffer == "true" {
+			c.editBuffer = "false"
+		} else {
+			c.editBuffer = "true"
+		}
+		c.commitEdit()
+		c.InvalidateProperties()
+		return true
+	}
+	if action == forms.AccessibilityActionSetValue {
+		c.editBuffer = value
+		c.selectValue = false
+		c.commitEdit()
+		c.InvalidateProperties()
+		return true
+	}
+	return false
 }
 
 func (c *workspaceInspector) pointerDown(x, y graphics.Scalar) {
@@ -1323,4 +1579,18 @@ func workspaceDecimal(value int) string {
 		text[i] = digits[len(digits)-i-1]
 	}
 	return string(text)
+}
+
+func workspaceAccessibilityIndex(id, prefix string) (int, bool) {
+	if len(id) <= len(prefix) || !workspaceHasPrefix(id, prefix) {
+		return -1, false
+	}
+	value := 0
+	for i := len(prefix); i < len(id); i++ {
+		if id[i] < '0' || id[i] > '9' {
+			return -1, false
+		}
+		value = value*10 + int(id[i]-'0')
+	}
+	return value - 1, value > 0
 }

@@ -40,6 +40,10 @@ func NewExplorerControl(model *Explorer) *ExplorerControl {
 	control.Control = *forms.NewControl()
 	control.SetFont(graphics.NewBuiltinFont(2))
 	control.SetBackground(explorerBackground)
+	control.SetAccessibilityRole(forms.AccessibilityRoleTree)
+	control.SetAccessibilityName("Project explorer")
+	control.AccessibilityChildren = control.accessibilityChildren
+	control.AccessibilityPerform = control.accessibilityPerform
 	control.Paint = control.paint
 	control.PointerDown = control.pointerDown
 	control.PointerWheel = control.pointerWheel
@@ -64,6 +68,7 @@ func (c *ExplorerControl) SetModel(model *Explorer) {
 	}
 	c.Model = model
 	c.scrollY = 0
+	c.AccessibilityChildrenChanged()
 	c.Invalidate()
 }
 
@@ -161,6 +166,7 @@ func (c *ExplorerControl) pointerDown(x, y graphics.Scalar) {
 	}
 	old := c.Model.SelectedIndex()
 	c.Model.Select(index)
+	c.AccessibilityChildrenChanged()
 	c.invalidateRow(old)
 	c.invalidateRow(index)
 }
@@ -181,6 +187,7 @@ func (c *ExplorerControl) activate() {
 		c.OpenFile(path)
 	}
 	if len(c.Model.Rows()) != before {
+		c.AccessibilityChildrenChanged()
 		c.Invalidate()
 	}
 }
@@ -207,12 +214,51 @@ func (c *ExplorerControl) keyDown(event graphics.Event) {
 		return
 	}
 	c.ensureSelectionVisible()
+	c.AccessibilityChildrenChanged()
 	if oldRows != len(c.Model.Rows()) {
 		c.Invalidate()
 	} else {
 		c.invalidateRow(old)
 		c.invalidateRow(c.Model.SelectedIndex())
 	}
+}
+
+func (c *ExplorerControl) accessibilityChildren() []forms.AccessibilityNode {
+	if c == nil || c.Model == nil {
+		return nil
+	}
+	rows := c.Model.Rows()
+	nodes := make([]forms.AccessibilityNode, 0, len(rows))
+	bounds := c.Bounds()
+	for i := 0; i < len(rows); i++ {
+		y := bounds.MinY + graphics.Scalar(i*c.rowHeight) - c.scrollY
+		nodes = append(nodes, forms.AccessibilityNode{
+			ID:         c.AccessibilityID() + "-row-" + decimal(i+1),
+			Role:       forms.AccessibilityRoleTreeItem,
+			Name:       rows[i].Node.Name,
+			Bounds:     graphics.R(bounds.MinX, y, bounds.Width(), graphics.Scalar(c.rowHeight)),
+			Actions:    forms.AccessibilitySupportsInvoke,
+			Selectable: true,
+			Selected:   i == c.Model.SelectedIndex(),
+		})
+	}
+	return nodes
+}
+
+func (c *ExplorerControl) accessibilityPerform(id string, action forms.AccessibilityAction, value string) bool {
+	index, ok := accessibilityIndex(id, c.AccessibilityID()+"-row-")
+	if !ok || c.Model == nil || index < 0 || index >= len(c.Model.Rows()) {
+		return false
+	}
+	c.Model.Select(index)
+	c.ensureSelectionVisible()
+	c.Invalidate()
+	c.AccessibilityChildrenStateChanged()
+	if action == forms.AccessibilityActionInvoke {
+		c.activate()
+		return true
+	}
+	return action == forms.AccessibilityActionFocus
 }
 
 func (c *ExplorerControl) ensureSelectionVisible() {
@@ -316,6 +362,16 @@ func NewEditorControl(document *Document) *EditorControl {
 	control.Control = *forms.NewControl()
 	control.SetFont(graphics.NewBuiltinFont(2))
 	control.SetBackground(editorBackground)
+	control.SetAccessibilityRole(forms.AccessibilityRoleTextBox)
+	control.SetAccessibilityName("Code editor")
+	control.SetAccessibilityMultiline(true)
+	control.AccessibilityValue = control.accessibilityValue
+	control.AccessibilitySetValue = control.accessibilitySetValue
+	control.AccessibilitySelectionStart = control.accessibilitySelectionStart
+	control.AccessibilitySelectionEnd = control.accessibilitySelectionEnd
+	control.AccessibilitySetSelection = control.accessibilitySetSelection
+	control.AccessibilityChildren = control.accessibilityChildren
+	control.AccessibilityPerform = control.accessibilityPerform
 	control.Paint = control.paint
 	control.PointerDown = control.pointerDown
 	control.PointerMove = control.pointerMove
@@ -349,6 +405,8 @@ func (c *EditorControl) SetDocument(document *Document) {
 	c.closeCompletion()
 	c.closeSignature()
 	c.rebuildSyntaxStates(0)
+	c.AccessibilityChanged()
+	c.AccessibilityChildrenChanged()
 	c.Invalidate()
 }
 
@@ -360,6 +418,7 @@ func (c *EditorControl) SetDiagnostics(diagnostics []Diagnostic) {
 	copyOfDiagnostics := make([]Diagnostic, len(diagnostics))
 	copy(copyOfDiagnostics, diagnostics)
 	c.diagnostics = copyOfDiagnostics
+	c.AccessibilityChildrenChanged()
 	c.invalidateDiagnostics(c.diagnostics)
 }
 
@@ -582,6 +641,7 @@ func (c *EditorControl) placeCaret(x, y graphics.Scalar, extend bool) {
 	newLine, _ := c.Document.Position(c.Document.Caret)
 	c.invalidateEditorLine(oldLine)
 	c.invalidateEditorLine(newLine)
+	c.AccessibilitySelectionChanged()
 }
 
 func (c *EditorControl) textInput(text string) {
@@ -637,6 +697,7 @@ func (c *EditorControl) keyDown(event graphics.Event) {
 			}
 			c.ensureCompletionPickVisible()
 			c.invalidateCompletion()
+			c.AccessibilityChildrenStateChanged()
 			return
 		}
 		if event.Key == graphics.KeyDown {
@@ -646,6 +707,7 @@ func (c *EditorControl) keyDown(event graphics.Event) {
 			}
 			c.ensureCompletionPickVisible()
 			c.invalidateCompletion()
+			c.AccessibilityChildrenStateChanged()
 			return
 		}
 		if event.Key == graphics.KeyPageUp {
@@ -655,6 +717,7 @@ func (c *EditorControl) keyDown(event graphics.Event) {
 			}
 			c.ensureCompletionPickVisible()
 			c.invalidateCompletion()
+			c.AccessibilityChildrenStateChanged()
 			return
 		}
 		if event.Key == graphics.KeyPageDown {
@@ -664,6 +727,7 @@ func (c *EditorControl) keyDown(event graphics.Event) {
 			}
 			c.ensureCompletionPickVisible()
 			c.invalidateCompletion()
+			c.AccessibilityChildrenStateChanged()
 			return
 		}
 		if event.Key == graphics.KeyTab || event.Key == graphics.KeyEnter {
@@ -769,6 +833,7 @@ func (c *EditorControl) keyDown(event graphics.Event) {
 	newLine, _ := c.Document.Position(c.Document.Caret)
 	c.invalidateEditorLine(oldLine)
 	c.invalidateEditorLine(newLine)
+	c.AccessibilitySelectionChanged()
 	if c.signature.Ok {
 		c.refreshSignature()
 	}
@@ -803,6 +868,7 @@ func (c *EditorControl) refreshCompletion(acceptSingle, explicit bool) bool {
 		return true
 	}
 	c.completions = items
+	c.AccessibilityChildrenChanged()
 	c.invalidateCompletion()
 	return true
 }
@@ -853,6 +919,7 @@ func (c *EditorControl) refreshSignature() {
 		next.ActiveParameter = active
 		c.signature = next
 		c.signatureOpen = open
+		c.AccessibilityChildrenChanged()
 		c.invalidateSignature()
 		return
 	}
@@ -889,6 +956,7 @@ func (c *EditorControl) closeSignature() {
 	c.invalidateSignature()
 	c.signature = SignatureHelp{}
 	c.signatureOpen = -1
+	c.AccessibilityChildrenChanged()
 }
 
 func (c *EditorControl) acceptCompletion() {
@@ -904,6 +972,7 @@ func (c *EditorControl) acceptCompletion() {
 	c.completions = nil
 	c.completionPick = 0
 	c.completionFirst = 0
+	c.AccessibilityChildrenChanged()
 	c.afterEdit(startLine, oldLines)
 }
 
@@ -915,6 +984,7 @@ func (c *EditorControl) closeCompletion() {
 	c.completions = nil
 	c.completionPick = 0
 	c.completionFirst = 0
+	c.AccessibilityChildrenChanged()
 }
 
 func (c *EditorControl) paintCompletion(surface *graphics.Surface) {
@@ -1218,6 +1288,133 @@ func (c *EditorControl) afterEdit(startLine, oldLines int) {
 	if c.Changed != nil {
 		c.Changed()
 	}
+	c.AccessibilityChanged()
+}
+
+func (c *EditorControl) accessibilityValue() string {
+	if c == nil || c.Document == nil {
+		return ""
+	}
+	return c.Document.Text()
+}
+
+func (c *EditorControl) accessibilitySelectionStart() int {
+	if c == nil || c.Document == nil {
+		return -1
+	}
+	start, _ := c.Document.Selection()
+	return start
+}
+
+func (c *EditorControl) accessibilitySelectionEnd() int {
+	if c == nil || c.Document == nil {
+		return -1
+	}
+	_, end := c.Document.Selection()
+	return end
+}
+
+func (c *EditorControl) accessibilitySetValue(value string) {
+	if c == nil || c.Document == nil || c.Document.Text() == value {
+		return
+	}
+	oldLines := c.Document.LineCount()
+	c.Document.SetSelection(0, len(c.Document.text))
+	c.Document.Insert(value)
+	c.afterEdit(0, oldLines)
+}
+
+func (c *EditorControl) accessibilitySetSelection(start, end int) {
+	if c == nil || c.Document == nil {
+		return
+	}
+	oldLine, _ := c.Document.Position(c.Document.Caret)
+	c.Document.SetSelection(start, end)
+	c.ensureCaretVisible()
+	newLine, _ := c.Document.Position(c.Document.Caret)
+	c.invalidateEditorLine(oldLine)
+	c.invalidateEditorLine(newLine)
+	c.AccessibilitySelectionChanged()
+}
+
+func (c *EditorControl) accessibilityChildren() []forms.AccessibilityNode {
+	if c == nil || c.Document == nil {
+		return nil
+	}
+	nodes := make([]forms.AccessibilityNode, 0, len(c.completions)+len(c.diagnostics)+2)
+	baseID := c.AccessibilityID()
+	if len(c.completions) > 0 {
+		listID := baseID + "-completions"
+		bounds := c.completionBounds()
+		nodes = append(nodes, forms.AccessibilityNode{ID: listID, Role: forms.AccessibilityRoleList, Name: "Code completions", Bounds: bounds})
+		rowHeight := graphics.Scalar(c.lineHeight + 4)
+		for i := 0; i < len(c.completions); i++ {
+			nodes = append(nodes, forms.AccessibilityNode{
+				ID:          listID + "-" + decimal(i+1),
+				ParentID:    listID,
+				Role:        forms.AccessibilityRoleListItem,
+				Name:        c.completions[i].Text,
+				Description: c.completions[i].Detail,
+				Bounds:      graphics.R(bounds.MinX, bounds.MinY+graphics.Scalar(i-c.completionFirst)*rowHeight, bounds.Width(), rowHeight),
+				Actions:     forms.AccessibilitySupportsInvoke,
+				Selectable:  true,
+				Selected:    i == c.completionPick,
+			})
+		}
+	}
+	if c.signature.Ok {
+		nodes = append(nodes, forms.AccessibilityNode{ID: baseID + "-signature", Role: forms.AccessibilityRoleStatus, Name: "Signature help", Value: c.signature.Label, Bounds: c.signatureBounds()})
+	}
+	for i := 0; i < len(c.diagnostics); i++ {
+		line, _ := c.Document.Position(c.diagnostics[i].Start)
+		prefix := "Warning: "
+		if c.diagnostics[i].Error {
+			prefix = "Error: "
+		}
+		nodes = append(nodes, forms.AccessibilityNode{
+			ID:     baseID + "-diagnostic-" + decimal(i+1),
+			Role:   forms.AccessibilityRoleStatus,
+			Name:   prefix + c.diagnostics[i].Message,
+			Bounds: graphics.R(c.Bounds().MinX, c.Bounds().MinY+graphics.Scalar(line*c.lineHeight)-c.scrollY, c.Bounds().Width(), graphics.Scalar(c.lineHeight)),
+		})
+	}
+	return nodes
+}
+
+func (c *EditorControl) accessibilityPerform(id string, action forms.AccessibilityAction, value string) bool {
+	index, ok := accessibilityIndex(id, c.AccessibilityID()+"-completions-")
+	if !ok || action != forms.AccessibilityActionInvoke || index < 0 || index >= len(c.completions) {
+		return false
+	}
+	c.completionPick = index
+	c.acceptCompletion()
+	return true
+}
+
+func accessibilityIndex(id, prefix string) (int, bool) {
+	if len(id) <= len(prefix) || !ideHasPrefix(id, prefix) {
+		return -1, false
+	}
+	value := 0
+	for i := len(prefix); i < len(id); i++ {
+		if id[i] < '0' || id[i] > '9' {
+			return -1, false
+		}
+		value = value*10 + int(id[i]-'0')
+	}
+	return value - 1, value > 0
+}
+
+func ideHasPrefix(text, prefix string) bool {
+	if len(prefix) > len(text) {
+		return false
+	}
+	for i := 0; i < len(prefix); i++ {
+		if text[i] != prefix[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *EditorControl) rebuildSyntaxStates(startLine int) {
