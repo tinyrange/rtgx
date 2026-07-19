@@ -128,6 +128,9 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if !ok {
 				return info, false, CheckErrScope, fileIndex, scopeTok
 			}
+			if builtinErr, builtinTok := invalidBuiltinCalls(&pkg, &info, fileIndex, fn, &signature, scope); builtinErr != CheckOK {
+				return info, false, builtinErr, fileIndex, builtinTok
+			}
 			bodyStart := fn.BodyStart + 1
 			bodyEnd := fn.BodyEnd - 1
 			var out CoreFuncBody
