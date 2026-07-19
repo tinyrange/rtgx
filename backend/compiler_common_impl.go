@@ -228,6 +228,8 @@ func renvo_runtime_ArenaMark() int { return 0 }
 
 func renvo_runtime_ArenaReset(mark int) {}
 
+func renvo_runtime_ArenaDiscardBytes(value []byte) {}
+
 // These internal intrinsics are only used after compiler code has established
 // the corresponding index invariant. Host builds retain Go's checked access;
 // self-hosted builds lower the calls to an explicitly unsafe load.
