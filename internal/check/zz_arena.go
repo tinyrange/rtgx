@@ -12,8 +12,3 @@ func renvo_runtime_ArenaPersistCheckSelectorRefs(value []CoreSelectorRef) []Core
 func renvo_runtime_ArenaPersistCheckTypeRefs(value []CoreTypeRef) []CoreTypeRef { return value }
 
 func renvo_runtime_ArenaPersistCheckBools(value []bool) []bool { return value }
-
-func renvo_runtime_ArenaDiscardCheckNameRefs(value []CoreNameRef)         {}
-func renvo_runtime_ArenaDiscardCheckSelectorRefs(value []CoreSelectorRef) {}
-func renvo_runtime_ArenaDiscardCheckTypeRefs(value []CoreTypeRef)         {}
-func renvo_runtime_ArenaDiscardCheckBools(value []bool)                   {}

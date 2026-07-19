@@ -327,7 +327,7 @@ func (b *coreUnitBuilder) addCheckedDecls(info check.PackageInfo, files []coreFi
 		if !b.addDeclCalls(declInfo, files[declInfo.File].tokens, ownerIndex) {
 			return false
 		}
-		if !b.addDeclResolution(declInfo, files[declInfo.File].tokens, ownerIndex) {
+		if !b.addDeclResolution(declInfo, files[declInfo.File].tokens, ownerIndex, info.Symbols) {
 			return false
 		}
 	}
@@ -337,17 +337,20 @@ func (b *coreUnitBuilder) addCheckedDecls(info check.PackageInfo, files []coreFi
 func (b *coreUnitBuilder) addCheckedTypeRefs(info check.PackageInfo, files []coreFileTokens) bool {
 	for i := 0; i < len(info.CoreTypeRefs); i++ {
 		ref := info.CoreTypeRefs[i]
-		if ref.File < 0 || ref.File >= len(files) {
-			b.setErr(EmitErrCheck, -1, ref.Token)
+		fileIndex := ref.File
+		ownerDecl := ref.OwnerDecl
+		token := ref.Token
+		if fileIndex < 0 || fileIndex >= len(files) {
+			b.setErr(EmitErrCheck, -1, token)
 			return false
 		}
-		if ref.OwnerDecl < 0 || ref.OwnerDecl >= len(b.declRows) || b.declRows[ref.OwnerDecl] < 0 {
-			b.setErr(EmitErrCheck, ref.File, ref.Token)
+		if ownerDecl < 0 || ownerDecl >= len(b.declRows) || b.declRows[ownerDecl] < 0 {
+			b.setErr(EmitErrCheck, fileIndex, token)
 			return false
 		}
-		mapped, ok := mapCoreTypeRef(ref, files[ref.File].tokens, b.finalEOF, b.declRows[ref.OwnerDecl])
+		mapped, ok := mapCoreTypeRef(ref, files[fileIndex].tokens, b.finalEOF, b.declRows[ownerDecl])
 		if !ok {
-			b.setErr(EmitErrCheck, ref.File, ref.Token)
+			b.setErr(EmitErrCheck, fileIndex, token)
 			return false
 		}
 		b.program.TypeRefs = append(b.program.TypeRefs, mapped)
@@ -384,7 +387,7 @@ func (b *coreUnitBuilder) addCheckedFuncs(info check.PackageInfo, files []coreFi
 		if !b.addBodyCalls(body, files[body.File].tokens, ownerIndex) {
 			return false
 		}
-		if !b.addBodyResolution(body, files[body.File].tokens, ownerIndex) {
+		if !b.addBodyResolution(body, files[body.File].tokens, ownerIndex, info.Symbols) {
 			return false
 		}
 		if !b.addBodyTypeRefs(body, files[body.File].tokens, ownerIndex) {
@@ -427,9 +430,9 @@ func (b *coreUnitBuilder) addDeclCalls(decl check.DeclInfo, mapping coreTokenMap
 	return true
 }
 
-func (b *coreUnitBuilder) addDeclResolution(decl check.DeclInfo, mapping coreTokenMap, ownerIndex int) bool {
+func (b *coreUnitBuilder) addDeclResolution(decl check.DeclInfo, mapping coreTokenMap, ownerIndex int, symbols []check.Symbol) bool {
 	for i := 0; i < len(decl.CoreRefs); i++ {
-		ref, ok := mapCoreNameRef(decl.CoreRefs[i], mapping, b.finalEOF, ownerIndex)
+		ref, ok := mapCoreNameRef(decl.CoreRefs[i], mapping, b.finalEOF, ownerIndex, symbols)
 		if !ok {
 			b.setErr(EmitErrCheck, decl.File, decl.Token)
 			return false
@@ -447,9 +450,9 @@ func (b *coreUnitBuilder) addDeclResolution(decl check.DeclInfo, mapping coreTok
 	return true
 }
 
-func (b *coreUnitBuilder) addBodyResolution(body check.CoreFuncBody, mapping coreTokenMap, ownerIndex int) bool {
+func (b *coreUnitBuilder) addBodyResolution(body check.CoreFuncBody, mapping coreTokenMap, ownerIndex int, symbols []check.Symbol) bool {
 	for i := 0; i < len(body.CoreRefs); i++ {
-		ref, ok := mapCoreNameRef(body.CoreRefs[i], mapping, b.finalEOF, ownerIndex)
+		ref, ok := mapCoreNameRef(body.CoreRefs[i], mapping, b.finalEOF, ownerIndex, symbols)
 		if !ok {
 			b.setErr(EmitErrCheck, body.File, body.ErrorToken)
 			return false
@@ -538,12 +541,15 @@ func mapCoreCallRef(call check.CallRef, mapping coreTokenMap, eof int) (unit.Cal
 	return out, true
 }
 
-func mapCoreNameRef(ref check.CoreNameRef, mapping coreTokenMap, eof int, ownerIndex int) (unit.NameRef, bool) {
+func mapCoreNameRef(ref check.CoreNameRef, mapping coreTokenMap, eof int, ownerIndex int, symbols []check.Symbol) (unit.NameRef, bool) {
+	if ref.Index < 0 || ref.Index >= len(symbols) {
+		return unit.NameRef{}, false
+	}
 	out := unit.NameRef{
 		Kind:    unit.RefPackage,
 		Token:   mapCoreToken(mapping, ref.Token, eof),
 		Index:   ref.Index,
-		Package: ref.Package,
+		Package: symbols[ref.Index].Package,
 	}
 	if ownerIndex < 0 || out.Token < 0 || out.Index < -1 || out.Package < -1 {
 		return out, false

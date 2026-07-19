@@ -151,15 +151,9 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			}
 			locals := buildFuncLocalTypeSpansCore(file, fn)
 			out.CoreTypeRefs = buildFuncTypeRefsCore(file, fileIndex, info, checked, signature, locals, scope)
-			coreRefs := out.CoreRefs
-			coreSelectors := out.CoreSelectors
-			coreTypeRefs := out.CoreTypeRefs
-			out.CoreRefs = renvo_runtime_ArenaPersistCheckNameRefs(coreRefs)
-			out.CoreSelectors = renvo_runtime_ArenaPersistCheckSelectorRefs(coreSelectors)
-			out.CoreTypeRefs = renvo_runtime_ArenaPersistCheckTypeRefs(coreTypeRefs)
-			renvo_runtime_ArenaDiscardCheckNameRefs(coreRefs)
-			renvo_runtime_ArenaDiscardCheckSelectorRefs(coreSelectors)
-			renvo_runtime_ArenaDiscardCheckTypeRefs(coreTypeRefs)
+			out.CoreRefs = renvo_runtime_ArenaPersistCheckNameRefs(out.CoreRefs)
+			out.CoreSelectors = renvo_runtime_ArenaPersistCheckSelectorRefs(out.CoreSelectors)
+			out.CoreTypeRefs = renvo_runtime_ArenaPersistCheckTypeRefs(out.CoreTypeRefs)
 			arena.Reset(functionArenaStart)
 			info.CoreBodies = append(info.CoreBodies, out)
 		}
@@ -277,7 +271,7 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 			lookupImportTokenNameCore(info, fileIndex, file, i) < 0 {
 			symbolIndex := lookupPackageSymbolTokenCore(info, file, fileIndex, i)
 			if symbolIndex >= 0 {
-				refs = append(refs, CoreNameRef{Token: i, Index: symbolIndex, Package: info.Symbols[symbolIndex].Package})
+				refs = append(refs, CoreNameRef{Token: i, Index: symbolIndex})
 			}
 		}
 		dot := token.Kind == syntax.TokenOperator && token.End == token.Start+1 && file.Src[token.Start] == '.'
