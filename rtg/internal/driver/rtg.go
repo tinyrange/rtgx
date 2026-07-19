@@ -11,9 +11,11 @@ import (
 
 type RTGFS struct{}
 
+const rtgCommandDiagnosticCapacity = 8192
+
 // Keep one capture buffer outside per-build arena marks. A failed frontend can
 // copy its diagnostic here before resetting all of its transient allocations.
-var rtgCommandDiagnosticBuffer [8192]byte
+var rtgCommandDiagnosticBuffer []byte
 
 func RunRTGCommand(args []string, env []string) int {
 	status, output := runRTGCommand(args, env)
@@ -35,6 +37,9 @@ func runRTGCommand(args []string, env []string) (int, string) {
 	if CommandHelpRequested(args) {
 		return 0, HelpText
 	}
+	if len(rtgCommandDiagnosticBuffer) == 0 {
+		rtgCommandDiagnosticBuffer = make([]byte, rtgCommandDiagnosticCapacity)
+	}
 	commandArgs := args
 	if len(commandArgs) > 0 {
 		commandArgs = commandArgs[1:]
@@ -46,7 +51,7 @@ func runRTGCommand(args []string, env []string) (int, string) {
 	}
 	built := buildFromFSCompactWithModuleCache(commandArgs, rtgWorkDir(env), rtgStdRoot(args, env), rtgEnvValue(env, "RTG_MODCACHE"), RTGFS{})
 	if !built.Ok {
-		return finishRTGCommandFailure(rtgCommandDiagnosticBuffer[:], built.Diagnostic, resetArena, mark)
+		return finishRTGCommandFailure(rtgCommandDiagnosticBuffer, built.Diagnostic, resetArena, mark)
 	}
 	unit := built.Unit
 	target := built.Options.Target
@@ -58,7 +63,7 @@ func runRTGCommand(args []string, env []string) (int, string) {
 		if output == "-" {
 			print(string(unit))
 		} else if os.WriteFile(output, unit, 0644) != nil {
-			return finishRTGCommandFailure(rtgCommandDiagnosticBuffer[:], Diagnostic{Phase: "unit", Code: "RTG-UNIT-002", Message: "failed to write linked unit"}, resetArena, mark)
+			return finishRTGCommandFailure(rtgCommandDiagnosticBuffer, Diagnostic{Phase: "unit", Code: "RTG-UNIT-002", Message: "failed to write linked unit"}, resetArena, mark)
 		}
 		if resetArena {
 			arena.Reset(mark)
@@ -83,7 +88,7 @@ func runRTGCommand(args []string, env []string) (int, string) {
 		arena.PersistReset(persistMark)
 	}
 	if !ok {
-		return finishRTGCommandFailure(rtgCommandDiagnosticBuffer[:], Diagnostic{Phase: "backend", Code: "RTG-BACKEND-001", Message: "backend compilation failed"}, false, 0)
+		return finishRTGCommandFailure(rtgCommandDiagnosticBuffer, Diagnostic{Phase: "backend", Code: "RTG-BACKEND-001", Message: "backend compilation failed"}, false, 0)
 	}
 	return 0, ""
 }
@@ -91,13 +96,13 @@ func runRTGCommand(args []string, env []string) (int, string) {
 func finishRTGCommandFailure(buffer []byte, diagnostic Diagnostic, resetArena bool, mark int) (int, string) {
 	formatted := FormatDiagnostic(diagnostic)
 	used := len(formatted)
-	if used > len(buffer) {
-		used = len(buffer)
+	if used > rtgCommandDiagnosticCapacity {
+		used = rtgCommandDiagnosticCapacity
 	}
 	for i := 0; i < used; i++ {
 		buffer[i] = formatted[i]
 	}
-	if used == len(buffer) && used > 0 {
+	if used == rtgCommandDiagnosticCapacity && used > 0 {
 		buffer[used-1] = '\n'
 	}
 	if resetArena {
