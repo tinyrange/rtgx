@@ -7154,12 +7154,14 @@ type renvoLinearGen struct {
 	fixedPrunedReturns       bool
 }
 
+const renvoStringInternSearchBytes = 512
+
 func renvoAddStringData(g *renvoLinearGen, msg []byte) int {
 	renvoNonNil(g)
 	// Keep interning bounded. Large embedded assets should not make every later
 	// literal rescan the entire static-data segment; missing an old match only
 	// emits another copy and does not change program semantics.
-	searchStart := len(g.asm.data) - 4096
+	searchStart := len(g.asm.data) - renvoStringInternSearchBytes
 	if searchStart < 0 {
 		searchStart = 0
 	}

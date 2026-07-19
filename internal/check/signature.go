@@ -54,9 +54,13 @@ func buildSignatureFromParts(file syntax.File, receiverStart int, receiverEnd in
 }
 
 func parseFieldList(file syntax.File, start int, end int) []Field {
-	capacity := end - start
-	if capacity < 0 {
-		capacity = 0
+	capacity := 0
+	if tokens := end - start; tokens > 0 {
+		// Every additional field needs at least a separating comma, so a field
+		// list can contain at most roughly half as many fields as tokens. Using
+		// the raw token count here doubled the live signature arena while
+		// self-hosting packages with many functions.
+		capacity = tokens/2 + 1
 	}
 	fields := make([]Field, 0, capacity)
 	pending := make([]int, 0, capacity)

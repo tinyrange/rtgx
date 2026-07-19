@@ -56,7 +56,7 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
 			updated := false
 			if !tokenTextIs(&file, op, ":=") {
 				for j := len(literalLocals) - 3; j >= 0; j -= 3 {
-					if stmt.StartTok < literalLocals[j+1] && statementTokensEqual(file, literalLocals[j], leftFirst.StartTok) {
+					if stmt.StartTok < literalLocals[j+1] && statementTokensEqual(&file, literalLocals[j], leftFirst.StartTok) {
 						literalLocals[j+2] = 0
 						if literal {
 							literalLocals[j+2] = 1
@@ -100,7 +100,7 @@ func definiteExprListSummary(file syntax.File, start int, end int, validateTarge
 
 func definiteLiteralLocal(locals []int, file syntax.File, tok int) bool {
 	for i := len(locals) - 3; i >= 0; i -= 3 {
-		if tok < locals[i+1] && statementTokensEqual(file, locals[i], tok) {
+		if tok < locals[i+1] && statementTokensEqual(&file, locals[i], tok) {
 			return locals[i+2] != 0
 		}
 	}
@@ -175,7 +175,7 @@ func stripOuterParens(file syntax.File, start int, end int) (int, int) {
 	return start, end
 }
 
-func statementTokensEqual(file syntax.File, left int, right int) bool {
+func statementTokensEqual(file *syntax.File, left int, right int) bool {
 	if left < 0 || left >= len(file.Tokens) || right < 0 || right >= len(file.Tokens) {
 		return false
 	}
