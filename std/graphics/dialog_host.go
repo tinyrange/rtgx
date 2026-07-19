@@ -1,4 +1,4 @@
-//go:build !rtg
+//go:build !renvo
 
 package graphics
 

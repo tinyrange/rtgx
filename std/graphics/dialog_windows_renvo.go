@@ -1,4 +1,4 @@
-//go:build rtg && windows && (386 || amd64 || arm64)
+//go:build renvo && windows && (386 || amd64 || arm64)
 
 package graphics
 
