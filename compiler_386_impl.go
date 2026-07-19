@@ -924,6 +924,21 @@ func rtg386EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		return true
 	}
 	if e.kind == rtgExprCall {
+		if rtgExprIsIdentText(p, ep, e.left, "rtgTrustNonNil") {
+			return rtgEmitRuntimeTrustPointer(g, ep, e)
+		}
+		if rtgExprIsIdentText(p, ep, e.left, "rtg_runtime_UnsafeByteAt") {
+			return rtgEmitRuntimeUnsafeIndex(g, ep, e, 1)
+		}
+		if rtgExprIsIdentText(p, ep, e.left, "rtg_runtime_UnsafeInt32At") {
+			return rtgEmitRuntimeUnsafeIndex(g, ep, e, 4)
+		}
+		if rtgExprIsIdentText(p, ep, e.left, "rtg_runtime_UnsafeIntAt") {
+			return rtgEmitRuntimeUnsafeIndex(g, ep, e, rtgNativeIntSize)
+		}
+		if rtgExprIsIdentText(p, ep, e.left, "rtgTruncateBytes") || rtgExprIsIdentText(p, ep, e.left, "rtgTruncateParams") || rtgExprIsIdentText(p, ep, e.left, "rtgTruncateTypes") || rtgExprIsIdentText(p, ep, e.left, "rtgTruncateFields") {
+			return rtgEmitRuntimeTruncateSlice(g, ep, e)
+		}
 		callee := rtgExprIdentCode(p, ep, e.left)
 		if callee != rtgIdentSyscall && (rtgFunctionValueCalleeType(g, ep, e.left) != 0 || rtgFuncInfoFromCall(g, ep, e.left) >= 0) {
 			return rtgEmitUserCall(g, ep, idx)

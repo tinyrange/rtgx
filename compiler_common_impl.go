@@ -1967,7 +1967,7 @@ func rtgScan(src []byte, toks *rtgTokens) {
 	line := 1
 	for i < srcLen {
 		c := rtg_runtime_UnsafeByteAt(src, i)
-		if (0x800011>>(c-'\t'))&1 != 0 {
+		if c >= '\t' && c <= ' ' && (0x800011>>(c-'\t'))&1 != 0 {
 			i++
 			continue
 		}
@@ -7073,65 +7073,73 @@ type rtgLinearGen struct {
 	panicDeferPendingOff      int
 	panicRecoveredOff         int
 	runtimeFaultLabel         int
-	runtimeCheckLabels        [7]int
-	checkedPointerLocals      int
-	invalidatedPointerLocals  int
-	divideCheckLabel          int
-	remainderCheckLabel       int
-	locals                    []rtgLocalInfo
-	localCount                int
-	localCacheStart           int
-	localCacheCount           int
-	localCacheIndex           int
-	stackUsed                 int
-	stackPeak                 int
-	arenaSize                 int
-	fieldIndex                int
-	fieldOffset               int
-	fieldPointerIndex         int
-	fieldPointerOffset        int
-	globals                   []rtgGlobalInfo
-	gotoLabels                []rtgGlobalInfo
-	breakLabels               []int
-	continueLabels            []int
-	breakDepth                int
-	continueDepth             int
-	pendingControl            int
-	streqLabel                int
-	streqEmitted              bool
-	append8Label              int
-	append8Emitted            bool
-	append64Label             int
-	append64Emitted           bool
-	appendAddrLabel           int
-	appendAddrEmitted         bool
-	arenaAllocLabel           int
-	arenaAllocEmitted         bool
-	makeZeroLabel             int
-	makeZeroEmitted           bool
-	stringHeapOff             int
-	stringHeapEndOff          int
-	stringHeapDataOff         int
-	stringHeapReady           int
-	winReadLabel              int
-	winReadEmitted            bool
-	winWriteLabel             int
-	winWriteEmitted           bool
-	printIntLabel             int
-	printIntEmitted           bool
-	printIntBufferOff         int
-	darwinEntryOff            int
-	lastRangeReturns          bool
-	scopeBase                 int
-	scopeValueType            int
-	scopeValueOffset          int
-	scopeValueNameStart       int
-	scopeValueNameEnd         int
-	constEvalIota             int
-	constEvalIotaValid        int
-	fixedTargetValue          int
-	fixedTargetState          int
-	fixedPrunedReturns        bool
+	// Runtime helpers have distinct calling conventions, so keep their label
+	// state named and pass the exact slot to architecture-specific emitters.
+	runtimeNonNilLabel       int
+	runtimeSecondaryLabel    int
+	runtimeBoundsLabel       int
+	runtimeByteIndexLabel    int
+	runtimeWordIndexLabel    int
+	runtimeWideIndexLabel    int
+	runtimeSliceBoundsLabel  int
+	checkedPointerLocals     int
+	invalidatedPointerLocals int
+	divideCheckLabel         int
+	remainderCheckLabel      int
+	locals                   []rtgLocalInfo
+	localCount               int
+	localCacheStart          int
+	localCacheCount          int
+	localCacheIndex          int
+	stackUsed                int
+	stackPeak                int
+	arenaSize                int
+	fieldIndex               int
+	fieldOffset              int
+	fieldPointerIndex        int
+	fieldPointerOffset       int
+	globals                  []rtgGlobalInfo
+	gotoLabels               []rtgGlobalInfo
+	breakLabels              []int
+	continueLabels           []int
+	breakDepth               int
+	continueDepth            int
+	pendingControl           int
+	streqLabel               int
+	streqEmitted             bool
+	append8Label             int
+	append8Emitted           bool
+	append64Label            int
+	append64Emitted          bool
+	appendAddrLabel          int
+	appendAddrEmitted        bool
+	arenaAllocLabel          int
+	arenaAllocEmitted        bool
+	makeZeroLabel            int
+	makeZeroEmitted          bool
+	stringHeapOff            int
+	stringHeapEndOff         int
+	stringHeapDataOff        int
+	stringHeapReady          int
+	winReadLabel             int
+	winReadEmitted           bool
+	winWriteLabel            int
+	winWriteEmitted          bool
+	printIntLabel            int
+	printIntEmitted          bool
+	printIntBufferOff        int
+	darwinEntryOff           int
+	lastRangeReturns         bool
+	scopeBase                int
+	scopeValueType           int
+	scopeValueOffset         int
+	scopeValueNameStart      int
+	scopeValueNameEnd        int
+	constEvalIota            int
+	constEvalIotaValid       int
+	fixedTargetValue         int
+	fixedTargetState         int
+	fixedPrunedReturns       bool
 }
 
 func rtgAddStringData(g *rtgLinearGen, msg []byte) int {
@@ -12772,7 +12780,7 @@ func rtgEmitRuntimeNonNilPrimary(g *rtgLinearGen) {
 	a := &g.asm
 	if !g.meta.panicEnabled {
 		if rtgTargetArch == rtgArchAmd64 {
-			rtgAsmCallLabel(a, rtgAmd64EnsureRuntimeCheck(g, 0, "\x48\x85\xc0\x74\x01\xc3\xe9\x00\x00\x00\x00"))
+			rtgAsmCallLabel(a, rtgAmd64EnsureRuntimeCheck(g, &g.runtimeNonNilLabel, 0, "\x48\x85\xc0\x74\x01\xc3\xe9\x00\x00\x00\x00"))
 		} else {
 			rtgAsmCallLabel(a, rtgEnsureNonNilCheckHelper(g))
 		}
@@ -12787,13 +12795,13 @@ func rtgEmitRuntimeNonNilPrimary(g *rtgLinearGen) {
 func rtgEnsureNonNilCheckHelper(g *rtgLinearGen) int {
 	rtgTrustNonNil(g)
 	if rtgTargetArch == rtgArchAmd64 {
-		return rtgAmd64EnsureRuntimeCheck(g, 0, "\x48\x85\xc0\x74\x01\xc3\xe9\x00\x00\x00\x00")
+		return rtgAmd64EnsureRuntimeCheck(g, &g.runtimeNonNilLabel, 0, "\x48\x85\xc0\x74\x01\xc3\xe9\x00\x00\x00\x00")
 	}
-	if g.runtimeCheckLabels[0] > 0 {
-		return g.runtimeCheckLabels[0] - 1
+	if g.runtimeNonNilLabel > 0 {
+		return g.runtimeNonNilLabel - 1
 	}
 	label := rtgAsmNewLabel(&g.asm)
-	g.runtimeCheckLabels[0] = label + 1
+	g.runtimeNonNilLabel = label + 1
 	after := rtgAsmNewLabel(&g.asm)
 	ok := rtgAsmNewLabel(&g.asm)
 	rtgAsmJmpMarkLabel(&g.asm, after, label)
@@ -12825,13 +12833,13 @@ func rtgEmitRuntimeNonNilSecondary(g *rtgLinearGen) {
 func rtgEnsureNonNilSecondaryCheckHelper(g *rtgLinearGen) int {
 	rtgTrustNonNil(g)
 	if rtgTargetArch == rtgArchAmd64 {
-		return rtgAmd64EnsureRuntimeCheck(g, 1, "\x48\x85\xd2\x74\x01\xc3\xe9\x00\x00\x00\x00")
+		return rtgAmd64EnsureRuntimeCheck(g, &g.runtimeSecondaryLabel, 1, "\x48\x85\xd2\x74\x01\xc3\xe9\x00\x00\x00\x00")
 	}
-	if g.runtimeCheckLabels[1] > 0 {
-		return g.runtimeCheckLabels[1] - 1
+	if g.runtimeSecondaryLabel > 0 {
+		return g.runtimeSecondaryLabel - 1
 	}
 	label := rtgAsmNewLabel(&g.asm)
-	g.runtimeCheckLabels[1] = label + 1
+	g.runtimeSecondaryLabel = label + 1
 	after := rtgAsmNewLabel(&g.asm)
 	ok := rtgAsmNewLabel(&g.asm)
 	rtgAsmJmpMarkLabel(&g.asm, after, label)
@@ -12893,19 +12901,14 @@ func rtgEmitRuntimeTruncateSlice(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr) 
 
 func rtgEmitRuntimeTrustPointer(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr) bool {
 	rtgTrustNonNil(g, ep, e)
-	if e.argCount == 0 {
-		return false
-	}
 	for i := 0; i < e.argCount; i++ {
 		arg := &ep.exprs[rtg_runtime_UnsafeIntAt(ep.args, e.firstArg+i)]
-		if arg.kind != rtgExprIdent {
-			return false
+		if arg.kind == rtgExprIdent {
+			local := rtgFindLocalIndex(g, arg.nameStart, arg.nameEnd)
+			if local >= 0 && local < rtgNativeIntSize*8-1 {
+				g.checkedPointerLocals |= 1 << local
+			}
 		}
-		local := rtgFindLocalIndex(g, arg.nameStart, arg.nameEnd)
-		if local < 0 || local >= rtgNativeIntSize*8-1 {
-			return false
-		}
-		g.checkedPointerLocals |= 1 << local
 	}
 	return true
 }
@@ -15344,29 +15347,29 @@ func rtgEnsureIndexAddressHelper(g *rtgLinearGen, elemSize int) int {
 	rtgTrustNonNil(g)
 	if rtgTargetArch == rtgArchAmd64 {
 		if elemSize == 1 {
-			return rtgAmd64EnsureRuntimeCheck(g, 3, "\x48\x39\xd1\x73\x04\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00")
+			return rtgAmd64EnsureRuntimeCheck(g, &g.runtimeByteIndexLabel, 3, "\x48\x39\xd1\x73\x04\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00")
 		}
 		if elemSize == 8 {
-			return rtgAmd64EnsureRuntimeCheck(g, 4, "\x48\x39\xd1\x73\x08\x48\xc1\xe1\x03\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00")
+			return rtgAmd64EnsureRuntimeCheck(g, &g.runtimeWordIndexLabel, 4, "\x48\x39\xd1\x73\x08\x48\xc1\xe1\x03\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00")
 		}
-		return rtgAmd64EnsureRuntimeCheck(g, 5, "\x48\x39\xd1\x73\x08\x48\x6b\xc9\x48\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00")
+		return rtgAmd64EnsureRuntimeCheck(g, &g.runtimeWideIndexLabel, 5, "\x48\x39\xd1\x73\x08\x48\x6b\xc9\x48\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00")
 	}
-	if elemSize == 1 && g.runtimeCheckLabels[3] > 0 {
-		return g.runtimeCheckLabels[3] - 1
+	if elemSize == 1 && g.runtimeByteIndexLabel > 0 {
+		return g.runtimeByteIndexLabel - 1
 	}
-	if elemSize == 8 && g.runtimeCheckLabels[4] > 0 {
-		return g.runtimeCheckLabels[4] - 1
+	if elemSize == 8 && g.runtimeWordIndexLabel > 0 {
+		return g.runtimeWordIndexLabel - 1
 	}
-	if elemSize == 72 && g.runtimeCheckLabels[5] > 0 {
-		return g.runtimeCheckLabels[5] - 1
+	if elemSize == 72 && g.runtimeWideIndexLabel > 0 {
+		return g.runtimeWideIndexLabel - 1
 	}
 	label := rtgAsmNewLabel(&g.asm)
 	if elemSize == 1 {
-		g.runtimeCheckLabels[3] = label + 1
+		g.runtimeByteIndexLabel = label + 1
 	} else if elemSize == 8 {
-		g.runtimeCheckLabels[4] = label + 1
+		g.runtimeWordIndexLabel = label + 1
 	} else {
-		g.runtimeCheckLabels[5] = label + 1
+		g.runtimeWideIndexLabel = label + 1
 	}
 	after := rtgAsmNewLabel(&g.asm)
 	negative := rtgAsmNewLabel(&g.asm)
@@ -15413,7 +15416,7 @@ func rtgEmitRuntimeBoundsCheck(g *rtgLinearGen) {
 	}
 	done := rtgAsmNewLabel(a)
 	if rtgTargetArch == rtgArchAmd64 {
-		rtgAsmCallLabel(a, rtgAmd64EnsureRuntimeCheck(g, 2, "\x48\x89\xc2\x48\x39\xc8\x73\x01\xc3\xe9\x00\x00\x00\x00"))
+		rtgAsmCallLabel(a, rtgAmd64EnsureRuntimeCheck(g, &g.runtimeBoundsLabel, 2, "\x48\x89\xc2\x48\x39\xc8\x73\x01\xc3\xe9\x00\x00\x00\x00"))
 	} else {
 		rtgAsmCallLabel(a, rtgEnsureBoundsCheckHelper(g))
 	}
@@ -15433,7 +15436,7 @@ func rtgEmitSliceBoundsChecks(g *rtgLinearGen, lowOff int, highOff int, maxOff i
 		rtgAsmLoadPrimaryStack(a, highOff)
 		rtgAsmCopyPrimaryToSecondary(a)
 		rtgAsmLoadPrimaryStack(a, lowOff)
-		rtgAsmCallLabel(a, rtgAmd64EnsureRuntimeCheck(g, 6, "\x48\x39\xc2\x72\x0b\x48\x39\xd1\x72\x06\x48\x39\xcf\x72\x01\xc3\xe9\x00\x00\x00\x00"))
+		rtgAsmCallLabel(a, rtgAmd64EnsureRuntimeCheck(g, &g.runtimeSliceBoundsLabel, 6, "\x48\x39\xc2\x72\x0b\x48\x39\xd1\x72\x06\x48\x39\xcf\x72\x01\xc3\xe9\x00\x00\x00\x00"))
 		if g.meta.panicEnabled {
 			done := rtgAsmNewLabel(a)
 			rtgAsmJnzPrimary(a, done)
@@ -15456,13 +15459,13 @@ func rtgEmitSliceBoundsChecks(g *rtgLinearGen, lowOff int, highOff int, maxOff i
 func rtgEnsureBoundsCheckHelper(g *rtgLinearGen) int {
 	rtgTrustNonNil(g)
 	if rtgTargetArch == rtgArchAmd64 {
-		return rtgAmd64EnsureRuntimeCheck(g, 2, "\x48\x89\xc2\x48\x39\xc8\x73\x01\xc3\xe9\x00\x00\x00\x00")
+		return rtgAmd64EnsureRuntimeCheck(g, &g.runtimeBoundsLabel, 2, "\x48\x89\xc2\x48\x39\xc8\x73\x01\xc3\xe9\x00\x00\x00\x00")
 	}
-	if g.runtimeCheckLabels[2] > 0 {
-		return g.runtimeCheckLabels[2] - 1
+	if g.runtimeBoundsLabel > 0 {
+		return g.runtimeBoundsLabel - 1
 	}
 	label := rtgAsmNewLabel(&g.asm)
-	g.runtimeCheckLabels[2] = label + 1
+	g.runtimeBoundsLabel = label + 1
 	after := rtgAsmNewLabel(&g.asm)
 	invalid := rtgAsmNewLabel(&g.asm)
 	rtgAsmJmpMarkLabel(&g.asm, after, label)
@@ -17290,7 +17293,10 @@ func rtgEnsureSignedDivisionHelper(g *rtgLinearGen, mod bool) int {
 	*slot = label + 1
 	after := rtgAsmNewLabel(a)
 	rtgAsmJmpMarkLabel(a, after, label)
-	rtgEmitRuntimeNonNilPrimary(g)
+	nonzero := rtgAsmNewLabel(a)
+	rtgAsmJnzPrimary(a, nonzero)
+	rtgAsmJmpLabel(a, rtgEnsureUncaughtRuntimeFaultHelper(g))
+	rtgAsmMarkLabel(a, nonzero)
 	done := -1
 	if rtgTargetArch != rtgArchAmd64 {
 		done = rtgEmitSignedDivisionOverflowGuard(g, mod)

@@ -1634,11 +1634,11 @@ func rtgAmd64AsmJccLabel(a *rtgAsm, op int, label int) {
 func rtgAmd64InitRuntimeCheckRegs(g *rtgLinearGen) {
 	rtgTrustNonNil(g)
 	a := &g.asm
-	rtgAmd64InitRuntimeCheckReg(a, 0x258d4c, rtgAmd64EnsureRuntimeCheck(g, 2, "\x48\x89\xc2\x48\x39\xc8\x73\x01\xc3\xe9\x00\x00\x00\x00"))
-	rtgAmd64InitRuntimeCheckReg(a, 0x2d8d4c, rtgAmd64EnsureRuntimeCheck(g, 1, "\x48\x85\xd2\x74\x01\xc3\xe9\x00\x00\x00\x00"))
-	rtgAmd64InitRuntimeCheckReg(a, 0x358d4c, rtgAmd64EnsureRuntimeCheck(g, 3, "\x48\x39\xd1\x73\x04\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00"))
-	rtgAmd64InitRuntimeCheckReg(a, 0x3d8d4c, rtgAmd64EnsureRuntimeCheck(g, 4, "\x48\x39\xd1\x73\x08\x48\xc1\xe1\x03\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00"))
-	rtgAmd64InitRuntimeCheckReg(a, 0x1d8d48, rtgAmd64EnsureRuntimeCheck(g, 5, "\x48\x39\xd1\x73\x08\x48\x6b\xc9\x48\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00"))
+	rtgAmd64InitRuntimeCheckReg(a, 0x258d4c, rtgAmd64EnsureRuntimeCheck(g, &g.runtimeBoundsLabel, 2, "\x48\x89\xc2\x48\x39\xc8\x73\x01\xc3\xe9\x00\x00\x00\x00"))
+	rtgAmd64InitRuntimeCheckReg(a, 0x2d8d4c, rtgAmd64EnsureRuntimeCheck(g, &g.runtimeSecondaryLabel, 1, "\x48\x85\xd2\x74\x01\xc3\xe9\x00\x00\x00\x00"))
+	rtgAmd64InitRuntimeCheckReg(a, 0x358d4c, rtgAmd64EnsureRuntimeCheck(g, &g.runtimeByteIndexLabel, 3, "\x48\x39\xd1\x73\x04\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00"))
+	rtgAmd64InitRuntimeCheckReg(a, 0x3d8d4c, rtgAmd64EnsureRuntimeCheck(g, &g.runtimeWordIndexLabel, 4, "\x48\x39\xd1\x73\x08\x48\xc1\xe1\x03\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00"))
+	rtgAmd64InitRuntimeCheckReg(a, 0x1d8d48, rtgAmd64EnsureRuntimeCheck(g, &g.runtimeWideIndexLabel, 5, "\x48\x39\xd1\x73\x08\x48\x6b\xc9\x48\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00"))
 }
 
 func rtgAmd64InitRuntimeCheckReg(a *rtgAsm, op int, label int) {
@@ -1660,11 +1660,9 @@ func rtgAmd64CallIndexAddressHelper(a *rtgAsm, elemSize int) {
 	}
 }
 
-func rtgAmd64EnsureRuntimeCheck(g *rtgLinearGen, kind int, code string) int {
-	rtgTrustNonNil(g)
+func rtgAmd64EnsureRuntimeCheck(g *rtgLinearGen, slot *int, kind int, code string) int {
+	rtgTrustNonNil(g, slot)
 	a := &g.asm
-	slot := &g.runtimeCheckLabels[kind]
-	rtgTrustNonNil(slot)
 	if *slot > 0 {
 		return *slot - 1
 	}
