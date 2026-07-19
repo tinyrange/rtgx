@@ -28,7 +28,7 @@ type definiteCallTarget struct {
 // remain for later, richer checking rather than being guessed here.
 func invalidDefiniteCallArgumentType(pkg *load.Package, info *PackageInfo, fileIndex int, caller syntax.FuncDecl, callerSignature *FuncSignature, refs []CoreNameRef, targets []definiteCallTarget) int {
 	file := &pkg.Files[fileIndex].File
-	callerSignatureReady := false
+	localTypesReady := false
 	var localTypes []definiteLocalTypeSpan
 	for refIndex := 0; refIndex < len(refs); refIndex++ {
 		ref := refs[refIndex]
@@ -45,10 +45,6 @@ func invalidDefiniteCallArgumentType(pkg *load.Package, info *PackageInfo, fileI
 		if len(target.pointerParams) == 0 {
 			continue
 		}
-		if !callerSignatureReady {
-			localTypes = collectDefiniteLocalTypes(*file, caller)
-			callerSignatureReady = true
-		}
 		close := findTypeMatching(*file, open, '(', ')')
 		if close <= open || close > caller.BodyEnd {
 			continue
@@ -58,7 +54,7 @@ func invalidDefiniteCallArgumentType(pkg *load.Package, info *PackageInfo, fileI
 		for i := 0; i < len(target.pointerParams) && argStart < close-1; i++ {
 			argEnd := nextDefiniteCallComma(file, argStart, close-1)
 			if target.pointerParams[i] &&
-				definiteArgumentTypeKind(pkg, info, fileIndex, callerSignature, localTypes, argStart, argEnd, calleeTok) == definiteTypeNonPointer {
+				definiteArgumentTypeKind(pkg, info, fileIndex, &caller, callerSignature, &localTypes, &localTypesReady, argStart, argEnd, calleeTok) == definiteTypeNonPointer {
 				invalidTok = argStart
 				break
 			}
@@ -170,7 +166,7 @@ func findDefinitePackageFunc(pkg *load.Package, info *PackageInfo, callerFile *s
 	return symbol.File, fn, ok
 }
 
-func definiteArgumentTypeKind(pkg *load.Package, info *PackageInfo, fileIndex int, signature *FuncSignature, localTypes []definiteLocalTypeSpan, start int, end int, before int) int {
+func definiteArgumentTypeKind(pkg *load.Package, info *PackageInfo, fileIndex int, caller *syntax.FuncDecl, signature *FuncSignature, localTypes *[]definiteLocalTypeSpan, localTypesReady *bool, start int, end int, before int) int {
 	file := &pkg.Files[fileIndex].File
 	for start < end && (tokCharIs(file, start, ';') || tokCharIs(file, start, ',')) {
 		start++
@@ -200,7 +196,11 @@ func definiteArgumentTypeKind(pkg *load.Package, info *PackageInfo, fileIndex in
 	if kind := definiteNamedFieldTypeKind(pkg, info, fileIndex, signature.Results, name); kind != definiteTypeUnknown {
 		return kind
 	}
-	if typeStart, typeEnd, ok := findDefiniteLocalType(file, localTypes, start, before); ok {
+	if !*localTypesReady {
+		*localTypes = collectDefiniteLocalTypes(*file, *caller)
+		*localTypesReady = true
+	}
+	if typeStart, typeEnd, ok := findDefiniteLocalType(file, *localTypes, start, before); ok {
 		if typeStart < 0 || typeEnd <= typeStart {
 			return definiteTypeUnknown
 		}
