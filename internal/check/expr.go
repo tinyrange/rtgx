@@ -24,10 +24,10 @@ type CompositeExpr struct {
 	Elems     []ExprSpan
 }
 
-func buildFuncIndexExprs(file syntax.File, body syntax.Body) []IndexExpr {
+func buildFuncIndexExprs(file *syntax.File, body *syntax.Body) []IndexExpr {
 	var indexes []IndexExpr
 	for i := 0; i < len(body.Stmts); i++ {
-		stmt := body.Stmts[i]
+		stmt := &body.Stmts[i]
 		if stmt.Kind == syntax.StmtDecl {
 			indexes = appendDeclIndexExprs(indexes, file, stmt)
 		} else if stmt.Kind == syntax.StmtAssign {
@@ -42,7 +42,7 @@ func buildFuncIndexExprs(file syntax.File, body syntax.Body) []IndexExpr {
 func buildFuncCompositeExprs(file syntax.File, body syntax.Body) []CompositeExpr {
 	var composites []CompositeExpr
 	for i := 0; i < len(body.Stmts); i++ {
-		stmt := body.Stmts[i]
+		stmt := &body.Stmts[i]
 		if stmt.Kind == syntax.StmtDecl {
 			composites = appendDeclCompositeExprs(composites, file, stmt)
 		} else if stmt.Kind == syntax.StmtAssign {
@@ -54,20 +54,20 @@ func buildFuncCompositeExprs(file syntax.File, body syntax.Body) []CompositeExpr
 	return composites
 }
 
-func appendDeclIndexExprs(indexes []IndexExpr, file syntax.File, stmt syntax.Stmt) []IndexExpr {
+func appendDeclIndexExprs(indexes []IndexExpr, file *syntax.File, stmt *syntax.Stmt) []IndexExpr {
 	start := stmt.StartTok + 1
 	end := stmt.EndTok
 	if start >= end {
 		return indexes
 	}
-	if tokCharIs(&file, start, '(') {
+	if tokCharIs(file, start, '(') {
 		i := start + 1
 		for i < end {
-			i = skipLocalSeparators(file, i, end)
-			if i >= end || tokCharIs(&file, i, ')') {
+			i = skipLocalSeparators(*file, i, end)
+			if i >= end || tokCharIs(file, i, ')') {
 				break
 			}
-			specEnd := statementSpecEnd(file, i, end)
+			specEnd := statementSpecEnd(*file, i, end)
 			indexes = appendSpecInitializerIndexes(indexes, file, i, specEnd)
 			i = specEnd
 		}
@@ -76,7 +76,7 @@ func appendDeclIndexExprs(indexes []IndexExpr, file syntax.File, stmt syntax.Stm
 	return appendSpecInitializerIndexes(indexes, file, start, end)
 }
 
-func appendDeclCompositeExprs(composites []CompositeExpr, file syntax.File, stmt syntax.Stmt) []CompositeExpr {
+func appendDeclCompositeExprs(composites []CompositeExpr, file syntax.File, stmt *syntax.Stmt) []CompositeExpr {
 	start := stmt.StartTok + 1
 	end := stmt.EndTok
 	if start >= end {
@@ -98,8 +98,8 @@ func appendDeclCompositeExprs(composites []CompositeExpr, file syntax.File, stmt
 	return appendSpecInitializerComposites(composites, file, start, end)
 }
 
-func appendSpecInitializerIndexes(indexes []IndexExpr, file syntax.File, start int, end int) []IndexExpr {
-	assign := findTokenText(file, start, end, "=")
+func appendSpecInitializerIndexes(indexes []IndexExpr, file *syntax.File, start int, end int) []IndexExpr {
+	assign := findTokenText(*file, start, end, "=")
 	if assign < 0 {
 		return indexes
 	}
@@ -114,20 +114,20 @@ func appendSpecInitializerComposites(composites []CompositeExpr, file syntax.Fil
 	return appendExprComposites(composites, file, assign+1, end)
 }
 
-func appendExprIndexes(indexes []IndexExpr, file syntax.File, start int, end int) []IndexExpr {
+func appendExprIndexes(indexes []IndexExpr, file *syntax.File, start int, end int) []IndexExpr {
 	for i := start; i < end && i < len(file.Tokens); i++ {
-		if !tokCharIs(&file, i, '[') {
+		if !tokCharIs(file, i, '[') {
 			continue
 		}
-		close := findTypeMatching(file, i, '[', ']')
+		close := findTypeMatching(*file, i, '[', ']')
 		if close <= i || close > end {
 			continue
 		}
-		baseStart := exprOperandStartBefore(file, start, i)
-		if baseStart >= i || isIndexTypePrefix(file, baseStart) {
+		baseStart := exprOperandStartBefore(*file, start, i)
+		if baseStart >= i || isIndexTypePrefix(*file, baseStart) {
 			continue
 		}
-		indexStart, indexEnd := trimExprSpan(file, i+1, close-1)
+		indexStart, indexEnd := trimExprSpan(*file, i+1, close-1)
 		indexes = append(indexes, IndexExpr{
 			StartTok:   baseStart,
 			EndTok:     close,

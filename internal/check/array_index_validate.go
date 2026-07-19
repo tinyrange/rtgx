@@ -12,20 +12,20 @@ type constantIndexContext struct {
 	fn        syntax.FuncDecl
 }
 
-func invalidConstantArrayIndex(pkg load.Package, info PackageInfo, fileIndex int, fn syntax.FuncDecl, body syntax.Body) int {
+func invalidConstantArrayIndex(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body) int {
 	if fileIndex < 0 || fileIndex >= len(pkg.Files) {
 		return -1
 	}
 	file := pkg.Files[fileIndex].File
-	indexes := buildFuncIndexExprs(file, body)
+	indexes := buildFuncIndexExprs(&file, body)
 	if len(indexes) == 0 {
 		return -1
 	}
-	context := constantIndexContext{pkg: &pkg, info: &info, fileIndex: fileIndex, fn: fn}
+	context := constantIndexContext{pkg: pkg, info: info, fileIndex: fileIndex, fn: fn}
 	signature := buildFuncSignature(file, fn)
 	locals := collectDefiniteLocalTypes(file, fn)
 	for i := 0; i < len(indexes); i++ {
-		index := indexes[i]
+		index := &indexes[i]
 		length, array := constantIndexArrayLength(context, signature, locals, index.BaseStart, index.BaseEnd, index.OpenTok, 0)
 		if !array {
 			continue
@@ -86,18 +86,17 @@ func constantIndexInt(context constantIndexContext, start int, end int, before i
 		return 0, false
 	}
 	for i := context.fn.BodyStart + 1; i+3 < before; i++ {
-		if file.Tokens[i].Kind == syntax.TokenConst && statementTokensEqual(file, i+1, start) && tokenTextIs(&file, i+2, "=") {
+		if file.Tokens[i].Kind == syntax.TokenConst && statementTokensEqual(&file, i+1, start) && tokenTextIs(&file, i+2, "=") {
 			return constantIndexInt(context, i+3, statementSpecEnd(file, i+1, before), before, depth+1)
 		}
 	}
 	name := tokenString(&file, start)
 	for i := 0; i < len(context.info.Decls); i++ {
-		decl := context.info.Decls[i]
-		if decl.Kind == SymbolConst && decl.Name == name && decl.File >= 0 && decl.File < len(context.pkg.Files) {
-			values := splitExprList(context.pkg.Files[decl.File].File, decl.ValueStart, decl.ValueEnd)
-			if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
-				context.fileIndex = decl.File
-				return constantIndexInt(context, values[decl.ValueIndex].StartTok, values[decl.ValueIndex].EndTok, decl.Token, depth+1)
+		if context.info.Decls[i].Kind == SymbolConst && context.info.Decls[i].Name == name && context.info.Decls[i].File >= 0 && context.info.Decls[i].File < len(context.pkg.Files) {
+			values := splitExprList(context.pkg.Files[context.info.Decls[i].File].File, context.info.Decls[i].ValueStart, context.info.Decls[i].ValueEnd)
+			if context.info.Decls[i].ValueIndex >= 0 && context.info.Decls[i].ValueIndex < len(values) {
+				context.fileIndex = context.info.Decls[i].File
+				return constantIndexInt(context, values[context.info.Decls[i].ValueIndex].StartTok, values[context.info.Decls[i].ValueIndex].EndTok, context.info.Decls[i].Token, depth+1)
 			}
 		}
 	}
@@ -186,12 +185,11 @@ func constantIndexType(context constantIndexContext, tok int, depth int) bool {
 	if typeIndex < 0 {
 		return false
 	}
-	typ := context.info.Types[typeIndex]
-	if typ.Kind != TypeNamed || typ.TypeEnd != typ.TypeStart+1 {
+	if context.info.Types[typeIndex].Kind != TypeNamed || context.info.Types[typeIndex].TypeEnd != context.info.Types[typeIndex].TypeStart+1 {
 		return false
 	}
-	context.fileIndex = typ.File
-	return constantIndexType(context, typ.TypeStart, depth+1)
+	context.fileIndex = context.info.Types[typeIndex].File
+	return constantIndexType(context, context.info.Types[typeIndex].TypeStart, depth+1)
 }
 
 func constantIndexArrayLength(context constantIndexContext, signature FuncSignature, locals []definiteLocalTypeSpan, start int, end int, before int, depth int) (int, bool) {
@@ -211,28 +209,34 @@ func constantIndexArrayLength(context constantIndexContext, signature FuncSignat
 		return 0, false
 	}
 	name := tokenString(&file, start)
-	groups := [][]Field{signature.Receiver, signature.Params, signature.Results}
-	for i := 0; i < len(groups); i++ {
-		for j := 0; j < len(groups[i]); j++ {
-			if groups[i][j].Name == name {
-				return constantIndexTypeLength(context, groups[i][j].TypeStart, groups[i][j].TypeEnd, before, depth+1)
+	for group := 0; group < 3; group++ {
+		var fields []Field
+		if group == 0 {
+			fields = signature.Receiver
+		} else if group == 1 {
+			fields = signature.Params
+		} else {
+			fields = signature.Results
+		}
+		for i := 0; i < len(fields); i++ {
+			if fields[i].Name == name {
+				return constantIndexTypeLength(context, fields[i].TypeStart, fields[i].TypeEnd, before, depth+1)
 			}
 		}
 	}
-	if typeStart, typeEnd, ok := findDefiniteLocalType(file, locals, start, before); ok && typeStart >= 0 && typeEnd > typeStart {
+	if typeStart, typeEnd, ok := findDefiniteLocalType(&file, locals, start, before); ok && typeStart >= 0 && typeEnd > typeStart {
 		return constantIndexTypeLength(context, typeStart, typeEnd, before, depth+1)
 	}
 	for i := before - 1; i > context.fn.BodyStart; i-- {
-		if file.Tokens[i].Kind == syntax.TokenIdent && statementTokensEqual(file, i, start) && i+2 < before && tokenTextIs(&file, i+1, ":=") {
+		if file.Tokens[i].Kind == syntax.TokenIdent && statementTokensEqual(&file, i, start) && i+2 < before && tokenTextIs(&file, i+1, ":=") {
 			valueStart, valueEnd := trimExprSpan(file, i+2, statementSpecEnd(file, i+2, before))
 			return constantIndexArrayLength(context, signature, locals, valueStart, valueEnd, i, depth+1)
 		}
 	}
 	for i := 0; i < len(context.info.Decls); i++ {
-		decl := context.info.Decls[i]
-		if decl.Kind == SymbolVar && decl.Name == name && decl.TypeStart >= 0 && decl.TypeEnd > decl.TypeStart {
-			context.fileIndex = decl.File
-			return constantIndexTypeLength(context, decl.TypeStart, decl.TypeEnd, before, depth+1)
+		if context.info.Decls[i].Kind == SymbolVar && context.info.Decls[i].Name == name && context.info.Decls[i].TypeStart >= 0 && context.info.Decls[i].TypeEnd > context.info.Decls[i].TypeStart {
+			context.fileIndex = context.info.Decls[i].File
+			return constantIndexTypeLength(context, context.info.Decls[i].TypeStart, context.info.Decls[i].TypeEnd, before, depth+1)
 		}
 	}
 	return 0, false
@@ -260,7 +264,6 @@ func constantIndexTypeLength(context constantIndexContext, start int, end int, b
 	if typeIndex < 0 {
 		return 0, false
 	}
-	typ := context.info.Types[typeIndex]
-	context.fileIndex = typ.File
-	return constantIndexTypeLength(context, typ.TypeStart, typ.TypeEnd, before, depth+1)
+	context.fileIndex = context.info.Types[typeIndex].File
+	return constantIndexTypeLength(context, context.info.Types[typeIndex].TypeStart, context.info.Types[typeIndex].TypeEnd, before, depth+1)
 }
