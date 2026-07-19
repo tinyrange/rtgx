@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-026",
+  "file": "cmd/app/main.go",
+  "line": 5,
+  "column": 8,
+  "message": "deferred builtin call discards a result"
+}

@@ -11,6 +11,12 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
 	var literalLocals []int
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
+		if stmt.Kind == syntax.StmtDefer && stmt.ExprStart+1 < stmt.ExprEnd && file.Tokens[stmt.ExprStart].Kind == syntax.TokenIdent && tokCharIs(&file, stmt.ExprStart+1, '(') {
+			name := tokenString(&file, stmt.ExprStart)
+			if name == "append" || name == "cap" || name == "complex" || name == "imag" || name == "len" || name == "make" || name == "max" || name == "min" || name == "new" || name == "real" {
+				return CheckErrDeferBuiltin, stmt.ExprStart
+			}
+		}
 		if stmt.Kind == syntax.StmtBreak && branchIsBare(file, stmt) && !branchHasEnclosing(body, stmt.StartTok, false) {
 			return CheckErrBreak, stmt.StartTok
 		}

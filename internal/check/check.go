@@ -32,6 +32,7 @@ const (
 	CheckErrMainMethod
 	CheckErrSliceOperand
 	CheckErrArrayIndex
+	CheckErrDeferBuiltin
 )
 
 const (

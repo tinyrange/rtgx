@@ -286,6 +286,8 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RENVO-CHECK-024", "cannot slice an unaddressable array value"
 		case check.CheckErrArrayIndex:
 			code, message = "RENVO-CHECK-025", "constant array index is out of bounds"
+		case check.CheckErrDeferBuiltin:
+			code, message = "RENVO-CHECK-026", "deferred builtin call discards a result"
 		}
 	} else if built.Build.Error == build.BuildErrLower {
 		phase, code, message = "lowerer", "RENVO-LOWER-001", "checked program could not be lowered"
