@@ -23,6 +23,15 @@ type definiteCallTarget struct {
 	pointerParams []bool
 }
 
+func prepareDefiniteCallTargets(pkg *load.Package, info *PackageInfo, refs []CoreNameRef, targets []definiteCallTarget) {
+	for i := 0; i < len(refs); i++ {
+		symbolIndex := refs[i].Index
+		if symbolIndex >= 0 && symbolIndex < len(info.Symbols) && symbolIndex < len(targets) {
+			prepareDefiniteCallTarget(pkg, info, symbolIndex, &targets[symbolIndex])
+		}
+	}
+}
+
 // invalidDefiniteCallArgumentType rejects representation-changing argument
 // mismatches that can be proven from declarations alone. Unknown expressions
 // remain for later, richer checking rather than being guessed here.
@@ -76,17 +85,12 @@ func prepareDefiniteCallTarget(pkg *load.Package, info *PackageInfo, symbolIndex
 	if symbol.Kind != SymbolFunc || symbol.File < 0 || symbol.File >= len(pkg.Files) {
 		return
 	}
-	file := pkg.Files[symbol.File].File
-	fn, ok := findDefinitePackageFuncDecl(file, symbol.Token)
+	file := &pkg.Files[symbol.File].File
+	fn, ok := findDefinitePackageFuncDecl(*file, symbol.Token)
 	if !ok || !definiteSignatureHasPointer(file, fn) {
 		return
 	}
-	signature := buildFuncSignature(file, fn)
-	target.pointerParams = make([]bool, len(signature.Params))
-	for i := 0; i < len(signature.Params); i++ {
-		param := signature.Params[i]
-		target.pointerParams[i] = definiteTypeKind(pkg, info, symbol.File, param.TypeStart, param.TypeEnd, 0) == definiteTypePointer
-	}
+	target.pointerParams = definitePointerParams(pkg, info, symbol.File, file, fn)
 }
 
 func nextDefiniteCallComma(file *syntax.File, start int, end int) int {
@@ -124,13 +128,52 @@ func nextDefiniteCallComma(file *syntax.File, start int, end int) int {
 	return end
 }
 
-func definiteSignatureHasPointer(file syntax.File, fn syntax.FuncDecl) bool {
+func definiteSignatureHasPointer(file *syntax.File, fn syntax.FuncDecl) bool {
 	for i := fn.ParamsStart; i < fn.ParamsEnd; i++ {
-		if tokCharIs(&file, i, '*') {
+		if tokCharIs(file, i, '*') {
 			return true
 		}
 	}
 	return false
+}
+
+func definitePointerParams(pkg *load.Package, info *PackageInfo, fileIndex int, file *syntax.File, fn syntax.FuncDecl) []bool {
+	var params []bool
+	pending := 0
+	start := fn.ParamsStart + 1
+	end := fn.ParamsEnd - 1
+	for start < end {
+		segmentEnd := nextTopLevelComma(*file, start, end)
+		first, last := trimFieldSpan(*file, start, segmentEnd)
+		if first >= last {
+			start = segmentEnd + 1
+			continue
+		}
+		if isSingleIdent(*file, first, last) {
+			pending++
+			start = segmentEnd + 1
+			continue
+		}
+		if file.Tokens[first].Kind == syntax.TokenIdent && first+1 < last && !tokCharIs(file, first+1, '.') {
+			pointer := definiteTypeKind(pkg, info, fileIndex, first+1, last, 0) == definiteTypePointer
+			for i := 0; i <= pending; i++ {
+				params = append(params, pointer)
+			}
+			pending = 0
+		} else {
+			for pending > 0 {
+				params = append(params, false)
+				pending--
+			}
+			params = append(params, definiteTypeKind(pkg, info, fileIndex, first, last, 0) == definiteTypePointer)
+		}
+		start = segmentEnd + 1
+	}
+	for pending > 0 {
+		params = append(params, false)
+		pending--
+	}
+	return params
 }
 
 func findDefinitePackageFuncDecl(file syntax.File, token int) (syntax.FuncDecl, bool) {

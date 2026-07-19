@@ -139,7 +139,10 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			out.CoreRefs = make([]CoreNameRef, 0, refCount)
 			out.CoreSelectors = make([]CoreSelectorRef, 0, selectorCount)
 			out.CoreRefs, out.CoreSelectors = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, &file, fileIndex, &info, checked, scope, bodyStart, bodyEnd)
+			prepareDefiniteCallTargets(&pkg, &info, out.CoreRefs, callTargets)
+			callCheckArenaStart := arena.Mark()
 			callTypeTok := invalidDefiniteCallArgumentType(&pkg, &info, fileIndex, fn, &signature, out.CoreRefs, callTargets)
+			arena.Reset(callCheckArenaStart)
 			if callTypeTok >= 0 {
 				return info, false, CheckErrCallArgument, fileIndex, callTypeTok
 			}
@@ -231,7 +234,6 @@ type CoreScope struct {
 type CoreScopeName struct {
 	Kind  int
 	Token int
-	Hash  int
 }
 
 func resolutionCapacitiesCore(tokens int) (int, int) {
@@ -500,11 +502,7 @@ func lookupScopeTokenNameCore(scope CoreScope, file *syntax.File, tok int) int {
 	if size < 0 || token.Start < 0 || token.End > len(file.Src) {
 		return -1
 	}
-	hash := hashCoreToken(file.Src, token.Start, size)
 	for i := 0; i < len(scope.Names); i++ {
-		if scope.Names[i].Hash != hash {
-			continue
-		}
 		nameTok := scope.Names[i].Token
 		if nameTok < 0 || nameTok >= len(file.Tokens) {
 			continue
@@ -807,8 +805,7 @@ func addCoreScopeName(scope *CoreScope, file syntax.File, tok int, kind int, rej
 	if variable {
 		kind = NameVariable
 	}
-	token := file.Tokens[tok]
-	scope.Names = append(scope.Names, CoreScopeName{Kind: kind, Token: tok, Hash: hashCoreToken(file.Src, token.Start, token.End-token.Start)})
+	scope.Names = append(scope.Names, CoreScopeName{Kind: kind, Token: tok})
 	return true
 }
 
