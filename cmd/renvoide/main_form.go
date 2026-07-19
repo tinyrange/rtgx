@@ -11,6 +11,8 @@ import (
 // and property assignment; this file contains application state and callbacks.
 type MainForm struct {
 	forms.Form
+	window         *graphics.Window
+	menuBar        *forms.MenuBar
 	appBar         *workspaceAppBar
 	targetMenu     *workspaceTargetMenu
 	explorerFrame  *workspaceExplorerFrame
@@ -58,6 +60,14 @@ func NewMainFormWithEnv(root string, env []string) *MainForm {
 	return form
 }
 
+func (f *MainForm) SetWindow(window *graphics.Window) {
+	if f == nil {
+		return
+	}
+	f.window = window
+	f.updateWindowTitle()
+}
+
 func (f *MainForm) explorerOpenFile(path string) {
 	data, err := renvoos.ReadFile(path)
 	if err != nil {
@@ -71,13 +81,138 @@ func (f *MainForm) explorerOpenFile(path string) {
 }
 
 func (f *MainForm) saveCurrentFile() {
-	if f.currentPath == "" || f.editor.Document == nil || !f.editor.Document.Dirty() {
+	if f.editor.Document == nil || !f.editor.Document.Dirty() {
 		return
 	}
-	if renvoos.WriteFile(f.currentPath, f.editor.Document.Bytes(), 0644) == nil {
+	if f.currentPath == "" {
+		f.saveCurrentFileAs()
+		return
+	}
+	f.saveDocumentTo(f.currentPath)
+}
+
+func (f *MainForm) saveDocumentTo(path string) bool {
+	if f == nil || path == "" || f.editor == nil || f.editor.Document == nil {
+		return false
+	}
+	if renvoos.WriteFile(path, f.editor.Document.Bytes(), 0644) == nil {
+		f.currentPath = path
 		f.editor.Document.MarkSaved()
 		f.editor.Invalidate()
 		f.syncEditorFrame()
+		if f.explorer != nil && f.explorer.Model != nil {
+			f.explorer.Model.Refresh()
+			f.explorer.Invalidate()
+		}
+		return true
+	}
+	f.output.SetMessage("Could not save "+path+".", false)
+	return false
+}
+
+func (f *MainForm) chooseOpenFile() {
+	if f == nil || f.window == nil {
+		return
+	}
+	path, ok := f.window.OpenFileDialog(graphics.FileDialogOptions{Title: "Open File", InitialDirectory: f.root})
+	if ok {
+		f.saveCurrentFile()
+		f.explorerOpenFile(path)
+	}
+}
+
+func (f *MainForm) saveCurrentFileAs() {
+	if f == nil || f.window == nil || f.editor == nil || f.editor.Document == nil {
+		return
+	}
+	name := workspacePathBase(f.currentPath)
+	if name == "" {
+		name = "main.go"
+	}
+	path, ok := f.window.SaveFileDialog(graphics.FileDialogOptions{Title: "Save File As", InitialDirectory: f.root, DefaultName: name})
+	if ok {
+		f.saveDocumentTo(path)
+	}
+}
+
+func (f *MainForm) chooseNewProject() {
+	if f == nil || f.window == nil {
+		return
+	}
+	path, ok := f.window.SelectFolderDialog(graphics.FolderDialogOptions{Title: "Create Project", InitialDirectory: f.root})
+	if ok {
+		f.openProjectPath(path, true)
+	}
+}
+
+func (f *MainForm) chooseOpenProject() {
+	if f == nil || f.window == nil {
+		return
+	}
+	path, ok := f.window.SelectFolderDialog(graphics.FolderDialogOptions{Title: "Open Project", InitialDirectory: f.root})
+	if ok {
+		f.openProjectPath(path, false)
+	}
+}
+
+func (f *MainForm) openProjectPath(root string, create bool) bool {
+	if f == nil || root == "" {
+		return false
+	}
+	if _, err := renvoos.ReadDir(root); err != nil {
+		f.output.SetMessage("Could not read the project directory.", false)
+		return false
+	}
+	f.saveCurrentFile()
+	created := false
+	message := "Opened project " + workspacePathBase(root) + "."
+	if create {
+		created, message = ensureHelloWorldProject(root)
+		if message != "" && !created {
+			f.output.SetMessage(message, false)
+			return false
+		}
+	}
+	f.root = root
+	f.projectOutput = workspaceProjectOutput(root, f.selectedTarget)
+	f.lastBuildOK = false
+	f.analysis = editorAnalysisSession{}
+	f.analysisTimer = false
+	f.design = defaultFormDesign()
+	f.designer.SetDesign(&f.design)
+	f.inspector.SetDesign(&f.design)
+	f.explorer.SetModel(ide.OpenExplorer(root))
+	f.currentPath = ""
+	f.editor.SetDocument(ide.NewDocument(nil))
+	initial := workspaceJoinPath(root, projectUserFormFile)
+	if _, err := renvoos.ReadFile(initial); err != nil {
+		initial = workspaceJoinPath(root, projectMainFile)
+	}
+	if data, err := renvoos.ReadFile(initial); err == nil {
+		f.currentPath = initial
+		f.editor.SetDocument(ide.NewDocument(data))
+	}
+	f.showCode()
+	f.requestEditorAnalysis()
+	f.updateWindowTitle()
+	if message != "" {
+		f.output.SetMessage(message, true)
+	}
+	return true
+}
+
+func (f *MainForm) updateWindowTitle() {
+	if f == nil || f.window == nil {
+		return
+	}
+	name := workspacePathBase(f.root)
+	if name == "" {
+		name = f.root
+	}
+	if name == "" || name == "." {
+		f.window.SetTitle("MiniIDE")
+	} else {
+		f.window.SetTitle("MiniIDE — " + name)
 	}
 }
 
@@ -91,7 +226,8 @@ func (f *MainForm) formResize() {
 		layout.editor = rect(documentX, int(layout.editor.MinY), width-documentX, int(layout.editor.Height()))
 	}
 	f.appBar.SetBounds(rect(0, 0, width, workspaceAppBarHeight))
-	f.targetMenu.SetBounds(rect(170, 39, 184, len(workspaceTargets())*27+10))
+	f.menuBar.SetBounds(rect(110, 7, 168, 32))
+	f.targetMenu.SetBounds(rect(290, 39, 184, len(workspaceTargets())*27+10))
 	f.explorerFrame.SetBounds(layout.explorerFrame)
 	f.editorFrame.SetBounds(layout.editorFrame)
 	f.designer.SetBounds(layout.designer)

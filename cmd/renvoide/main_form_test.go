@@ -19,7 +19,7 @@ func TestMainFormGeneratedLayoutAndOpenSaveCallbacks(t *testing.T) {
 	}
 	form := NewMainForm(root)
 	controls := form.Controls()
-	if len(controls) != 9 || controls[0] != &form.appBar.Control || controls[1] != &form.explorerFrame.Control || controls[2] != &form.editorFrame.Control || controls[3] != &form.designer.Control || controls[4] != &form.inspector.Control || controls[5] != &form.output.Control || controls[6] != &form.explorer.Control || controls[7] != &form.editor.Control || controls[8] != &form.targetMenu.Control {
+	if len(controls) != 10 || controls[0] != &form.appBar.Control || controls[1] != &form.explorerFrame.Control || controls[2] != &form.editorFrame.Control || controls[3] != &form.designer.Control || controls[4] != &form.inspector.Control || controls[5] != &form.output.Control || controls[6] != &form.explorer.Control || controls[7] != &form.editor.Control || controls[8] != &form.targetMenu.Control || controls[9] != &form.menuBar.Control {
 		t.Fatalf("generated controls = %#v", controls)
 	}
 	if form.explorer.Font == nil || form.editor.Font == nil || form.explorer.Font == form.editor.Font {
@@ -44,6 +44,67 @@ func TestMainFormGeneratedLayoutAndOpenSaveCallbacks(t *testing.T) {
 	form.Dispatch(graphics.Event{Type: graphics.EventNone})
 	if form.lastBuildOK {
 		t.Fatal("editing did not invalidate the previous build")
+	}
+}
+
+func TestMainFormOpensExistingProjectWithoutScaffoldingIt(t *testing.T) {
+	first := t.TempDir()
+	form := NewMainForm(first)
+	second := t.TempDir()
+	mainPath := filepath.Join(second, projectMainFile)
+	if err := os.WriteFile(mainPath, []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if !form.openProjectPath(second, false) {
+		t.Fatal("open project failed")
+	}
+	if form.root != second || form.currentPath != mainPath || form.editor.Document.Text() != "package main\n\nfunc main() {}\n" {
+		t.Fatalf("opened project state = root %q path %q text %q", form.root, form.currentPath, form.editor.Document.Text())
+	}
+	if form.explorer.Model == nil || form.explorer.Model.Root == nil || form.explorer.Model.Root.Path != second {
+		t.Fatalf("explorer root = %#v", form.explorer.Model)
+	}
+	if _, err := os.Stat(filepath.Join(second, projectGeneratedFormFile)); !os.IsNotExist(err) {
+		t.Fatalf("opening existing project unexpectedly scaffolded it: %v", err)
+	}
+}
+
+func TestMainFormCreatesProjectInSelectedFolderAndSaveAsTracksNewPath(t *testing.T) {
+	form := NewMainForm(t.TempDir())
+	project := t.TempDir()
+	if !form.openProjectPath(project, true) {
+		t.Fatal("create project failed")
+	}
+	for _, name := range []string{projectMainFile, projectUserFormFile, projectGeneratedFormFile} {
+		if _, err := os.Stat(filepath.Join(project, name)); err != nil {
+			t.Fatalf("created project missing %s: %v", name, err)
+		}
+	}
+	form.editor.Document.MoveDocumentEnd(false)
+	form.editor.Document.Insert("\n// saved elsewhere\n")
+	path := filepath.Join(project, "alternate.go")
+	if !form.saveDocumentTo(path) {
+		t.Fatal("save as failed")
+	}
+	if form.currentPath != path || form.editor.Document.Dirty() {
+		t.Fatalf("saved document state = path %q dirty %v", form.currentPath, form.editor.Document.Dirty())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(data), "saved elsewhere") {
+		t.Fatalf("saved file = %q, %v", data, err)
+	}
+}
+
+func TestMainFormMenuShortcutSavesWhileEditorIsFocused(t *testing.T) {
+	root := t.TempDir()
+	form := NewMainForm(root)
+	form.editor.Focus()
+	form.editor.Document.MoveDocumentEnd(false)
+	form.editor.Document.Insert("\n// shortcut save\n")
+	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeyS, Modifiers: graphics.ModifierControl})
+	data, err := os.ReadFile(form.currentPath)
+	if err != nil || !strings.Contains(string(data), "shortcut save") || form.editor.Document.Dirty() {
+		t.Fatalf("shortcut save = %q, %v dirty %v", data, err, form.editor.Document.Dirty())
 	}
 }
 

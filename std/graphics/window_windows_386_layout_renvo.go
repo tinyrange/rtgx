@@ -22,3 +22,18 @@ const windowsMessagePrivateOffset = 28
 
 const windowsTrackMouseEventSize = 16
 const windowsTrackMouseEventHoverTimeOffset = 12
+
+const windowsOpenFileNameSize = 76
+const windowsOpenFileNameOwnerOffset = 4
+const windowsOpenFileNameFileOffset = 28
+const windowsOpenFileNameMaxFileOffset = 32
+const windowsOpenFileNameInitialDirectoryOffset = 44
+const windowsOpenFileNameTitleOffset = 48
+const windowsOpenFileNameFlagsOffset = 52
+
+const windowsBrowseInfoSize = 32
+const windowsBrowseInfoOwnerOffset = 0
+const windowsBrowseInfoDisplayNameOffset = 8
+const windowsBrowseInfoTitleOffset = 12
+const windowsBrowseInfoFlagsOffset = 16
+const windowsDialogCharacterSize = 1

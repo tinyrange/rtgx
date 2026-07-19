@@ -12,6 +12,7 @@ func run(args []string, env []string) int {
 		return 1
 	}
 	form := NewMainFormWithEnv(root, env)
+	form.SetWindow(window)
 	for {
 		if form.Paint(window.Surface()) {
 			if !window.Present() {

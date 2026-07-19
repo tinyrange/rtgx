@@ -58,6 +58,15 @@ func (c *ExplorerControl) SetFont(font *graphics.Font) {
 	c.Invalidate()
 }
 
+func (c *ExplorerControl) SetModel(model *Explorer) {
+	if c == nil || model == nil || c.Model == model {
+		return
+	}
+	c.Model = model
+	c.scrollY = 0
+	c.Invalidate()
+}
+
 func (c *ExplorerControl) RowHeight() int { return c.rowHeight }
 
 func (c *ExplorerControl) paint(surface *graphics.Surface) {
