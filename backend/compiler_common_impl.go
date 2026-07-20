@@ -8677,6 +8677,15 @@ func renvoEmitLinearIncDec(g *renvoLinearGen, start int, end int) bool {
 			renvoAsmStorePrimaryBss(a, globalOffset)
 			return true
 		}
+		if renvoTargetArch == renvoArch386 {
+			renvoAsmPrimaryBssAddr(a, globalOffset)
+			opcode := 0x08ff
+			if inc {
+				opcode = 0x00ff
+			}
+			renvoAsmEmit16(a, opcode)
+			return true
+		}
 		if inc {
 			renvoAsmEmit24(a, 0x05ff48)
 		} else {

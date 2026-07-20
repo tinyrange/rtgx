@@ -33,7 +33,7 @@ func TestLinuxImagesSeparateExecutableAndWritableLoads(t *testing.T) {
 			t.Fatalf("parse %s: %v", target, err)
 		}
 		wantType := elf.ET_EXEC
-		if target == "linux/amd64" || target == "linux/aarch64" || target == "linux/arm" {
+		if target == "linux/amd64" || target == "linux/386" || target == "linux/aarch64" || target == "linux/arm" {
 			wantType = elf.ET_DYN
 		}
 		if file.Type != wantType {
@@ -137,29 +137,38 @@ func TestLinuxNativePIELoadsAtRandomizedAddresses(t *testing.T) {
 	}
 }
 
+func TestLinux386PIERunsAtAlternateBases(t *testing.T) {
+	testLinuxPIEAtAlternateBases(t, "linux/386", "qemu-i386")
+}
+
 func TestLinuxArmPIERunsAtAlternateBases(t *testing.T) {
+	testLinuxPIEAtAlternateBases(t, "linux/arm", "qemu-arm")
+}
+
+func testLinuxPIEAtAlternateBases(t *testing.T, target string, qemuName string) {
+	t.Helper()
 	if runtime.GOOS != "linux" {
 		t.Skip("requires Linux qemu-user")
 	}
-	qemu, err := exec.LookPath("qemu-arm")
+	qemu, err := exec.LookPath(qemuName)
 	if err != nil {
-		t.Skip("qemu-arm is not installed")
+		t.Skipf("%s is not installed", qemuName)
 	}
-	image, ok := RenvoCompileSourceToBytesStrip(executableLayoutSmokeSource, "linux/arm", true)
+	image, ok := RenvoCompileSourceToBytesStrip(executableLayoutSmokeSource, target, true)
 	if !ok {
-		t.Fatal("compile Linux ARM PIE")
+		t.Fatalf("compile %s PIE", target)
 	}
-	path := t.TempDir() + "/arm-pie"
+	path := t.TempDir() + "/pie"
 	if err := os.WriteFile(path, image, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	for _, base := range []string{"0x10000000", "0x20000000", "0x30000000"} {
 		output, err := exec.Command(qemu, "-B", base, path).CombinedOutput()
 		if err != nil {
-			t.Fatalf("run ARM PIE at guest base %s: %v: %s", base, err, output)
+			t.Fatalf("run %s PIE at guest base %s: %v: %s", target, base, err, output)
 		}
 		if string(output) != "PASS\n" {
-			t.Fatalf("ARM PIE at guest base %s output = %q", base, output)
+			t.Fatalf("%s PIE at guest base %s output = %q", target, base, output)
 		}
 	}
 }

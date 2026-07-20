@@ -671,14 +671,20 @@ func renvoArmAsmMovR10BssAddr(a *renvoAsm, bssOff int) {
 	renvoArmAsmMovRegAbs(a, renvoArmRegR10, bssOff, renvoAbsBssReloc)
 }
 
+func renvoArmAsmAccessRaxBss(a *renvoAsm, bssOff int, insn int) {
+	at := len(a.code)
+	renvoAsmEmit32(a, 0xe3000000|(renvoArmRegAddr<<12))
+	renvoAsmEmit32(a, 0xe3400000|(renvoArmRegAddr<<12))
+	renvoAsmEmit32(a, insn)
+	renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
+}
+
 func renvoArmAsmLoadRaxBss(a *renvoAsm, bssOff int) {
-	renvoArmAsmMovRegAbs(a, renvoArmRegAddr, bssOff, renvoAbsBssReloc)
-	renvoArmAsmLoadRegMem(a, renvoArmRegRax, renvoArmRegAddr, 0, 4)
+	renvoArmAsmAccessRaxBss(a, bssOff, 0xe79f0000|renvoArmRegAddr)
 }
 
 func renvoArmAsmStoreRaxBss(a *renvoAsm, bssOff int) {
-	renvoArmAsmMovRegAbs(a, renvoArmRegAddr, bssOff, renvoAbsBssReloc)
-	renvoArmAsmStoreRegMem(a, renvoArmRegRax, renvoArmRegAddr, 0, 4)
+	renvoArmAsmAccessRaxBss(a, bssOff, 0xe78f0000|renvoArmRegAddr)
 }
 
 func renvoArmAsmMovRdiRax(a *renvoAsm) {

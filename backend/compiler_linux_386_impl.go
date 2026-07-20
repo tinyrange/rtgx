@@ -1,7 +1,6 @@
 package main
 
 const renvoLinux386CodeOffset = 0x74
-const renvoLinux386LoadAddress = 0x08048000
 
 const renvoLinux386SysReadSeq = 3
 const renvoLinux386SysWriteSeq = 4
@@ -231,14 +230,12 @@ func renvoAsmBuildArgvEnvSlices386(a *renvoAsm, bssOff int, envOff int, envLenOf
 
 	// Stack walking is invariant; keep fixed instruction runs together and
 	// leave relocations and branch labels explicit below.
-	renvoAsmEmitText(a, "\x8b\x04\x24\x89\xe6\x83\xc6\x04\xbf")
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
+	renvoAsmEmitText(a, "\x8b\x04\x24\x89\xe6\x83\xc6\x04")
+	renvo386AsmMovRegPCRel(a, 7, bssOff, renvoAbsBssReloc)
 	renvoAsmEmitText(a, "\x31\xc9")
 	renvoAsmMarkLabel(a, loopLabel)
 	renvoAsmEmitText(a, "\x39\xc1\x0f\x8d")
-	at = len(a.code)
+	at := len(a.code)
 	renvoAsmEmit32(a, 0)
 	renvoAsmAddReloc(a, at, doneLabel)
 	renvoAsmEmitText(a, "\x8b\x14\x8e\x89\x17\x31\xdb")
@@ -250,10 +247,8 @@ func renvoAsmBuildArgvEnvSlices386(a *renvoAsm, bssOff int, envOff int, envLenOf
 	renvoAsmEmitText(a, "\x89\x5f\x08\x83\xc7\x10\x41")
 	renvoAsmJmpMarkLabel(a, loopLabel, doneLabel)
 
-	renvoAsmEmitText(a, "\x8d\x74\x86\x08\xbf")
-	at = len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, envOff, renvoAbsBssReloc)
+	renvoAsmEmitText(a, "\x8d\x74\x86\x08")
+	renvo386AsmMovRegPCRel(a, 7, envOff, renvoAbsBssReloc)
 	renvoAsmEmitText(a, "\x31\xc9")
 	renvoAsmMarkLabel(a, envLoopLabel)
 	renvoAsmEmitText(a, "\x8b\x14\x8e\x85\xd2")
@@ -266,23 +261,14 @@ func renvoAsmBuildArgvEnvSlices386(a *renvoAsm, bssOff int, envOff int, envLenOf
 	renvoAsmJmpMarkLabel(a, envStrlenLabel, envAfterLenLabel)
 	renvoAsmEmitText(a, "\x89\x5f\x08\x83\xc7\x10\x41")
 	renvoAsmJmpMarkLabel(a, envLoopLabel, envDoneLabel)
-	renvoAsmEmitText(a, "\x89\x0d")
-	at = len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, envLenOff, renvoAbsBssReloc)
+	renvo386AsmMovRegPCRel(a, 6, envLenOff, renvoAbsBssReloc)
+	renvoAsmEmit16(a, 0x0e89)
 
-	renvoAsmEmitText(a, "\xbb")
-	at = len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-	renvoAsmEmitText(a, "\x89\xc6\x89\xc2\xb9")
-	at = len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, envOff, renvoAbsBssReloc)
-	renvoAsmEmitText(a, "\xa1")
-	at = len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, envLenOff, renvoAbsBssReloc)
+	renvo386AsmMovRegPCRel(a, 3, bssOff, renvoAbsBssReloc)
+	renvoAsmEmitText(a, "\x89\xc6\x89\xc2")
+	renvo386AsmMovRegPCRel(a, 1, envOff, renvoAbsBssReloc)
+	renvo386AsmMovRegPCRel(a, 0, envLenOff, renvoAbsBssReloc)
+	renvoAsmEmit16(a, 0x008b)
 	renvoAsmEmitText(a, "\x89\xc7")
 }
 
@@ -302,7 +288,7 @@ func renvoAsmImage386(a *renvoAsm) []byte {
 		return out
 	}
 	var sec renvoElfSymbolSections
-	renvoBuildElfSymbolSections(a, renvoLinux386LoadAddress, a.codeOffset, loadFileSize, &sec)
+	renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
 	out := make([]byte, 0, sec.shoff+280)
 	out = renvoAppendElfHeader386(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
 	for i := 0; i < len(a.code); i++ {
@@ -324,7 +310,7 @@ func renvoAsmImage386(a *renvoAsm) []byte {
 		out = append(out, sec.shstrtab[i])
 	}
 	out = renvoAppendUntil(out, sec.shoff)
-	out = renvoAppendElfSectionHeaders(out, &sec, a, renvoLinux386LoadAddress)
+	out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
 	return out
 }
 
@@ -338,12 +324,12 @@ func renvoAsmPatch386(a *renvoAsm) {
 		if kind == renvoAbsBssReloc {
 			target = renvoAsmBssOffset(a) + off
 		}
-		renvoPut32At(a.code, at, renvoLinux386LoadAddress+target)
+		renvoPut32At(a.code, at, target-(a.codeOffset+at-3))
 	}
 }
 
 func renvoAppendElfHeader386(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
-	base := renvoLinux386LoadAddress
+	base := 0
 
 	out = append(out, 0x7f)
 	out = append(out, 'E')
@@ -356,7 +342,7 @@ func renvoAppendElfHeader386(out []byte, entryOff int, fileSize int, bssOffset i
 	for i := 0; i < 8; i++ {
 		out = append(out, 0)
 	}
-	out = renvoAppend16(out, 2)
+	out = renvoAppend16(out, 3)
 	out = renvoAppend16(out, 3)
 	out = renvoAppend32(out, 1)
 	out = renvoAppend32(out, base+entryOff)
