@@ -1391,11 +1391,12 @@ func scanSource(src []byte) ([]sourceToken, int) {
 			toks = append(toks, sourceToken{kind: kind, text: string(src[start:i]), line: line, start: start, end: i})
 			continue
 		}
-		if c == '"' {
+		if c == '"' || c == '`' {
 			start := i
+			tokenLine := line
 			i++
-			for i < len(src) && src[i] != '"' {
-				if src[i] == '\\' && i+1 < len(src) {
+			for i < len(src) && src[i] != c {
+				if c == '"' && src[i] == '\\' && i+1 < len(src) {
 					i += 2
 				} else {
 					if src[i] == '\n' {
@@ -1407,7 +1408,7 @@ func scanSource(src []byte) ([]sourceToken, int) {
 			if i < len(src) {
 				i++
 			}
-			toks = append(toks, sourceToken{kind: renvoTokString, text: string(src[start:i]), line: line, start: start, end: i})
+			toks = append(toks, sourceToken{kind: renvoTokString, text: string(src[start:i]), line: tokenLine, start: start, end: i})
 			continue
 		}
 		if c == '\'' {
