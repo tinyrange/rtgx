@@ -1936,11 +1936,11 @@ func renvoScan(src []byte, toks *renvoTokens) {
 			renvoScanAppendToken(toks, kind, start, i-start, line)
 			continue
 		}
-		if c == '"' {
+		if c == '"' || c == '`' {
 			start := i
 			i++
-			for i < srcLen && renvo_runtime_UnsafeByteAt(src, i) != '"' {
-				if renvo_runtime_UnsafeByteAt(src, i) == '\\' && i+1 < srcLen {
+			for i < srcLen && renvo_runtime_UnsafeByteAt(src, i) != c {
+				if c == '"' && renvo_runtime_UnsafeByteAt(src, i) == '\\' && i+1 < srcLen {
 					i += 2
 				} else {
 					if renvo_runtime_UnsafeByteAt(src, i) == '\n' {
@@ -2232,8 +2232,10 @@ func renvoDecodeStringToken(p *renvoProgram, tokIndex int) []byte {
 	i := int(tok.start) + 1
 	end := int(tok.end) - 1
 	out := renvoFixedByteScratch(end - i)
+	raw := renvo_runtime_UnsafeByteAt(src, int(tok.start)) == '`'
 	for i < end {
-		if renvo_runtime_UnsafeByteAt(src, i) == '\\' && i+1 < end {
+		ch := renvo_runtime_UnsafeByteAt(src, i)
+		if !raw && ch == '\\' && i+1 < end {
 			i++
 			if renvo_runtime_UnsafeByteAt(src, i) == 'x' && i+2 < end {
 				hi := renvoHexDigitValue(renvo_runtime_UnsafeByteAt(src, i+1))
@@ -2262,7 +2264,9 @@ func renvoDecodeStringToken(p *renvoProgram, tokIndex int) []byte {
 			i++
 			continue
 		}
-		out = append(out, renvo_runtime_UnsafeByteAt(src, i))
+		if ch != '\r' || !raw {
+			out = append(out, ch)
+		}
 		i++
 	}
 	return out
