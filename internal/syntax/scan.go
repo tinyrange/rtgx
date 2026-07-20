@@ -92,6 +92,20 @@ func scanTokens(src []byte) ([]Token, bool) {
 				ok = false
 				break
 			}
+			for escape := start + 1; escape < i; escape++ {
+				if src[escape] != '\\' {
+					continue
+				}
+				next, _, _, valid := stringEscapeValue(src, escape, i)
+				if !valid {
+					ok = false
+					break
+				}
+				escape = next - 1
+			}
+			if !ok {
+				break
+			}
 			i++
 			tokens = append(tokens, MakeToken(TokenString, start, i, line))
 			continue

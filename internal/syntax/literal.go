@@ -27,32 +27,79 @@ func StringLiteralValue(src []byte, tok Token) (string, bool) {
 		if i >= tok.End-1 {
 			return "", false
 		}
-		esc := src[i]
-		if esc == 'n' {
-			out = append(out, '\n')
-		} else if esc == 'r' {
-			out = append(out, '\r')
-		} else if esc == 't' {
-			out = append(out, '\t')
-		} else if esc == '\\' || esc == '"' {
-			out = append(out, esc)
-		} else if esc == 'x' {
-			if i+2 >= tok.End-1 {
-				return "", false
-			}
-			hi, okHi := hexValue(src[i+1])
-			lo, okLo := hexValue(src[i+2])
-			if !okHi || !okLo {
-				return "", false
-			}
-			out = append(out, byte(hi*16+lo))
-			i += 2
-		} else {
+		next, value, unicode, ok := stringEscapeValue(src, i-1, tok.End-1)
+		if !ok {
 			return "", false
 		}
-		i++
+		if unicode {
+			out = appendStringRune(out, value)
+		} else {
+			out = append(out, byte(value))
+		}
+		i = next
 	}
 	return string(out), true
+}
+
+func stringEscapeValue(src []byte, slash int, end int) (int, int, bool, bool) {
+	if slash < 0 || slash+1 >= end || end > len(src) {
+		return 0, 0, false, false
+	}
+	esc := src[slash+1]
+	simple := "abfnrtv\\\""
+	values := "\a\b\f\n\r\t\v\\\""
+	for i := 0; i < len(simple); i++ {
+		if esc == simple[i] {
+			return slash + 2, int(values[i]), false, true
+		}
+	}
+	digits := 0
+	base := 16
+	unicode := false
+	start := slash + 2
+	if esc == 'x' {
+		digits = 2
+	} else if esc == 'u' {
+		digits = 4
+		unicode = true
+	} else if esc == 'U' {
+		digits = 8
+		unicode = true
+	} else if esc >= '0' && esc <= '7' {
+		digits = 3
+		base = 8
+		start = slash + 1
+	} else {
+		return 0, 0, false, false
+	}
+	if start+digits > end {
+		return 0, 0, false, false
+	}
+	value := 0
+	for i := 0; i < digits; i++ {
+		digit, ok := hexValue(src[start+i])
+		if !ok || digit >= base {
+			return 0, 0, false, false
+		}
+		value = value*base + digit
+	}
+	if unicode && (value > 0x10ffff || value >= 0xd800 && value <= 0xdfff) || !unicode && value > 255 {
+		return 0, 0, false, false
+	}
+	return start + digits, value, unicode, true
+}
+
+func appendStringRune(out []byte, value int) []byte {
+	if value < 0x80 {
+		return append(out, byte(value))
+	}
+	if value < 0x800 {
+		return append(out, byte(0xc0|value>>6), byte(0x80|value&0x3f))
+	}
+	if value < 0x10000 {
+		return append(out, byte(0xe0|value>>12), byte(0x80|value>>6&0x3f), byte(0x80|value&0x3f))
+	}
+	return append(out, byte(0xf0|value>>18), byte(0x80|value>>12&0x3f), byte(0x80|value>>6&0x3f), byte(0x80|value&0x3f))
 }
 
 func hexValue(c byte) (int, bool) {

@@ -3,6 +3,7 @@ package link
 import (
 	"renvo.dev/internal/arena"
 	"renvo.dev/internal/build"
+	"renvo.dev/internal/syntax"
 	"renvo.dev/internal/unit"
 )
 
@@ -484,6 +485,13 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, line i
 			src.Tokens[i].KindLine = src.Tokens[i].KindLine&255 | mappedToken<<8
 			prevEnd = tokEnd
 			continue
+		} else if tok.KindLine&255 == unit.TokenString && tokStart < len(src.Text) && src.Text[tokStart] == '"' {
+			value, ok := syntax.StringLiteralValue(src.Text, syntax.MakeToken(syntax.TokenString, tokStart, tokEnd, 0))
+			if !ok {
+				return false, line
+			}
+			dst.Text = appendCoreQuotedString(dst.Text, value)
+			tok.Size = len(dst.Text) - tok.Start
 		} else {
 			part := src.Text[tokStart:tokEnd]
 			dst.Text = appendCoreBytes(dst.Text, part)
@@ -539,6 +547,22 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, line i
 		line++
 	}
 	return true, line
+}
+
+func appendCoreQuotedString(out []byte, value string) []byte {
+	const hex = "0123456789abcdef"
+	out = append(out, '"')
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if ch == '"' || ch == '\\' {
+			out = append(out, '\\', ch)
+		} else if ch < 32 || ch >= 127 {
+			out = append(out, '\\', 'x', hex[ch/16], hex[ch%16])
+		} else {
+			out = append(out, ch)
+		}
+	}
+	return append(out, '"')
 }
 
 func linkedTokenActions(program *unit.Program, aliases *[]string, symbolOffsets []int, actions []int, plusReplacement int) bool {

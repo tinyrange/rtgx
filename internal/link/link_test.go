@@ -66,6 +66,29 @@ func Value() int { return answer }
 	}
 }
 
+func TestLinkCanonicalizesInterpretedStringEscapes(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+var value = "\u0214\U0001F642\141\a\b\f\v"
+
+func main() {}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuild failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	want := []byte("\"\\xc8\\x94\\xf0\\x9f\\x99\\x82a\\x07\\x08\\x0c\\x0b\"")
+	if !bytes.Contains(linked.Program.Text, want) {
+		t.Fatalf("linked text did not canonicalize string escapes to bytes %q:\n%s", want, linked.Program.Text)
+	}
+	if bytes.Contains(linked.Program.Text, []byte("\\u0214")) || bytes.Contains(linked.Program.Text, []byte("\\U0001F642")) {
+		t.Fatalf("linked text retained Unicode escapes:\n%s", linked.Program.Text)
+	}
+}
+
 func TestLinkUnitsMapsDependencyEOFToPackageBoundary(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
