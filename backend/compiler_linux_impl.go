@@ -532,7 +532,6 @@ func renvoWinAmd64EmitReadWriteHelper(g *renvoLinearGen, isWrite bool) int {
 }
 
 func renvoWin386EmitReadWriteHelper(g *renvoLinearGen, isWrite bool) int {
-	renvoNonNil(g)
 	a := &g.asm
 	if isWrite {
 		if g.winWriteEmitted {
@@ -548,97 +547,31 @@ func renvoWin386EmitReadWriteHelper(g *renvoLinearGen, isWrite bool) int {
 		g.winReadLabel = renvoAsmNewLabel(a)
 	}
 	countOff := a.bssSize
-	a.bssSize += 8
-	posOff := a.bssSize
-	a.bssSize += 8
+	a.bssSize = countOff + 16
+	// The helper instruction streams are invariant. Relocation pairs encode
+	// their patch offset and either a BSS slot or Windows import identifier.
 	label := g.winReadLabel
-	importID := renvoWinImportReadFile
+	base := len(a.code)
+	relocs := ""
 	if isWrite {
 		label = g.winWriteLabel
-		importID = renvoWinImportWriteFile
-	}
-	afterLabel := renvoAsmNewLabel(a)
-	seqLabel := renvoAsmNewLabel(a)
-	failLabel := renvoAsmNewLabel(a)
-	seqFailLabel := renvoAsmNewLabel(a)
-	doneLabel := renvoAsmNewLabel(a)
-	renvoAsmJmpMarkLabel(a, afterLabel, label)
-	if isWrite {
-		stdOutLabel := renvoAsmNewLabel(a)
-		stdErrLabel := renvoAsmNewLabel(a)
-		afterStdLabel := renvoAsmNewLabel(a)
-		renvoAsmEmit3(a, 0x83, 0xfb, 1)
-		renvoAsmJzLabel(a, stdOutLabel)
-		renvoAsmEmit3(a, 0x83, 0xfb, 2)
-		renvoAsmJzLabel(a, stdErrLabel)
-		renvoAsmJmpMarkLabel(a, afterStdLabel, stdOutLabel)
-		renvoWin386SetStdHandle(a, -11)
-		renvoAsmJmpMarkLabel(a, afterStdLabel, stdErrLabel)
-		renvoWin386SetStdHandle(a, -12)
-		renvoAsmMarkLabel(a, afterStdLabel)
+		renvoAsmEmitText(a, "\xe9\xc4\x00\x00\x00\x83\xfb\x01\x0f\x84\x0e\x00\x00\x00\x83\xfb\x02\x0f\x84\x14\x00\x00\x00\xe9\x19\x00\x00\x00\x6a\xf5\xff\x15\x00\x00\x00\x00\x89\xc3\xe9\x0a\x00\x00\x00\x6a\xf4\xff\x15\x00\x00\x00\x00\x89\xc3\x83\xf9\x00\x0f\x8c\x49\x00\x00\x00\x51\x52\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xa3\x00\x00\x00\x00\x5a\x59\x51\x52\x6a\x00\x6a\x00\x51\x53\xff\x15\x00\x00\x00\x00\x5a\x59\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x2d\x00\x00\x00\xa1\x00\x00\x00\x00\xe9\x26\x00\x00\x00\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x06\x00\x00\x00\xa1\x00\x00\x00\x00\xc3\x6a\xff\x58\xc3\x6a\xff\x58\xa3\x00\x00\x00\x00\x6a\x00\x6a\x00\xa1\x00\x00\x00\x00\x50\x53\xff\x15\x00\x00\x00\x00\xa1\x00\x00\x00\x00\xc3")
+		relocs = "\x20\x08\x2f\x08\x49\x07\x4e\x01\x5e\x07\x67\x00\x70\x06\x7e\x00\x8a\x00\x93\x06\xa1\x00\xae\x00\xb7\x01\xbf\x07\xc4\x00"
 	} else {
-		stdInLabel := renvoAsmNewLabel(a)
-		afterStdLabel := renvoAsmNewLabel(a)
-		renvoAsmEmit3(a, 0x83, 0xfb, 0)
-		renvoAsmJzLabel(a, stdInLabel)
-		renvoAsmJmpMarkLabel(a, afterStdLabel, stdInLabel)
-		renvoWin386SetStdHandle(a, -10)
-		renvoAsmMarkLabel(a, afterStdLabel)
+		renvoAsmEmitText(a, "\xe9\xac\x00\x00\x00\x83\xfb\x00\x0f\x84\x05\x00\x00\x00\xe9\x0a\x00\x00\x00\x6a\xf6\xff\x15\x00\x00\x00\x00\x89\xc3\x83\xf9\x00\x0f\x8c\x49\x00\x00\x00\x51\x52\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xa3\x00\x00\x00\x00\x5a\x59\x51\x52\x6a\x00\x6a\x00\x51\x53\xff\x15\x00\x00\x00\x00\x5a\x59\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x2d\x00\x00\x00\xa1\x00\x00\x00\x00\xe9\x26\x00\x00\x00\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x06\x00\x00\x00\xa1\x00\x00\x00\x00\xc3\x6a\xff\x58\xc3\x6a\xff\x58\xa3\x00\x00\x00\x00\x6a\x00\x6a\x00\xa1\x00\x00\x00\x00\x50\x53\xff\x15\x00\x00\x00\x00\xa1\x00\x00\x00\x00\xc3")
+		relocs = "\x17\x08\x31\x07\x36\x01\x46\x07\x4f\x00\x58\x05\x66\x00\x72\x00\x7b\x05\x89\x00\x96\x00\x9f\x01\xa7\x07\xac\x00"
 	}
-	renvoAsmEmit3(a, 0x83, 0xf9, 0)
-	renvoAsmJlLabel(a, seqLabel)
-
-	renvoAsmEmit8(a, 0x51)
-	renvoAsmPushSecondary(a)
-	renvoAsmPushImm(a, 1)
-	renvoAsmPushImm(a, 0)
-	renvoAsmPushImm(a, 0)
-	renvoAsmEmit8(a, 0x53)
-	renvoWin386CallImport(a, renvoWinImportSetFilePointer)
-	renvoAsmStorePrimaryBss(a, posOff)
-	renvoAsmPopSecondary(a)
-	renvoAsmPopTertiary(a)
-
-	renvoAsmEmit8(a, 0x51)
-	renvoAsmPushSecondary(a)
-	renvoAsmPushImm(a, 0)
-	renvoAsmPushImm(a, 0)
-	renvoAsmPushTertiary(a)
-	renvoAsmEmit8(a, 0x53)
-	renvoWin386CallImport(a, renvoWinImportSetFilePointer)
-	renvoAsmPopSecondary(a)
-	renvoAsmPopTertiary(a)
-	renvoWin386EmitKernelReadWriteCall(a, importID, countOff)
-	renvoAsmEmit3(a, 0x83, 0xf8, 0)
-	renvoAsmJzLabel(a, failLabel)
-	renvoAsmLoadPrimaryBss(a, countOff)
-	renvoAsmJmpLabel(a, doneLabel)
-
-	renvoAsmMarkLabel(a, seqLabel)
-	renvoWin386EmitKernelReadWriteCall(a, importID, countOff)
-	renvoAsmEmit3(a, 0x83, 0xf8, 0)
-	renvoAsmJzLabel(a, seqFailLabel)
-	renvoAsmLoadPrimaryBss(a, countOff)
-	renvoAsmRet(a)
-
-	renvoAsmMarkLabel(a, seqFailLabel)
-	renvoAsmPrimaryImm(a, -1)
-	renvoAsmRet(a)
-
-	renvoAsmMarkLabel(a, failLabel)
-	renvoAsmPrimaryImm(a, -1)
-
-	renvoAsmMarkLabel(a, doneLabel)
-	renvoAsmStorePrimaryBss(a, countOff)
-	renvoAsmPushImm(a, 0)
-	renvoAsmPushImm(a, 0)
-	renvoWin386LoadEaxBss(a, posOff)
-	renvoAsmPushPrimary(a)
-	renvoAsmEmit8(a, 0x53)
-	renvoWin386CallImport(a, renvoWinImportSetFilePointer)
-	renvoAsmLoadPrimaryBss(a, countOff)
-	renvoAsmRet(a)
-	renvoAsmMarkLabel(a, afterLabel)
+	for i := 0; i < len(relocs); i += 2 {
+		at := base + int(relocs[i])
+		kind := int(relocs[i+1])
+		if kind < 2 {
+			renvoAsmAddAbsReloc(a, at, countOff+(kind<<3), renvoAbsBssReloc)
+		} else {
+			renvoAsmAddWinImportReloc(a, at, kind-2)
+		}
+	}
+	a.labelPos[label] = base + 5
+	a.labelSet[label] = true
 	return label
 }
 

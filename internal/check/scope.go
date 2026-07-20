@@ -185,13 +185,13 @@ func collectLeadingIdentList(file syntax.File, start int, end int, scope *FuncSc
 }
 
 func statementSpecEnd(file syntax.File, start int, end int) int {
-	line := file.Tokens[start].KindLine >> 8
+	line := syntax.TokenLine(file.Tokens[start])
 	i := start
 	for i < end {
 		if tokCharIs(&file, i, ';') {
 			return i + 1
 		}
-		if i > start && file.Tokens[i].KindLine>>8 != line {
+		if i > start && syntax.TokenLine(file.Tokens[i]) != line {
 			return i
 		}
 		i++
@@ -287,13 +287,8 @@ func tokCharIs(file *syntax.File, tok int, c byte) bool {
 	if tok < 0 || tok >= len(file.Tokens) {
 		return false
 	}
-	if file.Tokens[tok].KindLine&255 != syntax.TokenOperator {
-		return false
-	}
-	if file.Tokens[tok].End-file.Tokens[tok].Start != 1 {
-		return false
-	}
-	return file.Src[file.Tokens[tok].Start] == c
+	packed := file.Tokens[tok].KindLine
+	return packed&255 == syntax.TokenOperator && packed>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask == int(c)
 }
 
 func tokenTextIs(file *syntax.File, tok int, text string) bool {

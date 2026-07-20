@@ -34,15 +34,34 @@ const (
 	TokenFallthrough
 )
 
+const (
+	TokenOperatorCharShift = 8
+	TokenOperatorCharMask  = 127
+	TokenOperatorLineShift = 15
+	TokenLineLimit         = 65535
+)
+
 type Token struct {
-	// KindLine packs the token kind into the low byte and its source line above it.
+	// KindLine packs the kind into the low byte. Operator tokens additionally
+	// cache a one-byte ASCII operator in bits 8..14 and store the line above it;
+	// all other token kinds store the line directly above the kind byte.
 	KindLine int
 	Start    int
 	End      int
 }
 
 func MakeToken(kind int, start int, end int, line int) Token {
+	if kind == TokenOperator {
+		return Token{KindLine: kind | line<<TokenOperatorLineShift, Start: start, End: end}
+	}
 	return Token{KindLine: kind | line<<8, Start: start, End: end}
+}
+
+func TokenLine(tok Token) int {
+	if tok.KindLine&255 == TokenOperator {
+		return tok.KindLine >> TokenOperatorLineShift & TokenLineLimit
+	}
+	return tok.KindLine >> 8
 }
 
 func TokenText(src []byte, tok Token) []byte {

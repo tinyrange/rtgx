@@ -74,7 +74,7 @@ func skipNestedFunction(file syntax.File, start int, limit int) int {
 
 func returnValueList(file syntax.File, returnTok int, limit int) (int, int, int) {
 	start := returnTok + 1
-	if start >= limit || tokCharIs(&file, start, ';') || tokCharIs(&file, start, '}') || file.Tokens[start].KindLine>>8 > file.Tokens[returnTok].KindLine>>8 {
+	if start >= limit || tokCharIs(&file, start, ';') || tokCharIs(&file, start, '}') || syntax.TokenLine(file.Tokens[start]) > syntax.TokenLine(file.Tokens[returnTok]) {
 		return start, start, 0
 	}
 	parenDepth := 0
@@ -83,7 +83,7 @@ func returnValueList(file syntax.File, returnTok int, limit int) (int, int, int)
 	count := 1
 	end := start
 	for i := start; i < limit; i++ {
-		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && file.Tokens[i].KindLine>>8 > file.Tokens[i-1].KindLine>>8 && !returnLineContinues(file, i-1) {
+		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && syntax.TokenLine(file.Tokens[i]) > syntax.TokenLine(file.Tokens[i-1]) && !returnLineContinues(file, i-1) {
 			break
 		}
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 {

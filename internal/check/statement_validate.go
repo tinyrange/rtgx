@@ -32,7 +32,7 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
 			callEnd = stmt.ExprEnd
 		}
 		for tok := callStart; tok >= 0 && tok+1 < callEnd; tok++ {
-			if file.Tokens[tok].KindLine&255 == syntax.TokenIdent && file.Tokens[tok].KindLine>>8 == file.Tokens[tok+1].KindLine>>8 && tokCharIs(&file, tok+1, '(') && (tok == 0 || !tokCharIs(&file, tok-1, '.')) && definiteLiteralLocal(literalLocals, file, tok) {
+			if file.Tokens[tok].KindLine&255 == syntax.TokenIdent && syntax.TokenLine(file.Tokens[tok]) == syntax.TokenLine(file.Tokens[tok+1]) && tokCharIs(&file, tok+1, '(') && (tok == 0 || !tokCharIs(&file, tok-1, '.')) && definiteLiteralLocal(literalLocals, file, tok) {
 				return CheckErrCall, tok
 			}
 		}

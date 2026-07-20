@@ -3,6 +3,7 @@ package driver
 import (
 	"renvo.dev/internal/check"
 	"renvo.dev/internal/load"
+	"renvo.dev/internal/syntax"
 )
 
 // AnalysisResult is the frontend-only result used by interactive tools. It
@@ -130,7 +131,7 @@ func analysisDiagnosticAtToken(diagnostic Diagnostic, file load.ParsedFile, toke
 	start, end, line := len(file.Src), len(file.Src), 1
 	if tokenIndex >= 0 && tokenIndex < len(file.File.Tokens) {
 		token := file.File.Tokens[tokenIndex]
-		start, end, line = token.Start, token.End, token.KindLine>>8
+		start, end, line = token.Start, token.End, syntax.TokenLine(token)
 	}
 	diagnostic.Start, diagnostic.End, diagnostic.Line = start, end, line
 	diagnostic.Column = 1

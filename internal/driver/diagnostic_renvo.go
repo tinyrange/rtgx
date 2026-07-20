@@ -7,6 +7,7 @@ import (
 	"renvo.dev/internal/check"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/pipeline"
+	"renvo.dev/internal/syntax"
 )
 
 type Diagnostic struct {
@@ -254,7 +255,7 @@ func renvoBuildDiagnosticLocation(result BuildResult, d Diagnostic) Diagnostic {
 	}
 	d.Start = source.File.Tokens[tok].Start
 	d.End = source.File.Tokens[tok].End
-	d.Line = source.File.Tokens[tok].KindLine >> 8
+	d.Line = syntax.TokenLine(source.File.Tokens[tok])
 	d.Column = 1
 	for i := d.Start - 1; i >= 0 && source.Src[i] != '\n'; i-- {
 		d.Column++

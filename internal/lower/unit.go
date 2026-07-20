@@ -165,7 +165,7 @@ func (b *coreUnitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex 
 			b.setErr(EmitErrToken, fileIndex, i)
 			return coreTokenMap{}, false
 		}
-		b.program.Tokens = append(b.program.Tokens, unit.MakeToken(kind, base+tok.Start, tok.End-tok.Start, lineOffset+tok.KindLine>>8))
+		b.program.Tokens = append(b.program.Tokens, unit.MakeToken(kind, base+tok.Start, tok.End-tok.Start, lineOffset+syntax.TokenLine(tok)))
 	}
 	if transient {
 		renvo_runtime_ArenaDiscardLowerTokens(file.Tokens)

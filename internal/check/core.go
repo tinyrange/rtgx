@@ -387,7 +387,7 @@ func coreLocalWriteOnly(file *syntax.File, tok int, end int) bool {
 		return false
 	}
 	for i := tok + 1; i < end; i++ {
-		if file.Tokens[i].KindLine>>8 != file.Tokens[i-1].KindLine>>8 && !tokenTextIs(file, i-1, ",") {
+		if syntax.TokenLine(file.Tokens[i]) != syntax.TokenLine(file.Tokens[i-1]) && !tokenTextIs(file, i-1, ",") {
 			return false
 		}
 		if tokenTextIs(file, i, ";") || tokenTextIs(file, i, "{") || tokenTextIs(file, i, "}") {
@@ -954,7 +954,7 @@ func coreTokenLooksLikeLabel(file syntax.File, tok int, start int, end int) bool
 	if tokCharIs(&file, prev, '{') || tokCharIs(&file, prev, ',') {
 		return false
 	}
-	return file.Tokens[prev].KindLine>>8 != file.Tokens[tok].KindLine>>8 || tokCharIs(&file, prev, ';') || tokCharIs(&file, prev, '}')
+	return syntax.TokenLine(file.Tokens[prev]) != syntax.TokenLine(file.Tokens[tok]) || tokCharIs(&file, prev, ';') || tokCharIs(&file, prev, '}')
 }
 
 func collectCoreDeclScope(file syntax.File, start int, end int, scope *CoreScope) int {
@@ -1002,7 +1002,7 @@ func coreLHSStart(file syntax.File, assign int, limit int) int {
 		if tokCharIs(&file, start, ';') || tokCharIs(&file, start, '{') || tokCharIs(&file, start, '}') {
 			return start + 1
 		}
-		if file.Tokens[start].KindLine>>8 != file.Tokens[assign].KindLine>>8 {
+		if syntax.TokenLine(file.Tokens[start]) != syntax.TokenLine(file.Tokens[assign]) {
 			return start + 1
 		}
 		start--

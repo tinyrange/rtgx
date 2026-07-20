@@ -983,6 +983,18 @@ func renvoAarch64CondFromSetcc(setcc int) int {
 	if setcc == 0x95 {
 		return 1
 	}
+	if setcc == 0x92 {
+		return 3
+	}
+	if setcc == 0x93 {
+		return 2
+	}
+	if setcc == 0x96 {
+		return 9
+	}
+	if setcc == 0x97 {
+		return 8
+	}
 	if setcc == 0x9c {
 		return 11
 	}
