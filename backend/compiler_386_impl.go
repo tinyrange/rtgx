@@ -204,6 +204,16 @@ func renvo386AsmMovRaxImm64(a *renvoAsm, imm int) {
 	renvoAsmPrimaryImm(a, imm)
 }
 
+func renvo386AsmMovRegPCRel(a *renvoAsm, reg int, off int, kind int) {
+	renvoAsmEmit8(a, 0xe8)
+	renvoAsmEmit32(a, 0)
+	renvoAsmEmit8(a, 0x58|reg)
+	renvoAsmEmit2(a, 0x81, 0xc0|reg)
+	at := len(a.code)
+	renvoAsmEmit32(a, 0)
+	renvoAsmAddAbsReloc(a, at, off, kind)
+}
+
 func renvo386AsmMovRdxImm(a *renvoAsm, imm int) {
 	if imm == 0 {
 		renvoAsmEmit16(a, 0xd231)
@@ -232,6 +242,10 @@ func renvo386AsmMovRdxImm(a *renvoAsm, imm int) {
 }
 
 func renvo386AsmMovRaxDataAddr(a *renvoAsm, dataOff int) {
+	if renvoTargetOS == renvoOSLinux {
+		renvo386AsmMovRegPCRel(a, 0, dataOff, 0)
+		return
+	}
 	renvoAsmEmit8(a, 0xb8)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -239,6 +253,10 @@ func renvo386AsmMovRaxDataAddr(a *renvoAsm, dataOff int) {
 }
 
 func renvo386AsmMovRaxBssAddr(a *renvoAsm, bssOff int) {
+	if renvoTargetOS == renvoOSLinux {
+		renvo386AsmMovRegPCRel(a, 0, bssOff, renvoAbsBssReloc)
+		return
+	}
 	renvoAsmEmit8(a, 0xb8)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -246,6 +264,10 @@ func renvo386AsmMovRaxBssAddr(a *renvoAsm, bssOff int) {
 }
 
 func renvo386AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
+	if renvoTargetOS == renvoOSLinux {
+		renvo386AsmMovRegPCRel(a, 3, bssOff, renvoAbsBssReloc)
+		return
+	}
 	renvoAsmEmit8(a, 0xbb)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -253,6 +275,11 @@ func renvo386AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
 }
 
 func renvo386AsmLoadRaxBss(a *renvoAsm, bssOff int) {
+	if renvoTargetOS == renvoOSLinux {
+		renvo386AsmMovRegPCRel(a, 0, bssOff, renvoAbsBssReloc)
+		renvoAsmEmit16(a, 0x008b)
+		return
+	}
 	renvoAsmEmit8(a, 0xa1)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -260,6 +287,13 @@ func renvo386AsmLoadRaxBss(a *renvoAsm, bssOff int) {
 }
 
 func renvo386AsmStoreRaxBss(a *renvoAsm, bssOff int) {
+	if renvoTargetOS == renvoOSLinux {
+		renvoAsmEmit8(a, 0x53)
+		renvo386AsmMovRegPCRel(a, 3, bssOff, renvoAbsBssReloc)
+		renvoAsmEmit16(a, 0x0389)
+		renvoAsmEmit8(a, 0x5b)
+		return
+	}
 	renvoAsmEmit8(a, 0xa3)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -1389,6 +1423,11 @@ func renvo386EmitSliceSlotAddrs(g *renvoLinearGen, locEp *renvoExprParse, loc *r
 		return true
 	}
 	if loc.global {
+		if renvoTargetOS == renvoOSLinux {
+			renvo386AsmMovRegPCRel(a, 7, loc.offset, renvoAbsBssReloc)
+			renvo386AsmMovRegPCRel(a, 6, loc.offset+8, renvoAbsBssReloc)
+			return true
+		}
 		renvoAsmEmit16(a, 0x3d8d)
 		at := len(a.code)
 		renvoAsmEmit32(a, 0)
