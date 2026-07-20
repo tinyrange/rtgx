@@ -214,78 +214,15 @@ func renvoAsmBuildWindowsArgvEnvSlicesAmd64(a *renvoAsm, bssOff int, argsTextOff
 
 func renvoAsmBuildArgvEnvSlicesAmd64(a *renvoAsm, bssOff int, envOff int, envLenOff int) {
 	renvoNonNil(a)
-	loopLabel := renvoAsmNewLabel(a)
-	strlenLabel := renvoAsmNewLabel(a)
-	afterLenLabel := renvoAsmNewLabel(a)
-	doneLabel := renvoAsmNewLabel(a)
-	envScanLabel := renvoAsmNewLabel(a)
-	envStartLabel := renvoAsmNewLabel(a)
-	envLoopLabel := renvoAsmNewLabel(a)
-	envStrlenLabel := renvoAsmNewLabel(a)
-	envAfterLenLabel := renvoAsmNewLabel(a)
-	envDoneLabel := renvoAsmNewLabel(a)
-	renvoAsmEmit32(a, 0x24048b48)
-	renvoAsmEmit24(a, 0xc08949)
-	renvoAsmEmit32(a, 0x244c8d4c)
-	renvoAsmEmit8(a, 0x8)
-	renvoAsmScratchBssAddr(a, bssOff)
-	renvoAsmEmit32(a, 0x4dd4894d)
-	renvoAsmEmit16(a, 0xdb31)
-	renvoAsmMarkLabel(a, loopLabel)
-	renvoAsmEmit24(a, 0xc3394d)
-	renvoAsmEmit16(a, 0x8d0f)
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddReloc(a, at, doneLabel)
-	renvoAsmEmit32(a, 0xd93c8b4b)
-	renvoAsmEmit32(a, 0x483a8949)
-	renvoAsmEmit16(a, 0xc031)
-	renvoAsmMarkLabel(a, strlenLabel)
-	renvoAsmEmit32(a, 0x00073c80)
-	renvoAsmJzLabel(a, afterLenLabel)
-	renvoAsmEmit24(a, 0xc0ff48)
-	renvoAsmJmpMarkLabel(a, strlenLabel, afterLenLabel)
-	renvoAsmEmit32(a, 0x08428949)
-	renvoAsmEmit32(a, 0x10c28349)
-	renvoAsmEmit24(a, 0xc3ff49)
-	renvoAsmJmpMarkLabel(a, loopLabel, doneLabel)
-
-	renvoAsmEmit32(a, 0x244c8d4c)
-	renvoAsmEmit8(a, 0x8)
-	renvoAsmMarkLabel(a, envScanLabel)
-	renvoAsmEmit32(a, 0x00398349)
-	renvoAsmJzLabel(a, envStartLabel)
-	renvoAsmEmit32(a, 0x08c18349)
-	renvoAsmJmpMarkLabel(a, envScanLabel, envStartLabel)
-	renvoAsmEmit32(a, 0x08c18349)
-	renvoAsmScratchBssAddr(a, envOff)
-	renvoAsmEmit24(a, 0xdb314d)
-	renvoAsmMarkLabel(a, envLoopLabel)
-	renvoAsmEmit32(a, 0xd93c8b4b)
-	renvoAsmEmit32(a, 0x00ff8348)
-	renvoAsmJzLabel(a, envDoneLabel)
-	renvoAsmEmit32(a, 0x483a8949)
-	renvoAsmEmit16(a, 0xc031)
-	renvoAsmMarkLabel(a, envStrlenLabel)
-	renvoAsmEmit32(a, 0x00073c80)
-	renvoAsmJzLabel(a, envAfterLenLabel)
-	renvoAsmEmit24(a, 0xc0ff48)
-	renvoAsmJmpMarkLabel(a, envStrlenLabel, envAfterLenLabel)
-	renvoAsmEmit32(a, 0x08428949)
-	renvoAsmEmit32(a, 0x10c28349)
-	renvoAsmEmit24(a, 0xc3ff49)
-	renvoAsmJmpMarkLabel(a, envLoopLabel, envDoneLabel)
-	renvoAsmEmit24(a, 0xd8894c)
-	renvoAsmStorePrimaryBss(a, envLenOff)
-
-	renvoAsmEmit32(a, 0x4ce7894c)
-	renvoAsmEmit32(a, 0x894cc689)
-	renvoAsmEmit8(a, 0xc2)
-	renvoAsmPrimaryBssAddr(a, envOff)
-	renvoAsmCopyPrimaryToTertiary(a)
-	renvoAsmLoadPrimaryBss(a, envLenOff)
-	renvoAsmCopyPrimaryToCallWord4(a)
-	renvoAsmCopyPrimaryToCallWord5(a)
+	// Process-stack walking is invariant; only the destination BSS addresses
+	// vary between programs, so keep the relaxed instruction sequence compact.
+	base := len(a.code)
+	renvoAsmEmitText(a, "\x48\x8b\x04\x24\x49\x89\xc0\x4c\x8d\x4c\x24\x08\x4c\x8d\x15\x00\x00\x00\x00\x4d\x89\xd4\x4d\x31\xdb\x4d\x39\xc3\x7d\x22\x4b\x8b\x3c\xd9\x49\x89\x3a\x48\x31\xc0\x80\x3c\x07\x00\x74\x05\x48\xff\xc0\xeb\xf5\x49\x89\x42\x08\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd9\x4c\x8d\x4c\x24\x08\x49\x83\x39\x00\x74\x06\x49\x83\xc1\x08\xeb\xf4\x49\x83\xc1\x08\x4c\x8d\x15\x00\x00\x00\x00\x4d\x31\xdb\x4b\x8b\x3c\xd9\x48\x83\xff\x00\x74\x1e\x49\x89\x3a\x48\x31\xc0\x80\x3c\x07\x00\x74\x05\x48\xff\xc0\xeb\xf5\x49\x89\x42\x08\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd8\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x4c\x89\xe7\x4c\x89\xc6\x4c\x89\xc2\x48\x8d\x05\x00\x00\x00\x00\x50\x59\x48\x8b\x05\x00\x00\x00\x00\x49\x89\xc0\x49\x89\xc1")
+	renvoAsmAddAbsReloc(a, base+15, bssOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a, base+88, envOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a, base+141, envLenOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a, base+157, envOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a, base+166, envLenOff, renvoAbsBssReloc)
 }
 
 func renvoAsmImageAmd64(a *renvoAsm) []byte {
@@ -313,7 +250,8 @@ func renvoAsmImageAmd64(a *renvoAsm) []byte {
 		}
 		return out
 	}
-	sec := renvoBuildElf64SymbolSections(a, 0x400000, a.codeOffset, loadFileSize)
+	var sec renvoElfSymbolSections
+	renvoBuildElfSymbolSections(a, 0x400000, a.codeOffset, loadFileSize, &sec)
 	finalSize := sec.shoff + 448
 	out := make([]byte, finalSize)
 	renvoTruncBytes(&out, 0)
@@ -337,17 +275,15 @@ func renvoAsmImageAmd64(a *renvoAsm) []byte {
 		out = append(out, sec.shstrtab[i])
 	}
 	out = renvoAppendUntil(out, sec.shoff)
-	out = renvoAppendElf64SectionHeaders(out, &sec, a, 0x400000)
+	out = renvoAppendElfSectionHeaders(out, &sec, a, 0x400000)
 	return out
 }
 
 func renvoAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
 	start := len(out)
 	base := 0x400000
-	header := "\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x38\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x07\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00"
+	header := "\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x38\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00"
 	out = append(out, header...)
-	out[start+56] = 2
-	out[start+68] = 5
 	renvoPut32At(out, start+24, base+entryOff)
 	renvoPut32At(out, start+40, shoff)
 	if shoff != 0 {
@@ -372,7 +308,7 @@ func renvoAsmImageWindowsAmd64(a *renvoAsm) []byte {
 	a.dataOffset = dataRVA
 	var imports renvoWinImportLayout
 	if renvoAsmHasWinImportRelocs(a) {
-		imports = renvoAppendWinImports(a)
+		renvoAppendWinImports(a, &imports)
 	}
 	renvoAsmPatchWindows(a, imports)
 	dataRawSize := renvoAlignValue(len(a.data), renvoWinFileAlign)

@@ -143,73 +143,13 @@ func renvoEmitProgramEntryArgsArm(g *renvoLinearGen, appIndex int) bool {
 }
 
 func renvoAsmBuildArgvEnvSlicesArm(a *renvoAsm, bssOff int, envOff int, envLenOff int) {
-	loopLabel := renvoAsmNewLabel(a)
-	strlenLabel := renvoAsmNewLabel(a)
-	afterLenLabel := renvoAsmNewLabel(a)
-	doneLabel := renvoAsmNewLabel(a)
-	envLoopLabel := renvoAsmNewLabel(a)
-	envStrlenLabel := renvoAsmNewLabel(a)
-	envAfterLenLabel := renvoAsmNewLabel(a)
-	envDoneLabel := renvoAsmNewLabel(a)
-
-	renvoArmAsmLoadRegMem(a, renvoArmRegR8, renvoArmRegSp, 0, 4)
-	renvoArmAsmAddRegImm(a, renvoArmRegR9, renvoArmRegSp, 4)
-	renvoArmAsmMovRegAbs(a, renvoArmRegR10, bssOff, renvoAbsBssReloc)
-	renvoArmAsmMovRegImm(a, renvoArmRegTmp2, 0)
-	renvoAsmMarkLabel(a, loopLabel)
-	renvoArmAsmCmpRegReg(a, renvoArmRegTmp2, renvoArmRegR8)
-	renvoArmAsmBCondLabel(a, doneLabel, 0)
-	renvoArmAsmAddRegRegShift(a, renvoArmRegAddr, renvoArmRegR9, renvoArmRegTmp2, 2)
-	renvoArmAsmLoadRegMem(a, renvoArmRegAddr, renvoArmRegAddr, 0, 4)
-	renvoArmAsmStoreRegMem(a, renvoArmRegAddr, renvoArmRegR10, 0, 4)
-	renvoArmAsmMovRegImm(a, renvoArmRegRax, 0)
-	renvoAsmMarkLabel(a, strlenLabel)
-	renvoArmAsmAddRegReg(a, renvoArmRegTmp, renvoArmRegAddr, renvoArmRegRax)
-	renvoArmAsmLoadRegMem(a, renvoArmRegTmp, renvoArmRegTmp, 0, 1)
-	renvoArmAsmCmpRegImm(a, renvoArmRegTmp, 0)
-	renvoArmAsmBCondLabel(a, afterLenLabel, 0)
-	renvoArmAsmAddRegImm(a, renvoArmRegRax, renvoArmRegRax, 1)
-	renvoAsmJmpMarkLabel(a, strlenLabel, afterLenLabel)
-	renvoArmAsmStoreRegMem(a, renvoArmRegRax, renvoArmRegR10, 8, 4)
-	renvoArmAsmAddRegImm(a, renvoArmRegR10, renvoArmRegR10, 16)
-	renvoArmAsmAddRegImm(a, renvoArmRegTmp2, renvoArmRegTmp2, 1)
-	renvoAsmJmpMarkLabel(a, loopLabel, doneLabel)
-
-	renvoArmAsmAddRegRegShift(a, renvoArmRegR9, renvoArmRegR9, renvoArmRegR8, 2)
-	renvoArmAsmAddRegImm(a, renvoArmRegR9, renvoArmRegR9, 4)
-	renvoArmAsmMovRegAbs(a, renvoArmRegR10, envOff, renvoAbsBssReloc)
-	renvoArmAsmMovRegImm(a, renvoArmRegR9, 0)
-	renvoArmAsmLoadRegMem(a, renvoArmRegTmp2, renvoArmRegSp, 0, 4)
-	renvoArmAsmAddRegImm(a, renvoArmRegTmp2, renvoArmRegTmp2, 2)
-	renvoArmAsmAddRegRegShift(a, renvoArmRegTmp2, renvoArmRegSp, renvoArmRegTmp2, 2)
-	renvoArmAsmMovRegImm(a, renvoArmRegR9, 0)
-	renvoAsmMarkLabel(a, envLoopLabel)
-	renvoArmAsmLoadRegMem(a, renvoArmRegAddr, renvoArmRegTmp2, 0, 4)
-	renvoArmAsmCmpRegImm(a, renvoArmRegAddr, 0)
-	renvoArmAsmBCondLabel(a, envDoneLabel, 0)
-	renvoArmAsmStoreRegMem(a, renvoArmRegAddr, renvoArmRegR10, 0, 4)
-	renvoArmAsmMovRegImm(a, renvoArmRegRax, 0)
-	renvoAsmMarkLabel(a, envStrlenLabel)
-	renvoArmAsmAddRegReg(a, renvoArmRegTmp, renvoArmRegAddr, renvoArmRegRax)
-	renvoArmAsmLoadRegMem(a, renvoArmRegTmp, renvoArmRegTmp, 0, 1)
-	renvoArmAsmCmpRegImm(a, renvoArmRegTmp, 0)
-	renvoArmAsmBCondLabel(a, envAfterLenLabel, 0)
-	renvoArmAsmAddRegImm(a, renvoArmRegRax, renvoArmRegRax, 1)
-	renvoAsmJmpMarkLabel(a, envStrlenLabel, envAfterLenLabel)
-	renvoArmAsmStoreRegMem(a, renvoArmRegRax, renvoArmRegR10, 8, 4)
-	renvoArmAsmAddRegImm(a, renvoArmRegR10, renvoArmRegR10, 16)
-	renvoArmAsmAddRegImm(a, renvoArmRegTmp2, renvoArmRegTmp2, 4)
-	renvoArmAsmAddRegImm(a, renvoArmRegR9, renvoArmRegR9, 1)
-	renvoAsmJmpMarkLabel(a, envLoopLabel, envDoneLabel)
-	renvoArmAsmMovRegAbs(a, renvoArmRegAddr, envLenOff, renvoAbsBssReloc)
-	renvoArmAsmStoreRegMem(a, renvoArmRegR9, renvoArmRegAddr, 0, 4)
-
-	renvoArmAsmMovRegAbs(a, renvoArmRegRdi, bssOff, renvoAbsBssReloc)
-	renvoArmAsmMovRegReg(a, renvoArmRegRsi, renvoArmRegR8)
-	renvoArmAsmMovRegReg(a, renvoArmRegRdx, renvoArmRegR8)
-	renvoArmAsmMovRegAbs(a, renvoArmRegRcx, envOff, renvoAbsBssReloc)
-	renvoArmAsmMovRegReg(a, renvoArmRegR8, renvoArmRegR9)
-	renvoArmAsmMovRegReg(a, renvoArmRegR9, renvoArmRegR9)
+	base := len(a.code)
+	renvoAsmEmitText(a, "\x00\x50\x9d\xe5\x04\x90\x00\xe3\x09\x60\x8d\xe0\x00\x80\x00\xe3\x00\x80\x40\xe3\x00\xa0\x00\xe3\x05\x00\x5a\xe1\x10\x00\x00\x0a\x0a\xc1\x86\xe0\x00\xc0\x9c\xe5\x00\xc0\x88\xe5\x00\x00\x00\xe3\x00\x90\x8c\xe0\x00\x90\xd9\xe5\x00\x00\x59\xe3\x02\x00\x00\x0a\x01\x90\x00\xe3\x09\x00\x80\xe0\xf8\xff\xff\xea\x08\x00\x88\xe5\x10\x90\x00\xe3\x09\x80\x88\xe0\x01\x90\x00\xe3\x09\xa0\x8a\xe0\xec\xff\xff\xea\x05\x61\x86\xe0\x04\x90\x00\xe3\x09\x60\x86\xe0\x00\x80\x00\xe3\x00\x80\x40\xe3\x00\x60\x00\xe3\x00\xa0\x9d\xe5\x02\x90\x00\xe3\x09\xa0\x8a\xe0\x0a\xa1\x8d\xe0\x00\x60\x00\xe3\x00\xc0\x9a\xe5\x00\x00\x5c\xe3\x10\x00\x00\x0a\x00\xc0\x88\xe5\x00\x00\x00\xe3\x00\x90\x8c\xe0\x00\x90\xd9\xe5\x00\x00\x59\xe3\x02\x00\x00\x0a\x01\x90\x00\xe3\x09\x00\x80\xe0\xf8\xff\xff\xea\x08\x00\x88\xe5\x10\x90\x00\xe3\x09\x80\x88\xe0\x04\x90\x00\xe3\x09\xa0\x8a\xe0\x01\x90\x00\xe3\x09\x60\x86\xe0\xeb\xff\xff\xea\x00\xc0\x00\xe3\x00\xc0\x40\xe3\x00\x60\x8c\xe5\x00\x30\x00\xe3\x00\x30\x40\xe3\x05\x40\xa0\xe1\x05\x10\xa0\xe1\x00\x20\x00\xe3\x00\x20\x40\xe3\x06\x50\xa0\xe1")
+	renvoAsmAddAbsReloc(a, base+12, bssOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a, base+112, envOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a, base+224, envLenOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a, base+236, bssOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a, base+252, envOff, renvoAbsBssReloc)
 }
 
 func renvoAsmImageArm(a *renvoAsm) []byte {
@@ -227,7 +167,8 @@ func renvoAsmImageArm(a *renvoAsm) []byte {
 		}
 		return out
 	}
-	sec := renvoBuildElf32SymbolSections(a, renvoLinuxArmLoadAddress, a.codeOffset, loadFileSize)
+	var sec renvoElfSymbolSections
+	renvoBuildElfSymbolSections(a, renvoLinuxArmLoadAddress, a.codeOffset, loadFileSize, &sec)
 	out := make([]byte, 0, sec.shoff+280)
 	out = renvoAppendElfHeaderArm(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
 	for i := 0; i < len(a.code); i++ {
@@ -249,7 +190,7 @@ func renvoAsmImageArm(a *renvoAsm) []byte {
 		out = append(out, sec.shstrtab[i])
 	}
 	out = renvoAppendUntil(out, sec.shoff)
-	out = renvoAppendElf32SectionHeaders(out, &sec, a, renvoLinuxArmLoadAddress)
+	out = renvoAppendElfSectionHeaders(out, &sec, a, renvoLinuxArmLoadAddress)
 	return out
 }
 
@@ -268,47 +209,22 @@ func renvoAsmPatchArm(a *renvoAsm) {
 }
 
 func renvoAppendElfHeaderArm(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
+	start := len(out)
 	base := renvoLinuxArmLoadAddress
-
-	out = append(out, 0x7f)
-	out = append(out, 'E')
-	out = append(out, 'L')
-	out = append(out, 'F')
-	out = append(out, 1)
-	out = append(out, 1)
-	out = append(out, 1)
-	out = append(out, 0)
-	for i := 0; i < 8; i++ {
-		out = append(out, 0)
+	// The ELF and program-header layouts are fixed. Keep their invariant bytes
+	// together and patch the seven fields that vary per output image.
+	out = append(out, "\x7f\x45\x4c\x46\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x28\x00\x01\x00\x00\x00\x00\x00\x01\x00\x34\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x05\x34\x00\x20\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x05\x00\x00\x00\x00\x10\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x06\x00\x00\x00\x00\x10\x00\x00"...)
+	renvoPut32At(out, start+24, base+entryOff)
+	renvoPut32At(out, start+32, shoff)
+	if shoff != 0 {
+		out[start+46] = 40
+		out[start+48] = 7
+		out[start+50] = 6
 	}
-	out = renvoAppend16(out, 2)
-	out = renvoAppend16(out, 40)
-	out = renvoAppend32(out, 1)
-	out = renvoAppend32(out, base+entryOff)
-	out = renvoAppend32(out, 52)
-	out = renvoAppend32(out, shoff)
-	out = renvoAppend32(out, 0x05000000)
-	out = renvoAppend16(out, 52)
-	out = renvoAppend16(out, 32)
-	out = renvoAppend16(out, 2)
-	if shoff == 0 {
-		out = renvoAppend16(out, 0)
-		out = renvoAppend16(out, 0)
-		out = renvoAppend16(out, 0)
-	} else {
-		out = renvoAppend16(out, 40)
-		out = renvoAppend16(out, 7)
-		out = renvoAppend16(out, 6)
-	}
-
-	out = renvoAppend32(out, 1)
-	out = renvoAppend32(out, 0)
-	out = renvoAppend32(out, base)
-	out = renvoAppend32(out, base)
-	out = renvoAppend32(out, fileSize)
-	out = renvoAppend32(out, fileSize)
-	out = renvoAppend32(out, 5)
-	out = renvoAppend32(out, 0x1000)
-	out = renvoAppendElf32LoadProgram(out, 6, bssOffset, base+bssOffset, 0, bssSize)
+	renvoPut32At(out, start+68, fileSize)
+	renvoPut32At(out, start+72, fileSize)
+	renvoPut32At(out, start+88, bssOffset)
+	renvoPut32At(out, start+92, base+bssOffset)
+	renvoPut32At(out, start+104, bssSize)
 	return out
 }

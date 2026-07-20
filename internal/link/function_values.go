@@ -962,10 +962,10 @@ func reparseFunctionValueProgram(original *unit.Program, text []byte) bool {
 		kind := functionValueUnitTokenKind(text, tok)
 		if functionValueTokenIsEllipsis(text, tok) {
 			for dot := 0; dot < 3; dot++ {
-				out.Tokens = append(out.Tokens, unit.MakeToken(kind, tok.Start+dot, 1, tok.KindLine>>8))
+				out.Tokens = append(out.Tokens, unit.MakeToken(kind, tok.Start+dot, 1, syntax.TokenLine(tok)))
 			}
 		} else {
-			out.Tokens = append(out.Tokens, unit.MakeToken(kind, tok.Start, tok.End-tok.Start, tok.KindLine>>8))
+			out.Tokens = append(out.Tokens, unit.MakeToken(kind, tok.Start, tok.End-tok.Start, syntax.TokenLine(tok)))
 		}
 	}
 	tokenMap[len(file.Tokens)] = len(out.Tokens)

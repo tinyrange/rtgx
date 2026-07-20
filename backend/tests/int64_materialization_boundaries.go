@@ -20,15 +20,6 @@ func renvoWideSigned(value int64) int64 {
 }
 
 func appMain(args []string) int {
-	// The 32-bit backends require paired-register lowering, which is tracked by
-	// the wider int64/uint64 issue. This regression specifically protects the
-	// native 64-bit zero-test path fixed here.
-	nativeMax := int(0x7fffffff)
-	if nativeMax+1 < 0 {
-		print("PASS\n")
-		return 0
-	}
-
 	var one uint64 = 1
 	shifted := one << 40
 	if shifted == 0 || shifted != uint64(1<<40) {

@@ -437,8 +437,8 @@ func completionSelectorComponents(src []byte, dot int) []string {
 }
 
 func completionFindShortAssign(file syntax.File, name, end int) int {
-	line := file.Tokens[name].KindLine >> 8
-	for i := name + 1; i < end && i < len(file.Tokens) && file.Tokens[i].KindLine>>8 == line; i++ {
+	line := syntax.TokenLine(file.Tokens[name])
+	for i := name + 1; i < end && i < len(file.Tokens) && syntax.TokenLine(file.Tokens[i]) == line; i++ {
 		if tokenTextIs(&file, i, ":=") {
 			return i
 		}
@@ -453,9 +453,9 @@ func completionStatementEnd(file syntax.File, start, limit int) int {
 	if start >= len(file.Tokens) {
 		return start
 	}
-	line := file.Tokens[start].KindLine >> 8
+	line := syntax.TokenLine(file.Tokens[start])
 	for i := start; i < limit && i < len(file.Tokens); i++ {
-		if tokenTextIs(&file, i, ";") || i > start && file.Tokens[i].KindLine>>8 != line {
+		if tokenTextIs(&file, i, ";") || i > start && syntax.TokenLine(file.Tokens[i]) != line {
 			return i
 		}
 	}

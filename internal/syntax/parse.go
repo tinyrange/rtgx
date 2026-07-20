@@ -180,7 +180,7 @@ func parseImportSpec(file *File, start int, grouped bool) (int, bool) {
 		if grouped && tokCharIs(file.Src, file.Tokens, next, ')') {
 			break
 		}
-		if file.Tokens[next].KindLine>>8 != file.Tokens[pathTok].KindLine>>8 {
+		if TokenLine(file.Tokens[next]) != TokenLine(file.Tokens[pathTok]) {
 			break
 		}
 		return start, false
@@ -335,7 +335,7 @@ func findFuncBody(file File, start int) int {
 }
 
 func skipDeclSpec(file File, start int, grouped bool) (int, int, bool) {
-	line := file.Tokens[start].KindLine >> 8
+	line := TokenLine(file.Tokens[start])
 	i := start
 	parenDepth := 0
 	bracketDepth := 0
@@ -348,7 +348,7 @@ func skipDeclSpec(file File, start int, grouped bool) (int, int, bool) {
 			if tokCharIs(file.Src, file.Tokens, i, ';') {
 				return i, i + 1, true
 			}
-			if i > start && file.Tokens[i].KindLine>>8 != line {
+			if i > start && TokenLine(file.Tokens[i]) != line {
 				return i, i, true
 			}
 		}
@@ -441,15 +441,10 @@ func isImportName(src []byte, toks []Token, i int) bool {
 	return tokCharIs(src, toks, i, '.')
 }
 
-func tokCharIs(src []byte, toks []Token, i int, c byte) bool {
+func tokCharIs(_ []byte, toks []Token, i int, c byte) bool {
 	if i < 0 || i >= len(toks) {
 		return false
 	}
-	if toks[i].KindLine&255 != TokenOperator {
-		return false
-	}
-	if toks[i].End-toks[i].Start != 1 {
-		return false
-	}
-	return src[toks[i].Start] == c
+	packed := toks[i].KindLine
+	return packed&255 == TokenOperator && packed>>TokenOperatorCharShift&TokenOperatorCharMask == int(c)
 }

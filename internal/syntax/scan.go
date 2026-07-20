@@ -16,6 +16,10 @@ func scanTokens(src []byte) ([]Token, bool) {
 	i := 0
 	line := 1
 	for i < len(src) {
+		if line > TokenLineLimit {
+			ok = false
+			break
+		}
 		c := src[i]
 		if c == ' ' || c == '\t' || c == '\r' {
 			i++
@@ -155,7 +159,14 @@ func scanTokens(src []byte) ([]Token, bool) {
 				}
 			}
 		}
-		tokens = append(tokens, MakeToken(TokenOperator, start, i, line))
+		tok := MakeToken(TokenOperator, start, i, line)
+		if i == start+1 && c <= TokenOperatorCharMask {
+			tok.KindLine = tok.KindLine | int(c)<<TokenOperatorCharShift
+		}
+		tokens = append(tokens, tok)
+	}
+	if line > TokenLineLimit {
+		ok = false
 	}
 	tokens = append(tokens, MakeToken(TokenEOF, len(src), len(src), line))
 	return tokens, ok

@@ -204,107 +204,19 @@ func renvoEmitProgramEntryArgs386(g *renvoLinearGen, appIndex int) bool {
 }
 
 func renvoAsmBuildWindowsArgvEnvSlices386(a *renvoAsm, bssOff int, argsTextOff int, argsLenOff int, envOff int, envLenOff int) {
-	skipLabel := renvoAsmNewLabel(a)
-	startLabel := renvoAsmNewLabel(a)
-	skipCharLabel := renvoAsmNewLabel(a)
-	copyLabel := renvoAsmNewLabel(a)
-	notQuoteLabel := renvoAsmNewLabel(a)
-	copyCharLabel := renvoAsmNewLabel(a)
-	argDoneLabel := renvoAsmNewLabel(a)
-	finishLabel := renvoAsmNewLabel(a)
-
-	renvoWin386CallImport(a, renvoWinImportGetCommandLineA)
-	renvoAsmEmit16(a, 0xc689)
-	renvoWin386MovEdiBssAddr(a, bssOff)
-	renvoAsmPrimaryBssAddr(a, argsTextOff)
-	renvoAsmEmit16(a, 0xc289)
-	renvoAsmEmit16(a, 0xdb31)
-
-	renvoAsmMarkLabel(a, skipLabel)
-	renvoAsmEmit3(a, 0x80, 0x3e, 0)
-	renvoAsmJzLabel(a, finishLabel)
-	renvoAsmEmit3(a, 0x80, 0x3e, ' ')
-	renvoAsmJzLabel(a, skipCharLabel)
-	renvoAsmEmit3(a, 0x80, 0x3e, 9)
-	renvoAsmJnzLabel(a, startLabel)
-	renvoAsmMarkLabel(a, skipCharLabel)
-	renvoAsmEmit8(a, 0x46)
-	renvoAsmJmpLabel(a, skipLabel)
-
-	renvoAsmMarkLabel(a, startLabel)
-	renvoAsmEmit16(a, 0x1789)
-	renvoAsmEmit16(a, 0xc931)
-	renvoAsmEmit16(a, 0xed31)
-	renvoAsmMarkLabel(a, copyLabel)
-	renvoAsmEmit16(a, 0x068a)
-	renvoAsmEmit2(a, 0x3c, 0)
-	renvoAsmJzLabel(a, argDoneLabel)
-	renvoAsmEmit2(a, 0x3c, '"')
-	renvoAsmJnzLabel(a, notQuoteLabel)
-	renvoAsmEmit3(a, 0x83, 0xf5, 1)
-	renvoAsmEmit8(a, 0x46)
-	renvoAsmJmpMarkLabel(a, copyLabel, notQuoteLabel)
-	renvoAsmEmit3(a, 0x83, 0xfd, 0)
-	renvoAsmJnzLabel(a, copyCharLabel)
-	renvoAsmEmit2(a, 0x3c, ' ')
-	renvoAsmJzLabel(a, argDoneLabel)
-	renvoAsmEmit2(a, 0x3c, 9)
-	renvoAsmJzLabel(a, argDoneLabel)
-	renvoAsmMarkLabel(a, copyCharLabel)
-	renvoAsmEmit16(a, 0x0288)
-	renvoAsmEmit8(a, 0x46)
-	renvoAsmEmit8(a, 0x42)
-	renvoAsmEmit8(a, 0x41)
-	renvoAsmJmpLabel(a, copyLabel)
-
-	renvoAsmMarkLabel(a, argDoneLabel)
-	renvoAsmEmit3(a, 0xc6, 0x02, 0)
-	renvoAsmEmit8(a, 0x42)
-	renvoAsmEmit3(a, 0x89, 0x4f, 8)
-	renvoAsmEmit3(a, 0x83, 0xc7, 16)
-	renvoAsmEmit8(a, 0x43)
-	renvoAsmEmit2(a, 0x3c, 0)
-	renvoAsmJzLabel(a, finishLabel)
-	renvoAsmEmit8(a, 0x46)
-	renvoAsmJmpLabel(a, skipLabel)
-
-	renvoAsmMarkLabel(a, finishLabel)
-	renvoAsmEmit16(a, 0xd889)
-	renvoAsmStorePrimaryBss(a, argsLenOff)
-
-	envLoopLabel := renvoAsmNewLabel(a)
-	envStringLabel := renvoAsmNewLabel(a)
-	envStringDoneLabel := renvoAsmNewLabel(a)
-	envDoneLabel := renvoAsmNewLabel(a)
-	renvoWin386CallImport(a, renvoWinImportGetEnvironmentStringsA)
-	renvoAsmEmit16(a, 0xc689)
-	renvoWin386MovEdiBssAddr(a, envOff)
-	renvoAsmEmit16(a, 0xdb31)
-	renvoAsmMarkLabel(a, envLoopLabel)
-	renvoAsmEmit3(a, 0x80, 0x3e, 0)
-	renvoAsmJzLabel(a, envDoneLabel)
-	renvoAsmEmit16(a, 0x3789)
-	renvoAsmEmit16(a, 0xc931)
-	renvoAsmMarkLabel(a, envStringLabel)
-	renvoAsmEmit4(a, 0x80, 0x3c, 0x0e, 0)
-	renvoAsmJzLabel(a, envStringDoneLabel)
-	renvoAsmEmit8(a, 0x41)
-	renvoAsmJmpMarkLabel(a, envStringLabel, envStringDoneLabel)
-	renvoAsmEmit3(a, 0x89, 0x4f, 8)
-	renvoAsmEmit16(a, 0xce01)
-	renvoAsmEmit8(a, 0x46)
-	renvoAsmEmit3(a, 0x83, 0xc7, 16)
-	renvoAsmEmit8(a, 0x43)
-	renvoAsmJmpMarkLabel(a, envLoopLabel, envDoneLabel)
-	renvoAsmEmit16(a, 0xd889)
-	renvoAsmStorePrimaryBss(a, envLenOff)
-
-	renvoWin386MovEbxBssAddr(a, bssOff)
-	renvoWin386LoadEsiBss(a, argsLenOff)
-	renvoAsmEmit16(a, 0xf289)
-	renvoWin386MovEcxBssAddr(a, envOff)
-	renvoWin386LoadEaxBss(a, envLenOff)
-	renvoAsmEmit16(a, 0xc789)
+	base := len(a.code)
+	renvoAsmEmitText(a, "\xff\x15\x00\x00\x00\x00\x89\xc6\xbf\x00\x00\x00\x00\xb8\x00\x00\x00\x00\x89\xc2\x31\xdb\x80\x3e\x00\x0f\x84\x75\x00\x00\x00\x80\x3e\x20\x0f\x84\x09\x00\x00\x00\x80\x3e\x09\x0f\x85\x06\x00\x00\x00\x46\xe9\xdf\xff\xff\xff\x89\x17\x31\xc9\x31\xed\x8a\x06\x3c\x00\x0f\x84\x34\x00\x00\x00\x3c\x22\x0f\x85\x09\x00\x00\x00\x83\xf5\x01\x46\xe9\xe5\xff\xff\xff\x83\xfd\x00\x0f\x85\x10\x00\x00\x00\x3c\x20\x0f\x84\x12\x00\x00\x00\x3c\x09\x0f\x84\x0a\x00\x00\x00\x88\x02\x46\x42\x41\xe9\xc2\xff\xff\xff\xc6\x02\x00\x42\x89\x4f\x08\x83\xc7\x10\x43\x3c\x00\x0f\x84\x06\x00\x00\x00\x46\xe9\x82\xff\xff\xff\x89\xd8\xa3\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x89\xc6\xbf\x00\x00\x00\x00\x31\xdb\x80\x3e\x00\x0f\x84\x23\x00\x00\x00\x89\x37\x31\xc9\x80\x3c\x0e\x00\x0f\x84\x06\x00\x00\x00\x41\xe9\xf0\xff\xff\xff\x89\x4f\x08\x01\xce\x46\x83\xc7\x10\x43\xe9\xd4\xff\xff\xff\x89\xd8\xa3\x00\x00\x00\x00\xbb\x00\x00\x00\x00\x8b\x35\x00\x00\x00\x00\x89\xf2\xb9\x00\x00\x00\x00\xa1\x00\x00\x00\x00\x89\xc7")
+	renvoAsmAddWinImportReloc(a, base+2, renvoWinImportGetCommandLineA)
+	renvoAsmAddAbsReloc(a, base+9, bssOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a, base+14, argsTextOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a, base+151, argsLenOff, renvoAbsBssReloc)
+	renvoAsmAddWinImportReloc(a, base+157, renvoWinImportGetEnvironmentStringsA)
+	renvoAsmAddAbsReloc(a, base+164, envOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a, base+217, envLenOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a, base+222, bssOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a, base+228, argsLenOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a, base+235, envOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a, base+240, envLenOff, renvoAbsBssReloc)
 }
 
 func renvoAsmBuildArgvEnvSlices386(a *renvoAsm, bssOff int, envOff int, envLenOff int) {
@@ -402,7 +314,8 @@ func renvoAsmImage386(a *renvoAsm) []byte {
 		}
 		return out
 	}
-	sec := renvoBuildElf32SymbolSections(a, renvoLinux386LoadAddress, a.codeOffset, loadFileSize)
+	var sec renvoElfSymbolSections
+	renvoBuildElfSymbolSections(a, renvoLinux386LoadAddress, a.codeOffset, loadFileSize, &sec)
 	out := make([]byte, 0, sec.shoff+280)
 	out = renvoAppendElfHeader386(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
 	for i := 0; i < len(a.code); i++ {
@@ -424,7 +337,7 @@ func renvoAsmImage386(a *renvoAsm) []byte {
 		out = append(out, sec.shstrtab[i])
 	}
 	out = renvoAppendUntil(out, sec.shoff)
-	out = renvoAppendElf32SectionHeaders(out, &sec, a, renvoLinux386LoadAddress)
+	out = renvoAppendElfSectionHeaders(out, &sec, a, renvoLinux386LoadAddress)
 	return out
 }
 
@@ -496,7 +409,7 @@ func renvoAsmImageWindows386(a *renvoAsm) []byte {
 	a.dataOffset = dataRVA
 	var imports renvoWinImportLayout
 	if renvoAsmHasWinImportRelocs(a) {
-		imports = renvoAppendWinImports(a)
+		renvoAppendWinImports(a, &imports)
 	}
 	renvoAsmPatchWindows(a, imports)
 	dataRawSize := renvoAlignValue(len(a.data), renvoWinFileAlign)

@@ -233,7 +233,7 @@ func nextStructFieldEnd(file syntax.File, start int, end int) int {
 	braceDepth := 0
 	i := start
 	for i < end {
-		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && file.Tokens[i].KindLine>>8 != file.Tokens[i-1].KindLine>>8 {
+		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && syntax.TokenLine(file.Tokens[i]) != syntax.TokenLine(file.Tokens[i-1]) {
 			return i
 		}
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokCharIs(&file, i, ';') {

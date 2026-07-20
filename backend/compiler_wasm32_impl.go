@@ -1,5 +1,71 @@
 package main
 
+func renvoWasm32EmitWideBinaryStack(g *renvoLinearGen, dest int, left int, right int, tok int, signed bool) bool {
+	renvoNonNil(g)
+	if renvoTokCharIs(g.prog, tok, '+') {
+		renvoEmitWideAddStack(g, dest, left, right)
+		return true
+	}
+	if renvoTokCharIs(g.prog, tok, '-') {
+		renvoEmitWideSubStack(g, dest, left, right)
+		return true
+	}
+	if renvoTokCharIs(g.prog, tok, '*') {
+		renvoEmitWideMulStack(g, dest, left, right)
+		return true
+	}
+	if renvoTokCharIs(g.prog, tok, '/') || renvoTokCharIs(g.prog, tok, '%') {
+		renvoEmitWideDivStack(g, dest, left, right, signed, renvoTokCharIs(g.prog, tok, '%'))
+		return true
+	}
+	if renvoTok2Is(g.prog, tok, '<', '<') || renvoTok2Is(g.prog, tok, '>', '>') {
+		renvoEmitWideShiftStack(g, dest, left, right, renvoTok2Is(g.prog, tok, '>', '>'), signed)
+		return true
+	}
+	if renvoTokCharIs(g.prog, tok, '&') || renvoTokCharIs(g.prog, tok, '|') || renvoTokCharIs(g.prog, tok, '^') {
+		for at := 0; at < renvoBackendValueSlotSize; at += renvoNativeIntSize {
+			renvoAsmLoadPrimaryStack(&g.asm, right-at)
+			renvoAsmLoadTertiaryStack(&g.asm, left-at)
+			if !renvoEmitPrimaryTertiaryOp(g, tok) {
+				return false
+			}
+			renvoAsmStorePrimaryStack(&g.asm, dest-at)
+		}
+		return true
+	}
+	return false
+}
+
+func renvoWasm32EmitWideCompareStack(g *renvoLinearGen, left int, right int, tok int, signed bool) bool {
+	renvoNonNil(g)
+	p := g.prog
+	equal := renvoTok2Is(p, tok, '=', '=') || renvoTok2Is(p, tok, '!', '=')
+	if equal {
+		notEqual := renvoAsmNewLabel(&g.asm)
+		done := renvoAsmNewLabel(&g.asm)
+		renvoEmitNativeCompareStack(g, left-renvoNativeIntSize, right-renvoNativeIntSize, 0x94)
+		renvoAsmJzPrimary(&g.asm, notEqual)
+		renvoEmitNativeCompareStack(g, left, right, 0x94)
+		renvoAsmJmpMarkLabel(&g.asm, done, notEqual)
+		renvoAsmPrimaryImm(&g.asm, 0)
+		renvoAsmMarkLabel(&g.asm, done)
+		if renvoTok2Is(p, tok, '!', '=') {
+			renvoAsmBoolNotPrimary(&g.asm)
+		}
+		return true
+	}
+	greater := renvoTokCharIs(p, tok, '>') || renvoTok2Is(p, tok, '>', '=')
+	inclusive := renvoTok2Is(p, tok, '<', '=') || renvoTok2Is(p, tok, '>', '=')
+	if greater != inclusive {
+		left, right = right, left
+	}
+	renvoEmitWideLessStack(g, left, right, signed)
+	if inclusive {
+		renvoAsmBoolNotPrimary(&g.asm)
+	}
+	return true
+}
+
 func renvoWasmAppendU32(out []byte, v int) []byte {
 	for i := 0; i < 5; i++ {
 		b := byte(v & 0x7f)
@@ -262,6 +328,7 @@ const renvoWasm32OpCall = 40
 const renvoWasm32OpRet = 41
 const renvoWasm32OpSyscall = 42
 const renvoWasm32OpNop = 43
+const renvoWasm32OpShrUnsignedRegReg = 44
 
 const renvoWasm32CondEq = 0
 const renvoWasm32CondNe = 1
@@ -641,6 +708,14 @@ func renvoWasm32AsmSarRaxImm(a *renvoAsm, imm int) {
 	renvoWasm32EmitRegReg(a, renvoWasm32OpShrRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 }
 
+func renvoWasm32AsmShrRaxImm(a *renvoAsm, imm int) {
+	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
+	// The ordinary shift op is signed because Go's machine-int path uses it
+	// for signed values. Logical shifts are only needed explicitly by the
+	// two-word uint64 lowering.
+	renvoWasm32EmitRegReg(a, renvoWasm32OpShrUnsignedRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
+}
+
 func renvoWasm32AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
 	if mod {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpModRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
@@ -833,7 +908,7 @@ func renvoWasm32NextInstructionPc(code []byte, pc int) int {
 	if op == renvoWasm32OpMovRegImm || op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack || op == renvoWasm32OpLeaStack || op == renvoWasm32OpAddRegImm || op == renvoWasm32OpMulRegImm || op == renvoWasm32OpCmpRegImm || op == renvoWasm32OpJCond {
 		return pc + 6
 	}
-	if op == renvoWasm32OpMovRegReg || op == renvoWasm32OpAddRegReg || op == renvoWasm32OpSubRegReg || op == renvoWasm32OpMulRegReg || op == renvoWasm32OpDivRegReg || op == renvoWasm32OpModRegReg || op == renvoWasm32OpAndRegReg || op == renvoWasm32OpOrRegReg || op == renvoWasm32OpXorRegReg || op == renvoWasm32OpAndNotRegReg || op == renvoWasm32OpShlRegReg || op == renvoWasm32OpShrRegReg || op == renvoWasm32OpCmpRegReg {
+	if op == renvoWasm32OpMovRegReg || op == renvoWasm32OpAddRegReg || op == renvoWasm32OpSubRegReg || op == renvoWasm32OpMulRegReg || op == renvoWasm32OpDivRegReg || op == renvoWasm32OpModRegReg || op == renvoWasm32OpAndRegReg || op == renvoWasm32OpOrRegReg || op == renvoWasm32OpXorRegReg || op == renvoWasm32OpAndNotRegReg || op == renvoWasm32OpShlRegReg || op == renvoWasm32OpShrRegReg || op == renvoWasm32OpShrUnsignedRegReg || op == renvoWasm32OpCmpRegReg {
 		return pc + 3
 	}
 	if op == renvoWasm32OpPushReg || op == renvoWasm32OpPopReg || op == renvoWasm32OpIncReg || op == renvoWasm32OpIncMem || op == renvoWasm32OpDecMem || op == renvoWasm32OpBoolNot || op == renvoWasm32OpNegReg || op == renvoWasm32OpSetCond {
@@ -868,7 +943,7 @@ func renvoWasm32DecodeOne(code []byte, pc int, next int) renvoWasm32Instr {
 		ins.b = renvoWasm32GetS32(code, pc+2)
 		return ins
 	}
-	if op == renvoWasm32OpMovRegReg || op == renvoWasm32OpAddRegReg || op == renvoWasm32OpSubRegReg || op == renvoWasm32OpMulRegReg || op == renvoWasm32OpDivRegReg || op == renvoWasm32OpModRegReg || op == renvoWasm32OpAndRegReg || op == renvoWasm32OpOrRegReg || op == renvoWasm32OpXorRegReg || op == renvoWasm32OpAndNotRegReg || op == renvoWasm32OpShlRegReg || op == renvoWasm32OpShrRegReg || op == renvoWasm32OpCmpRegReg {
+	if op == renvoWasm32OpMovRegReg || op == renvoWasm32OpAddRegReg || op == renvoWasm32OpSubRegReg || op == renvoWasm32OpMulRegReg || op == renvoWasm32OpDivRegReg || op == renvoWasm32OpModRegReg || op == renvoWasm32OpAndRegReg || op == renvoWasm32OpOrRegReg || op == renvoWasm32OpXorRegReg || op == renvoWasm32OpAndNotRegReg || op == renvoWasm32OpShlRegReg || op == renvoWasm32OpShrRegReg || op == renvoWasm32OpShrUnsignedRegReg || op == renvoWasm32OpCmpRegReg {
 		ins.a = int(code[pc+1])
 		ins.b = int(code[pc+2])
 		return ins
@@ -1459,6 +1534,9 @@ func renvoWasm32AppendBinaryOp(out []byte, op int) []byte {
 	if op == renvoWasm32OpShrRegReg {
 		return append(out, 0x75)
 	}
+	if op == renvoWasm32OpShrUnsignedRegReg {
+		return append(out, 0x76)
+	}
 	return out
 }
 
@@ -1509,7 +1587,7 @@ func renvoWasm32AppendInstr(out []byte, ins *renvoWasm32Instr, nextIndex int, ta
 		out = renvoWasm32IndexAddr(out, argB, int(ins.c), int(ins.d), int(ins.e))
 		out = renvoWasm32RegGet(out, argA)
 		out = renvoWasm32StoreSized(out, int(ins.f))
-	} else if op >= renvoWasm32OpAddRegReg && op <= renvoWasm32OpShrRegReg {
+	} else if op >= renvoWasm32OpAddRegReg && op <= renvoWasm32OpShrRegReg || op == renvoWasm32OpShrUnsignedRegReg {
 		if op == renvoWasm32OpAndNotRegReg {
 			out = renvoWasm32RegGet(out, argA)
 			out = renvoWasm32RegGet(out, argB)

@@ -425,7 +425,7 @@ func renvoAsmImageWindowsArm64(a *renvoAsm) []byte {
 	a.dataOffset = dataRVA
 	var imports renvoWinImportLayout
 	if renvoAsmHasWinImportRelocs(a) {
-		imports = renvoAppendWinImports(a)
+		renvoAppendWinImports(a, &imports)
 	}
 	renvoAsmPatchWindowsArm64(a, imports)
 	dataRawSize := renvoAlignValue(len(a.data), renvoWinFileAlign)

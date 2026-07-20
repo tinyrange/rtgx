@@ -366,7 +366,7 @@ func findStmtBlockStart(file File, start int, limit int) int {
 }
 
 func findStmtEnd(file File, start int, limit int) int {
-	if start < limit && start > 0 && file.Tokens[start].KindLine>>8 != file.Tokens[start-1].KindLine>>8 {
+	if start < limit && start > 0 && TokenLine(file.Tokens[start]) != TokenLine(file.Tokens[start-1]) {
 		return start
 	}
 	i := start
@@ -384,7 +384,7 @@ func findStmtEnd(file File, start int, limit int) int {
 			if c == ';' {
 				return i + 1
 			}
-			if i > start && file.Tokens[i].KindLine>>8 != file.Tokens[prev].KindLine>>8 && !lineContinues(file, prev, i) {
+			if i > start && TokenLine(file.Tokens[i]) != TokenLine(file.Tokens[prev]) && !lineContinues(file, prev, i) {
 				return i
 			}
 		}

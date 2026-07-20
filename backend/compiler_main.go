@@ -210,8 +210,26 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
 
 func renvoUnitUsesPanic(p *renvoProgram) bool {
 	renvoNonNil(p)
-	for i := 0; i < renvoTokCount(p); i++ {
-		if renvoTokIdentIs(p, i, "defer") || renvoTokIdentIs(p, i, "panic") || renvoTokIdentIs(p, i, "recover") || renvoTokCharIs(p, i, '.') && renvoTokCharIs(p, i+1, '(') {
+	data := p.toks.data
+	src := p.src
+	for base := 0; base+2 < len(data); base += renvoTokenStride {
+		packed := int(renvo_runtime_UnsafeInt32At(data, base))
+		if packed&255 == renvoTokIdent {
+			start := int(renvo_runtime_UnsafeInt32At(data, base+1))
+			size := int(renvo_runtime_UnsafeInt32At(data, base+2)) - start
+			if size == 5 {
+				first := renvo_runtime_UnsafeByteAt(src, start)
+				if first == 'd' && renvo_runtime_UnsafeByteAt(src, start+1) == 'e' && renvo_runtime_UnsafeByteAt(src, start+2) == 'f' && renvo_runtime_UnsafeByteAt(src, start+3) == 'e' && renvo_runtime_UnsafeByteAt(src, start+4) == 'r' {
+					return true
+				}
+				if first == 'p' && renvo_runtime_UnsafeByteAt(src, start+1) == 'a' && renvo_runtime_UnsafeByteAt(src, start+2) == 'n' && renvo_runtime_UnsafeByteAt(src, start+3) == 'i' && renvo_runtime_UnsafeByteAt(src, start+4) == 'c' {
+					return true
+				}
+			} else if size == 7 && renvo_runtime_UnsafeByteAt(src, start) == 'r' && renvo_runtime_UnsafeByteAt(src, start+1) == 'e' && renvo_runtime_UnsafeByteAt(src, start+2) == 'c' && renvo_runtime_UnsafeByteAt(src, start+3) == 'o' && renvo_runtime_UnsafeByteAt(src, start+4) == 'v' && renvo_runtime_UnsafeByteAt(src, start+5) == 'e' && renvo_runtime_UnsafeByteAt(src, start+6) == 'r' {
+				return true
+			}
+		}
+		if packed>>24&255 == '.' && base+renvoTokenStride < len(data) && int(renvo_runtime_UnsafeInt32At(data, base+renvoTokenStride))>>24&255 == '(' {
 			return true
 		}
 	}
@@ -226,23 +244,29 @@ func renvoDecodeUnitProgram(src []byte) (renvoProgram, bool, bool) {
 	if src[0] != renvoUnitMagic[0] || src[1] != renvoUnitMagic[1] || src[2] != renvoUnitMagic[2] || src[3] != renvoUnitMagic[3] {
 		return prog, false, true
 	}
+	ok := renvoDecodeUnitProgramBody(src, &prog)
+	return prog, true, ok
+}
+
+func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
+	renvoNonNil(prog)
 	if len(src) < 14 {
-		return prog, true, false
+		return false
 	}
 	if int(src[4])|(int(src[5])<<8) != renvoUnitVersion {
-		return prog, true, false
+		return false
 	}
 	if int(src[6])|(int(src[7])<<8) != 0 {
-		return prog, true, false
+		return false
 	}
 	length := renvoUnitRead32(src, 10)
 	if int(src[8])|(int(src[9])<<8) != renvoUnitTagUnit || length < 0 {
-		return prog, true, false
+		return false
 	}
 	rootStart := 14
 	rootEnd := rootStart + length
 	if rootEnd != len(src) || rootEnd < rootStart {
-		return prog, true, false
+		return false
 	}
 	var text []byte
 	textStart := 0
@@ -254,32 +278,32 @@ func renvoDecodeUnitProgram(src []byte) (renvoProgram, bool, bool) {
 	pos := rootStart
 	for pos < rootEnd {
 		if pos+6 > rootEnd {
-			return prog, true, false
+			return false
 		}
 		tag := int(src[pos]) | (int(src[pos+1]) << 8)
 		length := renvoUnitRead32(src, pos+2)
 		pos = pos + 6
 		if length < 0 {
-			return prog, true, false
+			return false
 		}
 		next := pos + length
 		if next < pos || next > rootEnd {
-			return prog, true, false
+			return false
 		}
 		if tag == renvoUnitTagUnit {
-			return prog, true, false
+			return false
 		}
 		knownTag := tag == renvoUnitTagPackage || tag == renvoUnitTagImportPath || tag >= renvoUnitTagText && tag <= renvoUnitTagStmts
 		if knownTag {
 			bit := 1 << tag
 			if seen&bit != 0 {
-				return prog, true, false
+				return false
 			}
 			seen = seen | bit
 		}
 		if tag == renvoUnitTagPackage {
 			if length == 0 {
-				return prog, true, false
+				return false
 			}
 		}
 		if tag == renvoUnitTagText {
@@ -300,30 +324,30 @@ func renvoDecodeUnitProgram(src []byte) (renvoProgram, bool, bool) {
 	}
 	required := 1<<renvoUnitTagPackage | 1<<renvoUnitTagImportPath | 1<<renvoUnitTagText | 1<<renvoUnitTagTokens | 1<<renvoUnitTagDecls | 1<<renvoUnitTagFuncs
 	if seen&required != required {
-		return prog, true, false
+		return false
 	}
 	if len(text) == 0 || len(tokenData) == 0 {
-		return prog, true, false
+		return false
 	}
 	tokens, tokensOK := renvoDecodeUnitTokens(text, tokenData)
 	if !tokensOK {
-		return prog, true, false
+		return false
 	}
 	tokenCount := len(tokens) / renvoTokenStride
 	if tokenCount <= 0 {
-		return prog, true, false
+		return false
 	}
 	if int(tokens[(tokenCount-1)*renvoTokenStride])&255 != renvoTokEOF {
-		return prog, true, false
+		return false
 	}
 	prog.src = text
 	prog.toks.data = tokens
 	prog.toks.count = tokenCount
-	prog.toks.panicEnabled = renvoUnitUsesPanic(&prog)
+	prog.toks.panicEnabled = renvoUnitUsesPanic(prog)
 	declReader := renvoUnitReader{src: declData, end: len(declData), ok: true}
 	declCount := renvoUnitReadVar(&declReader)
 	if !declReader.ok {
-		return prog, true, false
+		return false
 	}
 	prog.decls = make([]renvoDecl, 0, declCount)
 	for i := 0; i < declCount; i++ {
@@ -336,22 +360,22 @@ func renvoDecodeUnitProgram(src []byte) (renvoProgram, bool, bool) {
 		decl.startTok = renvoUnitReadVar(&declReader)
 		tokCount = renvoUnitReadVar(&declReader)
 		if !declReader.ok {
-			return prog, true, false
+			return false
 		}
 		decl.nameEnd = decl.nameStart + nameSize
 		decl.endTok = decl.startTok + tokCount
 		if !renvoUnitValidRange(len(text), decl.nameStart, decl.nameEnd) || !renvoUnitValidTokenRange(tokenCount, decl.startTok, decl.endTok) {
-			return prog, true, false
+			return false
 		}
 		prog.decls = append(prog.decls, decl)
 	}
 	if declReader.pos != declReader.end {
-		return prog, true, false
+		return false
 	}
 	funcReader := renvoUnitReader{src: funcData, end: len(funcData), ok: true}
 	funcCount := renvoUnitReadVar(&funcReader)
 	if !funcReader.ok {
-		return prog, true, false
+		return false
 	}
 	prog.funcs = make([]renvoFuncDecl, 0, funcCount)
 	for i := 0; i < funcCount; i++ {
@@ -371,7 +395,7 @@ func renvoDecodeUnitProgram(src []byte) (renvoProgram, bool, bool) {
 		bodyCount = renvoUnitReadVar(&funcReader)
 		endCount = renvoUnitReadVar(&funcReader)
 		if !funcReader.ok {
-			return prog, true, false
+			return false
 		}
 		fn.nameEnd = fn.nameStart + nameSize
 		fn.nameTok = fn.startTok + nameTokDelta
@@ -379,20 +403,20 @@ func renvoDecodeUnitProgram(src []byte) (renvoProgram, bool, bool) {
 		fn.bodyEnd = fn.bodyStart + bodyCount
 		fn.endTok = fn.bodyEnd + endCount
 		if !renvoUnitValidRange(len(text), fn.nameStart, fn.nameEnd) || !renvoUnitValidTokenRange(tokenCount, fn.startTok, fn.endTok) {
-			return prog, true, false
+			return false
 		}
 		if fn.nameTok < 0 || fn.nameTok >= tokenCount || fn.bodyStart < 0 || fn.bodyEnd >= tokenCount || fn.bodyStart > fn.bodyEnd {
-			return prog, true, false
+			return false
 		}
 		prog.funcs = append(prog.funcs, fn)
 	}
 	if funcReader.pos != funcReader.end {
-		return prog, true, false
+		return false
 	}
 	renvo_runtime_ArenaDiscardBytes(src[:textStart])
 	renvo_runtime_ArenaDiscardBytes(src[textEnd:])
 	prog.ok = true
-	return prog, true, true
+	return true
 }
 
 func renvoUnitValidRange(limit int, start int, end int) bool {

@@ -575,7 +575,7 @@ func renvoAmd64EmitCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoEx
 	if start+1 < end {
 		c1 = renvo_runtime_UnsafeByteAt(p.src, start+1)
 	}
-	if !((c0 == '=' || c0 == '!') && c1 == '=' || c0 == '<' && c1 != '<' || c0 == '>' && c1 != '>') {
+	if !renvoIsComparisonChars(c0, c1) {
 		return false
 	}
 	// The immediate compare fast path operates on the backend's raw integer
@@ -593,7 +593,7 @@ func renvoAmd64EmitCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoEx
 			return false
 		}
 		renvoAsmCmpPrimaryImm8Discard(&g.asm, rightConst.value)
-		renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue)
+		renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, renvoNativeIntSize == 8 && renvoScalarComparisonIsUnsigned(g, ep, e, c0))
 		return true
 	}
 	if renvoTargetArch == renvoArchAmd64 {
@@ -604,7 +604,7 @@ func renvoAmd64EmitCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoEx
 			if leftLocal >= 0 && rightLocal >= 0 && renvoTypeIsInt(g.meta, g.locals[leftLocal].typ) && renvoTypeIsInt(g.meta, g.locals[rightLocal].typ) {
 				renvoAsmLoadPrimaryStack(&g.asm, g.locals[rightLocal].offset)
 				renvoAsmStackMem(&g.asm, g.locals[leftLocal].offset, 0x3948, 0x45, 0x85)
-				renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue)
+				renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, renvoNativeIntSize == 8 && renvoScalarComparisonIsUnsigned(g, ep, e, c0))
 				return true
 			}
 		}
@@ -654,7 +654,7 @@ func renvoAmd64EmitCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoEx
 	} else if c0 == '>' {
 		c0 = '<'
 	}
-	renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue)
+	renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, renvoNativeIntSize == 8 && renvoScalarComparisonIsUnsigned(g, ep, e, c0))
 	return true
 }
 func renvoAmd64EmitStringValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
@@ -950,7 +950,7 @@ func renvoAmd64EmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 		resultType := renvoInferParsedExprType(g, ep, idx)
 		result := renvoResolveType(meta, resultType)
 		renvoNonNil(result)
-		if result.kind != renvoTypeByte && result.kind != renvoTypeInt8 && result.kind != renvoTypeInt16 && result.kind != renvoTypeInt32 && result.kind != renvoTypeUint16 && result.kind != renvoTypeUint32 {
+		if result.kind != renvoTypeByte && result.kind != renvoTypeInt8 && result.kind != renvoTypeInt16 && result.kind != renvoTypeInt32 && result.kind != renvoTypeInt64 && result.kind != renvoTypeUint16 && result.kind != renvoTypeUint32 && result.kind != renvoTypeUint64 {
 			constResult := renvoEvalConstExpr(g, ep, idx)
 			if constResult.ok {
 				renvoAsmPrimaryImm(a, constResult.value)
@@ -1421,10 +1421,17 @@ func renvoAmd64EmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 		return false
 	}
 	if e.kind == renvoExprBinary {
+		opStart := int(renvoTokStart(p, e.tok))
+		opLen := int(renvoTokEnd(p, e.tok)) - opStart
+		op0 := renvo_runtime_UnsafeByteAt(p.src, opStart)
+		op1 := byte(0)
+		if opLen == 2 {
+			op1 = renvo_runtime_UnsafeByteAt(p.src, opStart+1)
+		}
 		if renvoBinaryUsesFloat(g, ep, e) {
 			return renvoEmitFloatBinaryExpr(g, ep, idx)
 		}
-		if renvoTok2Is(p, e.tok, '=', '=') || renvoTok2Is(p, e.tok, '!', '=') {
+		if opLen == 2 && (op0 == '=' || op0 == '!') && op1 == '=' {
 			leftType := renvoInferParsedExprType(g, ep, e.left)
 			leftResolved := renvoResolveType(meta, leftType)
 			renvoNonNil(leftResolved)
@@ -1432,7 +1439,7 @@ func renvoAmd64EmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 				return renvoEmitCompositeCompare(g, ep, e, leftType)
 			}
 		}
-		if renvoTok2Is(p, e.tok, '&', '&') || renvoTok2Is(p, e.tok, '|', '|') {
+		if opLen == 2 && (op0 == '&' && op1 == '&' || op0 == '|' && op1 == '|') {
 			falseLabel := renvoAsmNewLabel(a)
 			endLabel := renvoAsmNewLabel(a)
 			if !renvoEmitJumpIfFalse(g, ep, idx, falseLabel) {
@@ -1444,11 +1451,11 @@ func renvoAmd64EmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 			renvoAsmMarkLabel(a, endLabel)
 			return true
 		}
-		if renvoTok2Is(p, e.tok, '=', '=') || renvoTok2Is(p, e.tok, '!', '=') {
+		if opLen == 2 && (op0 == '=' || op0 == '!') && op1 == '=' {
 			leftType := renvoInferParsedExprType(g, ep, e.left)
 			rightType := renvoInferParsedExprType(g, ep, e.right)
 			if renvoTypeIsString(meta, leftType) || renvoTypeIsString(meta, rightType) {
-				notEqual := renvoTok2Is(p, e.tok, '!', '=')
+				notEqual := op0 == '!'
 				return renvoEmitStringCompare(g, ep, e.left, e.right, notEqual)
 			}
 		}
@@ -1460,23 +1467,26 @@ func renvoAmd64EmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 		immMultiply := false
 		immShift := 0
 		immDivide := false
-		if renvoTokCharIs(p, e.tok, '+') {
+		if opLen == 1 && op0 == '+' {
 			immOpcode, immGroup = 0x05, 0xc0
-		} else if renvoTokCharIs(p, e.tok, '-') {
+		} else if opLen == 1 && op0 == '-' {
 			immOpcode, immGroup = 0x2d, 0xe8
-		} else if renvoTokCharIs(p, e.tok, '*') {
+		} else if opLen == 1 && op0 == '*' {
 			immMultiply = true
-		} else if renvoTokCharIs(p, e.tok, '&') {
+		} else if opLen == 1 && op0 == '&' {
 			immOpcode, immGroup = 0x25, 0xe0
-		} else if renvoTokCharIs(p, e.tok, '|') {
+		} else if opLen == 1 && op0 == '|' {
 			immOpcode, immGroup = 0x0d, 0xc8
-		} else if renvoTokCharIs(p, e.tok, '^') {
+		} else if opLen == 1 && op0 == '^' {
 			immOpcode, immGroup = 0x35, 0xf0
-		} else if renvoTok2Is(p, e.tok, '<', '<') {
+		} else if opLen == 2 && op0 == '<' && op1 == '<' {
 			immShift = 0xe0
-		} else if renvoTok2Is(p, e.tok, '>', '>') {
+		} else if opLen == 2 && op0 == '>' && op1 == '>' {
 			immShift = 0xf8
-		} else if renvoTokCharIs(p, e.tok, '/') {
+			if renvoNativeIntSize == 8 && renvoExprHasUnsignedIntType(g, ep, e.left) {
+				immShift = 0xe8
+			}
+		} else if opLen == 1 && op0 == '/' {
 			immDivide = true
 		}
 		value := 0
@@ -1539,6 +1549,32 @@ func renvoAmd64EmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 			}
 		}
 		renvoAsmPopTertiary(a)
+		if renvoNativeIntSize == 8 && (op0 == '<' || op0 == '>') && !(opLen == 2 && op1 == op0) && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) && renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
+			renvoAmd64NormalizeExprPrimary(g, ep, idx)
+			return true
+		}
+		if renvoNativeIntSize == 8 && opLen == 2 && (op0 == '<' && op1 == '<' || op0 == '>' && op1 == '>') {
+			mode := 0
+			if op0 == '>' {
+				mode = 1
+				if renvoExprHasUnsignedIntType(g, ep, e.left) {
+					mode = 2
+				}
+			}
+			if renvoTargetArch == renvoArchAmd64 {
+				code := "\x48\x89\xc2\x48\x89\xc8\x48\x89\xd1\x48\xd3\xe0\x48\x83\xfa\x40\x48\x19\xc9\x48\x21\xc8"
+				if mode == 1 {
+					code = "\x48\x89\xc2\x48\x89\xc8\x48\x89\xd1\x48\xd3\xf8\x48\x89\xc1\x48\xc1\xf9\x3f\x48\x83\xfa\x40\x48\x0f\x43\xc1"
+				} else if mode == 2 {
+					code = "\x48\x89\xc2\x48\x89\xc8\x48\x89\xd1\x48\xd3\xe8\x48\x83\xfa\x40\x48\x19\xc9\x48\x21\xc8"
+				}
+				renvoAsmEmitText(a, code)
+			} else {
+				renvoAsmCallLabel(a, renvoEnsureNativeShiftHelper(g, mode))
+			}
+			renvoAmd64NormalizeExprPrimary(g, ep, idx)
+			return true
+		}
 		if !renvoEmitPrimaryTertiaryOp(g, e.tok) {
 			return false
 		}
