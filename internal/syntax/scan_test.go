@@ -161,7 +161,7 @@ func TestScanInvalidString(t *testing.T) {
 }
 
 func TestStringLiteralValue(t *testing.T) {
-	src := []byte("package main\nvar a = \"x\\ny\\x2fz\"\nvar b = `raw/path`\n")
+	src := []byte("package main\nvar a = \"x\\ny\\x2fz\"\nvar b = `raw/path`\nvar c = \"\\u0214\\U0001F642\\141\\a\\b\\f\\v\"\n")
 	toks := Scan(src)
 	found := 0
 	for i := 0; i < len(toks); i++ {
@@ -178,9 +178,28 @@ func TestStringLiteralValue(t *testing.T) {
 		if found == 1 && value != "raw/path" {
 			t.Fatalf("second value = %q, want raw/path", value)
 		}
+		if found == 2 && value != "Ȕ🙂a\a\b\f\v" {
+			t.Fatalf("third value = %q, want decoded Unicode, octal, and simple escapes", value)
+		}
 		found++
 	}
-	if found != 2 {
-		t.Fatalf("string count = %d, want 2", found)
+	if found != 3 {
+		t.Fatalf("string count = %d, want 3", found)
+	}
+}
+
+func TestScanRejectsInvalidStringEscapes(t *testing.T) {
+	invalid := []string{
+		"package main\nvar s = \"\\q\"\n",
+		"package main\nvar s = \"\\400\"\n",
+		"package main\nvar s = \"\\uD800\"\n",
+		"package main\nvar s = \"\\U00110000\"\n",
+	}
+	for _, src := range invalid {
+		var scanner Scanner
+		scanner.Scan([]byte(src))
+		if scanner.Ok {
+			t.Fatalf("scanner accepted invalid string escape in %q", src)
+		}
 	}
 }
