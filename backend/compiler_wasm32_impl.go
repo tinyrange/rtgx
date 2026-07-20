@@ -1689,9 +1689,13 @@ func renvoWasm32AppendInstr(out []byte, ins *renvoWasm32Instr, nextIndex int, ta
 	return renvoWasmBr(out, loopDepth)
 }
 
-func renvoWasm32AppendDirectArgs(out []byte) []byte {
+func renvoWasm32AppendDirectArgs(out []byte, frameSize int) []byte {
 	out = renvoWasmLocalGet(out, renvoWasm32LocalSp)
 	out = renvoWasmLocalGet(out, renvoWasm32LocalFp)
+	if frameSize > 0 {
+		out = renvoWasmAppendI32Const(out, frameSize)
+		out = append(out, 0x6b)
+	}
 	out = renvoWasmLocalGet(out, renvoWasm32LocalRax)
 	out = renvoWasmLocalGet(out, renvoWasm32LocalRdx)
 	out = renvoWasmLocalGet(out, renvoWasm32LocalRcx)
@@ -1749,7 +1753,7 @@ func renvoWasm32MarkFunc(g *renvoLinearGen, fnIndex int) {
 }
 
 func renvoWasm32AppendDirectCall(out []byte, funcIndex int, frameSize int) []byte {
-	out = renvoWasm32AppendDirectArgs(out)
+	out = renvoWasm32AppendDirectArgs(out, frameSize)
 	out = renvoWasmAppendCall(out, funcIndex)
 	out = renvoWasmLocalSet(out, renvoWasm32LocalRcx)
 	out = renvoWasmLocalSet(out, renvoWasm32LocalRdx)
@@ -1757,7 +1761,7 @@ func renvoWasm32AppendDirectCall(out []byte, funcIndex int, frameSize int) []byt
 	return out
 }
 
-func renvoWasm32AppendInstrDirect(out []byte, ins *renvoWasm32Instr, nextIndex int, targetIndex int, loopDepth int, callStackBase int, frameSize int, hasFrame bool, routinePcs []int) []byte {
+func renvoWasm32AppendInstrDirect(out []byte, ins *renvoWasm32Instr, nextIndex int, targetIndex int, loopDepth int, callStackBase int, frameSize int, routinePcs []int, symbolPcs []int) []byte {
 	op := int(ins.op)
 	argA := int(ins.a)
 	argB := int(ins.b)
@@ -1773,7 +1777,11 @@ func renvoWasm32AppendInstrDirect(out []byte, ins *renvoWasm32Instr, nextIndex i
 			out = renvoWasm32AppendInstr(out, ins, nextIndex, targetIndex, loopDepth, loopDepth+1, callStackBase, frameSize)
 			return out
 		}
-		out = renvoWasm32AppendDirectCall(out, renvoWasm32VmFuncBase+routineIndex, frameSize)
+		callFrameSize := 0
+		if argA != 0 && renvoWasm32SortedPcContains(symbolPcs, argA) {
+			callFrameSize = frameSize
+		}
+		out = renvoWasm32AppendDirectCall(out, renvoWasm32VmFuncBase+routineIndex, callFrameSize)
 		if argB > 6 {
 			// Direct wasm calls pass SP by value; drop caller-owned stack args.
 			out = renvoWasmLocalGet(out, renvoWasm32LocalSp)
@@ -1792,12 +1800,6 @@ func renvoWasm32AppendInstrDirect(out []byte, ins *renvoWasm32Instr, nextIndex i
 		out = renvoWasmAppendI32Const(out, callStackBase)
 		out = append(out, 0x46)
 		out = renvoWasmAppend2(out, 0x04, 0x40)
-		if hasFrame {
-			out = renvoWasmLocalGet(out, renvoWasm32LocalFp)
-			out = renvoWasmAppendI32Const(out, frameSize)
-			out = append(out, 0x6a)
-			out = renvoWasmLocalSet(out, renvoWasm32LocalFp)
-		}
 		out = renvoWasm32AppendStateReturn(out)
 		out = append(out, 0x05)
 		out = renvoWasmLocalGet(out, renvoWasm32LocalCsp)
@@ -1979,7 +1981,18 @@ func renvoWasm32RoutineEndPc(startPc int, codeLen int, symbolPcs []int, code []b
 	return renvoWasm32FirstRetAfter(code, instrPcs, startPc, nextSymbol)
 }
 
-func renvoWasm32AppendDirectRoutineBody(body []byte, instrs []renvoWasm32Instr, codeLen int, routinePcs []int, callStackBase int, frameSize int, hasFrame bool) []byte {
+func renvoWasm32RoutineFrameSize(instrs []renvoWasm32Instr) int {
+	frameSize := 0
+	for i := 0; i < len(instrs); i++ {
+		ins := &instrs[i]
+		if (ins.op == renvoWasm32OpLoadStack || ins.op == renvoWasm32OpStoreStack || ins.op == renvoWasm32OpLeaStack) && ins.b > frameSize {
+			frameSize = ins.b
+		}
+	}
+	return renvoAlignValue(frameSize, 16)
+}
+
+func renvoWasm32AppendDirectRoutineBody(body []byte, instrs []renvoWasm32Instr, codeLen int, routinePcs []int, symbolPcs []int, callStackBase int, frameSize int) []byte {
 	blockStarts := renvoWasm32BuildBlockStartsLocal(instrs)
 	instrBlockIndex := renvoWasm32BuildInstrBlockIndex(blockStarts, len(instrs))
 	body = renvoWasmAppendU32(body, 1)
@@ -1989,12 +2002,6 @@ func renvoWasm32AppendDirectRoutineBody(body []byte, instrs []renvoWasm32Instr, 
 	body = renvoWasmLocalSet(body, renvoWasm32LocalPc)
 	body = renvoWasmAppendI32Const(body, callStackBase)
 	body = renvoWasmLocalSet(body, renvoWasm32LocalCsp)
-	if hasFrame {
-		body = renvoWasmLocalGet(body, renvoWasm32LocalFp)
-		body = renvoWasmAppendI32Const(body, frameSize)
-		body = append(body, 0x6b)
-		body = renvoWasmLocalSet(body, renvoWasm32LocalFp)
-	}
 	if len(blockStarts) == 0 {
 		body = renvoWasm32AppendStateResults(body)
 		body = append(body, 0x0b)
@@ -2032,7 +2039,7 @@ func renvoWasm32AppendDirectRoutineBody(body []byte, instrs []renvoWasm32Instr, 
 				continue
 			}
 			if i+1 < end {
-				body = renvoWasm32AppendInstrDirect(body, ins, 0, 0, -1, callStackBase, frameSize, hasFrame, routinePcs)
+				body = renvoWasm32AppendInstrDirect(body, ins, 0, 0, -1, callStackBase, frameSize, routinePcs, symbolPcs)
 			} else {
 				nextIndex := renvoWasm32InstrIndexForPcLocal(instrs, len(instrs), int(ins.next))
 				nextBlock := renvoWasm32BlockForInstrFast(instrBlockIndex, nextIndex)
@@ -2046,7 +2053,7 @@ func renvoWasm32AppendDirectRoutineBody(body []byte, instrs []renvoWasm32Instr, 
 					targetIndex := renvoWasm32InstrIndexForPcLocal(instrs, len(instrs), targetPc)
 					targetBlock = renvoWasm32BlockForInstrFast(instrBlockIndex, targetIndex)
 				}
-				body = renvoWasm32AppendInstrDirect(body, ins, nextBlock, targetBlock, blockIndex, callStackBase, frameSize, hasFrame, routinePcs)
+				body = renvoWasm32AppendInstrDirect(body, ins, nextBlock, targetBlock, blockIndex, callStackBase, frameSize, routinePcs, symbolPcs)
 			}
 			i++
 		}
@@ -2071,7 +2078,7 @@ func renvoWasm32AppendDirectStartBody(body []byte, topFunc int, exprStackBase in
 	body = renvoWasmLocalSet(body, renvoWasm32LocalFp)
 	body = renvoWasmAppendI32Const(body, callStackBase)
 	body = renvoWasmLocalSet(body, renvoWasm32LocalCsp)
-	body = renvoWasm32AppendDirectArgs(body)
+	body = renvoWasm32AppendDirectArgs(body, 0)
 	body = renvoWasmAppendCall(body, topFunc)
 	body = renvoWasmLocalSet(body, renvoWasm32LocalRcx)
 	body = renvoWasmLocalSet(body, renvoWasm32LocalRdx)
@@ -2148,7 +2155,6 @@ func renvoWasm32ExportSectionFull(browserStepIndex int) []byte {
 }
 
 func renvoWasm32AppendCodeSectionDirect(out []byte, a *renvoAsm, instrPcs []int, routinePcs []int, symbolPcs []int, codeLen int, callStackBase int, frameTop int, exprStackBase int, browserStepRoutine int) []byte {
-	frameSize := 6144
 	out = append(out, 10)
 	lenAt := len(out)
 	out = renvoWasmAppendU32Fixed5(out, 0)
@@ -2169,8 +2175,7 @@ func renvoWasm32AppendCodeSectionDirect(out []byte, a *renvoAsm, instrPcs []int,
 		startIndex := renvoWasm32PcLowerBound(instrPcs, startPc)
 		endIndex := renvoWasm32PcLowerBound(instrPcs, endPc)
 		routineInstrPcs := instrPcs[startIndex:endIndex]
-		hasFrame := startPc != 0 && renvoWasm32SortedPcContains(symbolPcs, startPc)
-		out = renvoWasm32AppendDirectRoutine(out, a.code, routineInstrPcs, codeLen, routinePcs, callStackBase, frameSize, hasFrame)
+		out = renvoWasm32AppendDirectRoutine(out, a.code, routineInstrPcs, codeLen, routinePcs, symbolPcs, callStackBase)
 	}
 	if browserStepRoutine >= 0 {
 		stepLenAt := len(out)
@@ -2195,7 +2200,7 @@ func renvoWasm32AppendBrowserStepBody(body []byte, stepFunc int, exprStackBase i
 	body = renvoWasmLocalSet(body, renvoWasm32LocalFp)
 	body = renvoWasmAppendI32Const(body, callStackBase)
 	body = renvoWasmLocalSet(body, renvoWasm32LocalCsp)
-	body = renvoWasm32AppendDirectArgs(body)
+	body = renvoWasm32AppendDirectArgs(body, 0)
 	body = renvoWasmAppendCall(body, stepFunc)
 	body = append(body, 0x1a, 0x1a, 0x1a, 0x0b)
 	return body
@@ -2239,15 +2244,16 @@ func renvoWasm32EnsureAdditionalCapacity(out []byte, additional int) []byte {
 	return next
 }
 
-func renvoWasm32AppendDirectRoutine(out []byte, code []byte, instrPcs []int, codeLen int, routinePcs []int, callStackBase int, frameSize int, hasFrame bool) []byte {
+func renvoWasm32AppendDirectRoutine(out []byte, code []byte, instrPcs []int, codeLen int, routinePcs []int, symbolPcs []int, callStackBase int) []byte {
 	out = renvoWasm32EnsureAdditionalCapacity(out, len(instrPcs)*16+renvoWasm32RoutineBodyCapacity)
 	mark := renvo_runtime_ArenaMark()
 	instrs := renvoWasm32DecodePcRange(code, instrPcs)
+	frameSize := renvoWasm32RoutineFrameSize(instrs)
 	oldCap := cap(out)
 	lenAt := len(out)
 	out = renvoWasmAppendU32Fixed5(out, 0)
 	bodyStart := len(out)
-	out = renvoWasm32AppendDirectRoutineBody(out, instrs, codeLen, routinePcs, callStackBase, frameSize, hasFrame)
+	out = renvoWasm32AppendDirectRoutineBody(out, instrs, codeLen, routinePcs, symbolPcs, callStackBase, frameSize)
 	out = renvoWasmCompactU32Fixed5(out, lenAt, len(out)-bodyStart)
 	if cap(out) == oldCap {
 		renvo_runtime_ArenaReset(mark)
