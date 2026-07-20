@@ -172,6 +172,8 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
 	out := make([]int32, 0, count*renvoTokenStride)
 	start := 0
 	line := 0
+	discardStart := 0
+	nextDiscard := 65536
 	for i := 0; i < count; i++ {
 		kind := renvoUnitReadVar(&r)
 		delta := renvoUnitReadVar(&r)
@@ -201,10 +203,19 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
 		out[base] = int32(kind | line<<8 | charBits)
 		out[base+1] = int32(start)
 		out[base+2] = int32(start + size)
+		if r.pos >= nextDiscard {
+			// Token records are decoded in order and never revisited. Retire
+			// consumed pages while the decoded table grows so both forms do not
+			// contribute to the self-host compiler's peak resident set.
+			renvo_runtime_ArenaDiscardBytes(data[discardStart:r.pos])
+			discardStart = r.pos - 4096
+			nextDiscard = r.pos + 65536
+		}
 	}
 	if r.pos != r.end {
 		return nil, false
 	}
+	renvo_runtime_ArenaDiscardBytes(data[discardStart:r.pos])
 	return out, true
 }
 
