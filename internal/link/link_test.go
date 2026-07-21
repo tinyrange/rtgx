@@ -66,6 +66,35 @@ func Value() int { return answer }
 	}
 }
 
+func TestLinkBuildTransientOmitsIncrementalPackageMetadata(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func main() {}
+`)},
+	})
+	linked := LinkBuildCoreTransient(result)
+	if !linked.Ok {
+		t.Fatalf("transient LinkBuild failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	decoded, err := wireunit.Unmarshal(linked.Data)
+	if err != nil {
+		t.Fatalf("transient linked unit did not decode: %v", err)
+	}
+	if len(decoded.Packages) != 0 {
+		t.Fatalf("transient package metadata = %#v, want none", decoded.Packages)
+	}
+
+	retained := LinkBuildCore(result)
+	if !retained.Ok {
+		t.Fatalf("persistent LinkBuild failed: err=%d pkg=%d", retained.Error, retained.ErrorPackage)
+	}
+	if len(retained.Program.Packages) != len(result.Units) {
+		t.Fatalf("persistent package metadata count = %d, want %d", len(retained.Program.Packages), len(result.Units))
+	}
+}
+
 func TestLinkCanonicalizesInterpretedStringEscapes(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
@@ -156,6 +185,28 @@ func appMain() int { return lib.Value() }
 	}
 	if program.Tokens[len(program.Tokens)-1].KindLine&255 != unit.TokenEOF {
 		t.Fatalf("last token kind = %d, want EOF", program.Tokens[len(program.Tokens)-1].KindLine&255)
+	}
+}
+
+func TestLinkBuildCompactsLargeSourceLineGapsForUnitEncoding(t *testing.T) {
+	// Stay below the scanner's explicit 65,535-line source limit. The gap is
+	// still large enough to verify that linking compacts source line numbers.
+	source := append([]byte("package main\n"), bytes.Repeat([]byte{'\n'}, 60000)...)
+	source = append(source, []byte("func appMain() int { return 0 }\n")...)
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: source},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuild failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	_, err := wireunit.Unmarshal(linked.Data)
+	if err != nil {
+		t.Fatalf("linked unit with large source line gap did not decode: %v", err)
+	}
+	if got := linked.Program.Tokens[len(linked.Program.Tokens)-1].KindLine >> 8; got >= 100 {
+		t.Fatalf("linked token lines were not compacted: EOF line %d", got)
 	}
 }
 
@@ -672,6 +723,36 @@ func appMain() int {
 	}
 	if bytes.Contains(linked.Program.Text, []byte("control.Paint(&Surface{})")) {
 		t.Fatalf("callback field call was not lowered:\n%s", linked.Program.Text)
+	}
+}
+
+func TestLinkBuildCoreMethodWinsOverPromotedCallbackField(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type Handler func()
+type Control struct { dismiss Handler }
+type Menu struct { Control; open bool }
+
+func (menu *Menu) dismiss() { menu.open = false }
+
+func main() {
+	menu := &Menu{open: true}
+	menu.Control.dismiss = menu.dismiss
+	menu.dismiss()
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte("menu.Control.dismiss = Handler{kind: 1")) {
+		t.Fatalf("explicit callback assignment was not lowered:\n%s", linked.Program.Text)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte("menu.dismiss()")) || bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(&menu.dismiss)")) {
+		t.Fatalf("direct method lost selector precedence over promoted field:\n%s", linked.Program.Text)
 	}
 }
 
