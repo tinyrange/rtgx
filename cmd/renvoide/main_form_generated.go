@@ -14,19 +14,31 @@ func (f *MainForm) initializeComponent(root string) {
 	codeFont := ide.NewUIFont()
 
 	f.appBar = newWorkspaceAppBar(uiFont)
+	f.appBar.SetAccessibilityID("app-bar")
 	f.appBar.SetTarget(f.selectedTarget)
 	f.appBar.OpenTargets = f.toggleTargetMenu
 	f.targetMenu = newWorkspaceTargetMenu(uiFont, workspaceTargets())
+	f.targetMenu.SetAccessibilityID("target-menu")
 	f.targetMenu.Select = f.selectBuildTarget
 	f.explorerFrame = newWorkspaceExplorerFrame(uiFont)
+	f.explorerFrame.SetAccessibilityID("explorer-pane")
 	f.editorFrame = newWorkspaceEditorFrame(uiFont)
+	f.editorFrame.SetAccessibilityID("editor-pane")
 	f.designer = newWorkspaceDesigner(uiFont)
+	f.designer.SetAccessibilityID("form-designer")
+	f.designer.SetAccessibilityName("Form designer")
 	f.inspector = newWorkspaceInspector(uiFont)
+	f.inspector.SetAccessibilityID("properties")
+	f.inspector.SetAccessibilityName("Properties")
 	f.output = newWorkspaceOutput(uiFont)
+	f.output.SetAccessibilityID("build-output")
 	f.appBar.Build = f.buildProject
 	f.appBar.Run = f.runProject
 	f.menuBar = forms.NewMenuBar()
+	f.menuBar.SetAccessibilityID("main-menu")
 	f.menuBar.SetFont(uiFont)
+	f.menuBar.SetBounds(rect(0, 0, 168, 28))
+	f.menuBar.SetDock(forms.DockTop)
 	fileMenu := forms.NewMenu("File")
 	newProjectItem := forms.NewMenuItem("New Project...")
 	newProjectItem.SetShortcut(forms.Shortcut{Key: graphics.KeyN, Modifiers: graphics.ModifierShift, Primary: true, Text: "Ctrl/Cmd+Shift+N"})
@@ -59,7 +71,23 @@ func (f *MainForm) initializeComponent(root string) {
 	runItem.Activate = f.runProject
 	buildMenu.Add(runItem)
 	f.menuBar.Add(buildMenu)
+	viewMenu := forms.NewMenu("View")
+	f.lightThemeItem = forms.NewMenuItem("Light Theme")
+	f.lightThemeItem.SetChecked(true)
+	f.lightThemeItem.Activate = f.useLightTheme
+	viewMenu.Add(f.lightThemeItem)
+	f.darkThemeItem = forms.NewMenuItem("Dark Theme")
+	f.darkThemeItem.SetChecked(false)
+	f.darkThemeItem.Activate = f.useDarkTheme
+	viewMenu.Add(f.darkThemeItem)
+	f.menuBar.Add(viewMenu)
 	f.Form.SetMenuBar(f.menuBar)
+	f.statusBar = forms.NewStatusBar()
+	f.statusBar.SetAccessibilityID("main-status")
+	f.statusBar.SetFont(uiFont)
+	f.statusBar.SetText("Ready")
+	f.statusBar.SetBounds(rect(0, 0, 320, 24))
+	f.statusBar.SetDock(forms.DockBottom)
 	f.editorFrame.ShowDesigner = f.showDesigner
 	f.designer.ShowCode = f.showCode
 	f.designer.SetDesign(&f.design)
@@ -72,10 +100,12 @@ func (f *MainForm) initializeComponent(root string) {
 	f.inspector.CreateEvent = f.createDesignerEvent
 
 	f.explorer = ide.NewExplorerControl(ide.OpenExplorer(root))
+	f.explorer.SetAccessibilityID("project-explorer")
 	f.explorer.SetFont(uiFont)
 	f.explorer.OpenFile = f.explorerOpenFile
 
 	f.editor = ide.NewEditorControl(ide.NewDocument(nil))
+	f.editor.SetAccessibilityID("code-editor")
 	f.editor.SetFont(codeFont)
 	f.editor.Save = f.saveCurrentFile
 	f.editor.Changed = f.editorChanged
@@ -93,9 +123,11 @@ func (f *MainForm) initializeComponent(root string) {
 	f.Add(&f.editor.Control)
 	f.Add(&f.targetMenu.Control)
 	f.Add(&f.menuBar.Control)
+	f.Add(&f.statusBar.Control)
 	f.designer.SetVisible(false)
 	f.inspector.SetVisible(false)
 	f.targetMenu.SetVisible(false)
+	f.setDarkTheme(false)
 	f.formResize()
 }
 

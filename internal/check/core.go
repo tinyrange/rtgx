@@ -269,6 +269,7 @@ type CoreScope struct {
 type CoreScopeName struct {
 	Kind  int
 	Token int
+	Hash  int
 }
 
 func resolutionCapacitiesCore(tokens int) (int, int) {
@@ -314,6 +315,7 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 		dot := token.KindLine&255 == syntax.TokenOperator && token.End == token.Start+1 && file.Src[token.Start] == '.'
 		if i > start && i+1 < end && i+1 < len(file.Tokens) && dot &&
 			file.Tokens[i-1].KindLine&255 == syntax.TokenIdent && file.Tokens[i+1].KindLine&255 == syntax.TokenIdent &&
+			!(i >= start+2 && tokenTextIs(file, i-2, ".")) &&
 			!(file.Tokens[i-1].End == file.Tokens[i-1].Start+1 && file.Src[file.Tokens[i-1].Start] == '_') &&
 			!(file.Tokens[i+1].End == file.Tokens[i+1].Start+1 && file.Src[file.Tokens[i+1].Start] == '_') {
 			selector := resolveImportSelectorCore(fileIndex, info, checked, scope, file, i-1, i, i+1)
@@ -593,7 +595,7 @@ func resolveImportSelectorTypeRefCore(fileIndex int, info PackageInfo, checked [
 }
 
 func lookupScopeTokenNameCore(scope CoreScope, file *syntax.File, tok int) int {
-	if tok < 0 || tok >= len(file.Tokens) {
+	if len(scope.Names) == 0 || tok < 0 || tok >= len(file.Tokens) {
 		return -1
 	}
 	token := file.Tokens[tok]
@@ -601,7 +603,14 @@ func lookupScopeTokenNameCore(scope CoreScope, file *syntax.File, tok int) int {
 	if size < 0 || token.Start < 0 || token.End > len(file.Src) {
 		return -1
 	}
-	for i := 0; i < len(scope.Names); i++ {
+	hash := hashCoreToken(file.Src, token.Start, size)
+	// References overwhelmingly resolve to parameters and locals declared near
+	// the point of use. Search newest declarations first so large compiler
+	// functions do not rescan their full scope for every identifier.
+	for i := len(scope.Names) - 1; i >= 0; i-- {
+		if scope.Names[i].Hash != hash {
+			continue
+		}
 		nameTok := scope.Names[i].Token
 		if nameTok < 0 || nameTok >= len(file.Tokens) {
 			continue
@@ -899,9 +908,11 @@ func addCoreScopeName(scope *CoreScope, file syntax.File, tok int, kind int, rej
 	if tok < 0 || tok >= len(file.Tokens) || tokenTextIs(&file, tok, "_") {
 		return true
 	}
+	token := file.Tokens[tok]
+	hash := hashCoreToken(file.Src, token.Start, token.End-token.Start)
 	if rejectDup {
 		for i := 0; i < len(scope.Names); i++ {
-			if !coreTokensEqual(&file, scope.Names[i].Token, tok) {
+			if scope.Names[i].Hash != hash || !coreTokensEqual(&file, scope.Names[i].Token, tok) {
 				continue
 			}
 			if labelsOnly {
@@ -918,7 +929,7 @@ func addCoreScopeName(scope *CoreScope, file syntax.File, tok int, kind int, rej
 	if variable {
 		kind = NameVariable
 	}
-	scope.Names = append(scope.Names, CoreScopeName{Kind: kind, Token: tok})
+	scope.Names = append(scope.Names, CoreScopeName{Kind: kind, Token: tok, Hash: hash})
 	return true
 }
 

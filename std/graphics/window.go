@@ -25,6 +25,7 @@ const (
 	EventKeyUp
 	EventTextInput
 	EventTimer
+	EventAccessibilityAction
 )
 
 type Modifiers int

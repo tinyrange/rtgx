@@ -31,5 +31,16 @@ func renvoBrowserStep() {
 		}
 		app.dispatch(event)
 	}
+	app.syncAccessibility()
 	app.paint()
+}
+
+func (a *App) syncAccessibility() {
+	if a == nil || a.Window == nil || a.Form == nil {
+		return
+	}
+	update, ok := a.Form.TakeAccessibilityUpdate()
+	if ok {
+		a.Window.PresentAccessibility(encodeAccessibilityUpdate(update))
+	}
 }

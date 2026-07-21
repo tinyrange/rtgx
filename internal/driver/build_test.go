@@ -1,10 +1,12 @@
 package driver
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
 	"renvo.dev/backend/unit"
+	frontendbuild "renvo.dev/internal/build"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/pipeline"
 )
@@ -26,6 +28,19 @@ func TestBuildUnitFromDriverOptions(t *testing.T) {
 	}
 	if decoded.Package != "main" || len(decoded.Funcs) != 2 {
 		t.Fatalf("decoded unit = package %q funcs %d", decoded.Package, len(decoded.Funcs))
+	}
+}
+
+func TestOneShotEmitUnitPreservesCanonicalPackageMetadata(t *testing.T) {
+	args := []string{"-emit-unit", "-t", "linux/amd64", "-o", "program.unit", "./cmd/app"}
+	files := driverTestFiles()
+	want := BuildUnit(args, "/repo/case", "/std", files)
+	got := buildFromFSOneShotCompactWithModuleCache(args, "/repo/case", "/std", "", memorySourceFS{files: files})
+	if !want.Ok || !got.Ok {
+		t.Fatalf("persistent ok=%v, one-shot ok=%v", want.Ok, got.Ok)
+	}
+	if !bytes.Equal(got.Unit, want.Unit) {
+		t.Fatal("one-shot -emit-unit output differs from canonical persistent unit")
 	}
 }
 
@@ -134,6 +149,32 @@ func TestBuildUnitReportsStructuredParserDiagnostic(t *testing.T) {
 	})
 	if result.Ok || result.Diagnostic.Code != "RENVO-PARSE-001" || result.Diagnostic.Path != "/repo/case/cmd/app/main.go" || result.Diagnostic.Line < 1 || result.Diagnostic.Column < 1 {
 		t.Fatalf("parser diagnostic = %#v", result.Diagnostic)
+	}
+}
+
+func TestEmbeddedBuildCacheValidatesSelectedSourceContent(t *testing.T) {
+	embeddedBuildCacheValid = false
+	frontendbuild.InitializePackageProgramCache()
+	files := driverTestFiles()
+	files = append(files, load.SourceFile{Path: "/repo/case/app", Src: []byte("executable")})
+	args := []string{"-t", "darwin/arm64", "-s", "-o", "/repo/case/app", "./cmd/app"}
+	first := buildFromFSCompact(args, "/repo/case", "/std", memorySourceFS{files: files})
+	if !first.Ok || first.CacheHit {
+		t.Fatalf("cold compact build = %#v", first)
+	}
+	rememberEmbeddedBuild(first)
+	second := buildFromFSCompact(args, "/repo/case", "/std", memorySourceFS{files: files})
+	if !second.Ok || !second.CacheHit {
+		t.Fatalf("unchanged compact build = %#v", second)
+	}
+	for i := 0; i < len(files); i++ {
+		if files[i].Path == "/repo/case/cmd/app/main.go" {
+			files[i].Src = []byte("package main\nfunc appMain() int { return 1 }\n")
+		}
+	}
+	changed := buildFromFSCompact(args, "/repo/case", "/std", memorySourceFS{files: files})
+	if !changed.Ok || changed.CacheHit {
+		t.Fatalf("changed compact build = %#v", changed)
 	}
 }
 

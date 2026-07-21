@@ -11,6 +11,8 @@ import (
 
 type RenvoFS struct{}
 
+func (RenvoFS) PathExists(path string) bool { return renvoPathExists(path) }
+
 const renvoCommandDiagnosticCapacity = 8192
 
 // Keep one capture buffer outside per-build arena marks. A failed frontend can
@@ -49,16 +51,14 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 	if resetArena {
 		mark = arena.Mark()
 	}
-	built := buildFromFSCompactWithModuleCache(commandArgs, renvoWorkDir(env), renvoStdRoot(args, env), renvoModuleCache(env), RenvoFS{})
+	built := buildFromFSOneShotCompactWithModuleCache(commandArgs, renvoWorkDir(env), renvoStdRoot(args, env), renvoModuleCache(env), RenvoFS{})
 	if !built.Ok {
 		return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer, built.Diagnostic, resetArena, mark)
 	}
 	unit := built.Unit
 	target := built.Options.Target
 	output := built.Options.Output
-	strip := built.Options.Strip
-	windowsGUI := built.Options.WindowsGUI
-	arenaSize := backendArenaSize(target, built.Options.ArenaSize)
+	arenaSize := backendArenaSize(target, built.Options.Tags, built.Options.ArenaSize)
 	if built.Options.EmitUnit {
 		if output == "-" {
 			print(string(unit))
@@ -79,13 +79,13 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 		backendMark := mark
 		remainder := backendMark % 4096
 		if remainder != 0 {
-			backendMark = backendMark + 4096 - remainder
+			backendMark += 4096 - remainder
 		}
 		arena.Reset(backendMark)
 	}
 	virtualTarget := target
 	target = backendTarget(target)
-	ok := backendbridge.CompileUnitToOutputStripEnv(unit, target, output, strip, windowsGUI, arenaSize, args, env)
+	ok := backendbridge.CompileUnitToOutputStripEnv(unit, target, output, built.Options.Strip, built.Options.WindowsGUI, arenaSize, args, env)
 	if ok && virtualTarget == "browser/wasm32" {
 		wasm, readErr := os.ReadFile(output)
 		if readErr != nil || os.WriteFile(output, PackageBrowserHTML(wasm), 0644) != nil {
@@ -215,50 +215,10 @@ func (fs RenvoFS) ReadFile(path string) ([]byte, bool) {
 	if fd < 0 {
 		return nil, false
 	}
-	if !renvoFrontendCanResetArena() {
-		out := make([]byte, 4096)
-		used := 0
-		for {
-			if used == len(out) {
-				next := make([]byte, len(out)*2)
-				copy(next, out)
-				out = next
-			}
-			n := read(fd, out[used:], -1)
-			if n < 0 {
-				close(fd)
-				return nil, false
-			}
-			if n == 0 {
-				break
-			}
-			used += n
-		}
-		close(fd)
-		return out[:used], true
-	}
-	arenaStart := arena.Mark()
-	probe := make([]byte, 4096)
-	size := 0
-	for {
-		n := read(fd, probe, -1)
-		if n < 0 {
-			close(fd)
-			arena.Reset(arenaStart)
-			return nil, false
-		}
-		if n == 0 {
-			break
-		}
-		size += n
-	}
-	close(fd)
-	arena.Reset(arenaStart)
-	fd = open(renvoPathCString(path), 0)
-	if fd < 0 {
-		return nil, false
-	}
-	out := make([]byte, size+1)
+	// Most compiler source files fit in 32 KiB. Starting there avoids repeated
+	// arena copies while loading a package, and the transient build releases the
+	// modest unused tail after lowering.
+	out := make([]byte, 32768)
 	used := 0
 	for {
 		if used == len(out) {
@@ -269,7 +229,6 @@ func (fs RenvoFS) ReadFile(path string) ([]byte, bool) {
 		n := read(fd, out[used:], -1)
 		if n < 0 {
 			close(fd)
-			arena.Reset(arenaStart)
 			return nil, false
 		}
 		if n == 0 {
