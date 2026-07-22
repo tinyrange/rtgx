@@ -48,6 +48,11 @@ func BuildUnit(args []string, workDir string, stdRoot string, files []load.Sourc
 		result.Sources = SourceResult{Error: sourceError, ErrorPath: errorPath}
 		return buildFail(result, BuildErrSource, "", errorPath, -1, -1, -1, -1)
 	}
+	options = resolveModuleLicense(options, filtered)
+	result.Options = options
+	if !options.Ok {
+		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
+	}
 	rootArg := options.Package
 	if len(options.Files) > 0 {
 		rootArg = load.DirPath(load.JoinPath(workDir, options.Files[0]))
@@ -100,6 +105,11 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 	if !sources.Ok {
 		return buildFail(result, BuildErrSource, "", sources.ErrorPath, -1, -1, -1, -1)
 	}
+	options = resolveModuleLicense(options, sources.Files)
+	result.Options = options
+	if !options.Ok {
+		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
+	}
 	rootArg := options.Package
 	if len(options.Files) > 0 {
 		rootArg = sources.Root.Dir
@@ -147,6 +157,11 @@ func buildFromFS(args []string, workDir string, stdRoot string, moduleCache stri
 	if !sources.Ok {
 		return buildFail(result, BuildErrSource, "", sources.ErrorPath, -1, -1, -1, -1)
 	}
+	options = resolveModuleLicense(options, sources.Files)
+	result.Options = options
+	if !options.Ok {
+		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
+	}
 	if compact && !options.EmitUnit {
 		result.CacheKeyA, result.CacheKeyB = embeddedBuildFingerprint(workDir, options, sources.Files)
 		if embeddedBuildCacheValid && result.CacheKeyA == embeddedBuildCacheKeyA && result.CacheKeyB == embeddedBuildCacheKeyB {
@@ -193,6 +208,7 @@ func embeddedBuildFingerprint(workDir string, options Options, files []load.Sour
 	a, b = embeddedBuildHashString(a, b, workDir)
 	a, b = embeddedBuildHashString(a, b, options.Target)
 	a, b = embeddedBuildHashString(a, b, options.Output)
+	a, b = embeddedBuildHashString(a, b, options.ModuleLicense)
 	a = embeddedBuildHashInt(a, options.ArenaSize)
 	b = embeddedBuildHashIntB(b, options.ArenaSize)
 	if options.Strip {
@@ -222,6 +238,79 @@ func embeddedBuildFingerprint(workDir string, options Options, files []load.Sour
 		b = embeddedBuildHashIntB(b, len(files[i].Src))
 	}
 	return a, b
+}
+
+func resolveModuleLicense(options Options, files []load.SourceFile) Options {
+	if options.Mode != ModeKernelModule {
+		return options
+	}
+	license := ""
+	for i := 0; i < len(files); i++ {
+		value, found, valid, conflict := sourceModuleLicense(files[i].Src)
+		if conflict {
+			return parseFail(options, ParseErrConflictingModuleLicense, files[i].Path, -1)
+		}
+		if !valid {
+			return parseFail(options, ParseErrInvalidModuleLicense, files[i].Path, -1)
+		}
+		if !found {
+			continue
+		}
+		if license != "" && license != value {
+			return parseFail(options, ParseErrConflictingModuleLicense, files[i].Path, -1)
+		}
+		license = value
+	}
+	if license != "" {
+		options.ModuleLicense = license
+	}
+	return options
+}
+
+func sourceModuleLicense(src []byte) (string, bool, bool, bool) {
+	prefix := "// renvo:module-license "
+	license := ""
+	found := false
+	for start := 0; start < len(src); {
+		end := start
+		for end < len(src) && src[end] != '\n' {
+			end++
+		}
+		lineStart := start
+		for lineStart < end && (src[lineStart] == ' ' || src[lineStart] == '\t') {
+			lineStart++
+		}
+		if end-lineStart >= len(prefix) {
+			match := true
+			for i := 0; i < len(prefix); i++ {
+				if src[lineStart+i] != prefix[i] {
+					match = false
+				}
+			}
+			if match {
+				valueStart := lineStart + len(prefix)
+				valueEnd := end
+				for valueEnd > valueStart && (src[valueEnd-1] == ' ' || src[valueEnd-1] == '\t' || src[valueEnd-1] == '\r') {
+					valueEnd--
+				}
+				if valueEnd == valueStart || valueEnd-valueStart > 64 {
+					return "", true, false, false
+				}
+				for i := valueStart; i < valueEnd; i++ {
+					if src[i] < 32 || src[i] > 126 {
+						return "", true, false, false
+					}
+				}
+				value := string(src[valueStart:valueEnd])
+				if found && value != license {
+					return "", true, true, true
+				}
+				license, found = value, true
+			}
+		}
+		start = end + 1
+	}
+	return license, found, true, false
 }
 
 func embeddedBuildImmutableSource(path string) bool {

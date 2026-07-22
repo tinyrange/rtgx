@@ -26,6 +26,7 @@ func TestArenaDefaultsAreTargetAware(t *testing.T) {
 		want   int
 	}{
 		{target: "linux/amd64", want: renvoArenaSize64BitHosted},
+		{target: "linux-kernel/amd64", want: renvoArenaSizeKernelModule},
 		{target: "linux/386", want: renvoArenaSize32BitHosted},
 		{target: "linux/aarch64", want: renvoArenaSize64BitHosted},
 		{target: "linux/arm", want: renvoArenaSize32BitHosted},

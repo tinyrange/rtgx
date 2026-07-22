@@ -18,6 +18,20 @@ type ArenaBackend interface {
 	CompileUnitWithArena(unit []byte, target string, strip bool, windowsGUI bool, arenaSize int) BackendResult
 }
 
+type BackendCompileOptions struct {
+	Target        string
+	Mode          string
+	Output        string
+	Strip         bool
+	WindowsGUI    bool
+	ArenaSize     int
+	ModuleLicense string
+}
+
+type OptionsBackend interface {
+	CompileUnitWithOptions(unit []byte, options BackendCompileOptions) BackendResult
+}
+
 type BackendResult struct {
 	Binary     []byte
 	Ok         bool
@@ -67,14 +81,19 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 		return compileFail(result, CompileErrBackend)
 	}
 	var backendResult BackendResult
+	optionsBackend, acceptsOptions := backend.(OptionsBackend)
 	arenaBackend, acceptsArena := backend.(ArenaBackend)
 	arenaSize := backendArenaSize(built.Options.Target, built.Options.Tags, built.Options.ArenaSize)
-	if acceptsArena {
-		backendResult = arenaBackend.CompileUnitWithArena(built.Unit, backendTarget(built.Options.Target), built.Options.Strip, built.Options.WindowsGUI, arenaSize)
+	if built.Options.Mode != ModeExecutable && acceptsOptions {
+		backendResult = optionsBackend.CompileUnitWithOptions(built.Unit, BackendCompileOptions{Target: built.Options.Target, Mode: built.Options.Mode, Output: built.Options.Output, Strip: built.Options.Strip, WindowsGUI: built.Options.WindowsGUI, ArenaSize: arenaSize, ModuleLicense: built.Options.ModuleLicense})
+	} else if built.Options.Mode != ModeExecutable {
+		backendResult.Diagnostic = Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-006", Message: "backend does not accept output modes"}
+	} else if acceptsArena {
+		backendResult = arenaBackend.CompileUnitWithArena(built.Unit, backendTargetForOptions(built.Options.Target, built.Options.Mode), built.Options.Strip, built.Options.WindowsGUI, arenaSize)
 	} else if built.Options.ArenaSize != 0 {
 		backendResult.Diagnostic = Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-005", Message: "backend does not accept an arena policy"}
 	} else {
-		backendResult = backend.CompileUnit(built.Unit, backendTarget(built.Options.Target), built.Options.Strip, built.Options.WindowsGUI)
+		backendResult = backend.CompileUnit(built.Unit, backendTargetForOptions(built.Options.Target, built.Options.Mode), built.Options.Strip, built.Options.WindowsGUI)
 	}
 	if !backendResult.Ok || len(backendResult.Binary) == 0 {
 		result.Diagnostic = backendResult.Diagnostic

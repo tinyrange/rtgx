@@ -3,6 +3,16 @@ package main
 var renvoDefaultTarget int = renvoTargetLinuxAmd64
 var renvoFixedTarget int
 var renvoCompilerStripSymbols bool
+var renvoKernelRelease string
+var renvoKernelModuleName string
+var renvoKernelBTF []byte
+var renvoKernelSymvers []byte
+var renvoKernelVersion string
+var renvoKernelModuleSize int
+var renvoKernelModuleNameOff int
+var renvoKernelModuleInitOff int
+var renvoKernelModuleExitOff int
+var renvoKernelLicense string
 
 func renvoOpenArg(path string, env []string) int {
 	directFd := open(path, O_RDONLY)
@@ -32,6 +42,9 @@ func renvoOpenArg(path string, env []string) int {
 }
 
 func renvoParseTargetArg(target string) int {
+	if target == "linux-kernel/amd64" {
+		return renvoTargetLinuxKernelAmd64
+	}
 	if len(target) == 11 && target[0] == 'l' && target[1] == 'i' && target[2] == 'n' && target[3] == 'u' && target[4] == 'x' && target[5] == '/' && target[6] == 'a' && target[7] == 'm' && target[8] == 'd' && target[9] == '6' && target[10] == '4' {
 		return renvoTargetLinuxAmd64
 	}
@@ -516,6 +529,10 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 		renvoPrintErr("renvo: parse failed\n")
 		return 1
 	}
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 && !renvoPrepareKernelMetadata() {
+		renvoPrintErr("renvo: kernel metadata unavailable\n")
+		return 1
+	}
 	var meta renvoMeta
 	renvoBuildMetaInto(prog, &meta)
 	if !meta.ok {
@@ -596,6 +613,8 @@ func appMain(args []string, env []string) int {
 	input := make([]int, 256)
 	inputCount := 0
 	var outputPath string
+	var moduleNamePath string
+	moduleLicense := "Proprietary"
 	target := renvoDefaultTarget
 	arenaSize := 0
 	renvoCompilerStripSymbols = false
@@ -643,6 +662,26 @@ func appMain(args []string, env []string) int {
 				renvoPrintUnsupportedTarget(targetArg)
 				return 1
 			}
+			i++
+			continue
+		}
+		if arg == "-module-name" {
+			i++
+			if i == len(args) {
+				renvoPrintErr("renvo: missing argument for -module-name\n")
+				return 1
+			}
+			moduleNamePath = args[i]
+			i++
+			continue
+		}
+		if arg == "-module-license" {
+			i++
+			if i == len(args) || args[i] == "" {
+				renvoPrintErr("renvo: missing argument for -module-license\n")
+				return 1
+			}
+			moduleLicense = args[i]
 			i++
 			continue
 		}
@@ -703,6 +742,11 @@ func appMain(args []string, env []string) int {
 		renvoPrintUsage()
 		return 1
 	}
+	renvoKernelModuleName = renvoKernelNameFromOutput(outputPath)
+	if moduleNamePath != "" {
+		renvoKernelModuleName = renvoKernelNameFromOutput(moduleNamePath)
+	}
+	renvoKernelLicense = moduleLicense
 	if inputCount == 0 {
 		renvoPrintErr("renvo: no input files\n")
 		renvoPrintUsage()

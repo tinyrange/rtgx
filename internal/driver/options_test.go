@@ -23,8 +23,14 @@ func TestParseOptionsDefaultsTarget(t *testing.T) {
 	if options.Target != DefaultTarget {
 		t.Fatalf("target = %q, want %q", options.Target, DefaultTarget)
 	}
+	if options.Mode != ModeExecutable {
+		t.Fatalf("mode = %q, want %q", options.Mode, ModeExecutable)
+	}
 	if options.Strip {
 		t.Fatal("strip defaulted true")
+	}
+	if options.ModuleLicense != DefaultModuleLicense {
+		t.Fatalf("module license = %q, want %q", options.ModuleLicense, DefaultModuleLicense)
 	}
 }
 
@@ -54,7 +60,7 @@ func TestCommandHelpRequested(t *testing.T) {
 	if CommandHelpRequested([]string{"renvo", "-o", "app", "."}) {
 		t.Fatal("compile command requested help")
 	}
-	for _, want := range []string{"Usage: renvo", "-o <file>", "file.go...", "Exactly the named files", "windows/amd64", "windows/arm64", "darwin/arm64", "wasi/wasm32"} {
+	for _, want := range []string{"Usage: renvo", "-o <file>", "-mode=<mode>", "kernel-module", "file.go...", "Exactly the named files", "windows/amd64", "windows/arm64", "darwin/arm64", "wasi/wasm32"} {
 		if !strings.Contains(HelpText, want) {
 			t.Fatalf("HelpText missing %q", want)
 		}
@@ -75,6 +81,16 @@ func TestParseOptionsEmitUnit(t *testing.T) {
 	options := ParseOptions([]string{"-emit-unit", "-o", "program.unit", "./cmd/app"})
 	if !options.Ok || !options.EmitUnit || options.Output != "program.unit" {
 		t.Fatalf("emit-unit options = %#v", options)
+	}
+}
+
+func TestParseOptionsKernelModule(t *testing.T) {
+	options := ParseOptions([]string{"-mode=kernel-module", "-o", "hello.ko", "hello.go"})
+	if !options.Ok || options.Mode != ModeKernelModule || options.Target != "linux/amd64" {
+		t.Fatalf("kernel module options = %#v", options)
+	}
+	if backendTargetForOptions(options.Target, options.Mode) != "linux-kernel/amd64" {
+		t.Fatalf("backend target = %q", backendTargetForOptions(options.Target, options.Mode))
 	}
 }
 
@@ -99,6 +115,9 @@ func TestParseOptionsRejectsInvalidInputs(t *testing.T) {
 		{name: "extra package", args: []string{"-o", "app", "./cmd/app", "./other"}, err: ParseErrExtraPackage, arg: "./other", at: 3},
 		{name: "mixed file list", args: []string{"-o", "app", "main.go", "./other"}, err: ParseErrMixedFileList, arg: "./other", at: 3},
 		{name: "GUI subsystem on non-Windows target", args: []string{"-windows-gui", "-o", "app", "./cmd/app"}, err: ParseErrWindowsGUIRequiresWindows, arg: "linux/amd64", at: 0},
+		{name: "missing mode", args: []string{"-mode=", "-o", "app", "main.go"}, err: ParseErrMissingMode, arg: "-mode=", at: 0},
+		{name: "unsupported mode", args: []string{"-mode=firmware", "-o", "app", "main.go"}, err: ParseErrUnsupportedMode, arg: "firmware", at: 0},
+		{name: "kernel module on non-Linux target", args: []string{"-mode=kernel-module", "-t", "windows/amd64", "-o", "app.ko", "main.go"}, err: ParseErrModeRequiresLinuxAmd64, arg: "windows/amd64", at: 0},
 	}
 	for i := 0; i < len(tests); i++ {
 		tc := tests[i]

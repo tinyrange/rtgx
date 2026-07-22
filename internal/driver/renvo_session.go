@@ -132,9 +132,9 @@ func (s *RenvoCommandSession) Step() bool {
 		}
 		s.virtualTarget = target
 		s.backendOutput = output
-		target = backendTarget(target)
+		target = backendTargetForOptions(target, s.built.Options.Mode)
 		arenaSize := backendArenaSize(target, s.built.Options.Tags, s.built.Options.ArenaSize)
-		s.backend = backendbridge.BeginCompileSession(unit, target, output, s.built.Options.Strip, s.built.Options.WindowsGUI, arenaSize)
+		s.backend = backendbridge.BeginCompileSession(unit, target, output, s.built.Options.Strip, s.built.Options.WindowsGUI, arenaSize, s.built.Options.ModuleLicense)
 		return false
 	}
 	if !s.backend.Step() {

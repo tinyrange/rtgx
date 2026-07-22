@@ -252,6 +252,13 @@ func renvoEmitPrintStaticByte(g *renvoLinearGen, value byte, fd int) bool {
 func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 	renvoNonNil(g)
 	a := &g.asm
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+		if renvoTargetArch != renvoArchAmd64 {
+			return false
+		}
+		renvoAmd64EmitKernelPrintValue(a)
+		return true
+	}
 	if targetIsWindows() {
 		if renvoTargetArch == renvoArch386 {
 			label := renvoWin386EmitReadWriteHelper(g, true)

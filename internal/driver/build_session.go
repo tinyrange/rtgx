@@ -71,6 +71,13 @@ func (s *FSBuildSession) Step() bool {
 			s.stage = 4
 			return true
 		}
+		options = resolveModuleLicense(options, sources.Files)
+		s.result.Options = options
+		if !options.Ok {
+			s.result = buildFail(s.result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
+			s.stage = 4
+			return true
+		}
 		if s.cached && !options.EmitUnit {
 			s.result.CacheKeyA, s.result.CacheKeyB = embeddedBuildFingerprint(s.workDir, options, sources.Files)
 			if embeddedBuildCacheValid && s.result.CacheKeyA == embeddedBuildCacheKeyA && s.result.CacheKeyB == embeddedBuildCacheKeyB && s.fs.PathExists(options.Output) {

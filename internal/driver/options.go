@@ -14,26 +14,36 @@ const (
 	ParseErrMixedFileList
 	ParseErrMissingArenaSize
 	ParseErrInvalidArenaSize
+	ParseErrMissingMode
+	ParseErrUnsupportedMode
+	ParseErrModeRequiresLinuxAmd64
+	ParseErrInvalidModuleLicense
+	ParseErrConflictingModuleLicense
 )
 
 const DefaultTarget = "linux/amd64"
+const ModeExecutable = "executable"
+const ModeKernelModule = "kernel-module"
+const DefaultModuleLicense = "Proprietary"
 
-const HelpText = "Usage: renvo -o <file> [-t <target>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-windows-gui] <package | file.go...>\nOptions:\n  -arena-size   set the generated program arena limit in bytes (256..1073741824)\n  -emit-unit    write the canonical linked Renvo unit without invoking a backend\n  -windows-gui  select the Windows GUI subsystem instead of the console subsystem\nSource files:\n  Explicit .go files must share one directory and package. Exactly the named files are used;\n  build constraints and OS/architecture suffixes are ignored, while _test.go files are skipped.\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32 browser/wasm32\nUnsupported language/toolchain features:\n  generics, goroutines, channels, select, cgo\n"
+const HelpText = "Usage: renvo -o <file> [-t <target>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-windows-gui] <package | file.go...>\nOptions:\n  -arena-size  set the generated program arena limit in bytes (256..1073741824)\n  -emit-unit   write the canonical linked Renvo unit without invoking a backend\n  -mode        select executable (default) or kernel-module output\n  -windows-gui select the Windows GUI subsystem instead of the console subsystem\nSource files:\n  Explicit .go files must share one directory and package. Exactly the named files are used;\n  build constraints and OS/architecture suffixes are ignored, while _test.go files are skipped.\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32 browser/wasm32\nUnsupported language/toolchain features:\n  generics, goroutines, channels, select, cgo\n"
 
 type Options struct {
-	Target     string
-	Output     string
-	Package    string
-	Files      []string
-	Strip      bool
-	EmitUnit   bool
-	WindowsGUI bool
-	ArenaSize  int
-	Tags       []string
-	Ok         bool
-	Error      int
-	ErrorArg   string
-	ErrorAt    int
+	Target        string
+	Output        string
+	Package       string
+	Files         []string
+	Strip         bool
+	EmitUnit      bool
+	WindowsGUI    bool
+	Mode          string
+	ModuleLicense string
+	ArenaSize     int
+	Tags          []string
+	Ok            bool
+	Error         int
+	ErrorArg      string
+	ErrorAt       int
 }
 
 func CommandHelpRequested(args []string) bool {
@@ -42,13 +52,16 @@ func CommandHelpRequested(args []string) bool {
 
 func ParseOptions(args []string) Options {
 	options := Options{
-		Target:  DefaultTarget,
-		Ok:      true,
-		Error:   ParseOK,
-		ErrorAt: -1,
+		Target:        DefaultTarget,
+		Mode:          ModeExecutable,
+		ModuleLicense: DefaultModuleLicense,
+		Ok:            true,
+		Error:         ParseOK,
+		ErrorAt:       -1,
 	}
 	i := 0
 	windowsGUIAt := -1
+	modeAt := -1
 	for i < len(args) {
 		arg := args[i]
 		if arg == "-s" {
@@ -64,6 +77,19 @@ func ParseOptions(args []string) Options {
 		if arg == "-windows-gui" {
 			options.WindowsGUI = true
 			windowsGUIAt = i
+			i++
+			continue
+		}
+		if len(arg) >= 6 && arg[:6] == "-mode=" {
+			mode := arg[6:]
+			if mode == "" {
+				return parseFail(options, ParseErrMissingMode, arg, i)
+			}
+			if mode != ModeExecutable && mode != ModeKernelModule {
+				return parseFail(options, ParseErrUnsupportedMode, mode, i)
+			}
+			options.Mode = mode
+			modeAt = i
 			i++
 			continue
 		}
@@ -143,6 +169,9 @@ func ParseOptions(args []string) Options {
 	}
 	if options.WindowsGUI && options.Target != "windows/amd64" && options.Target != "windows/386" && options.Target != "windows/arm64" {
 		return parseFail(options, ParseErrWindowsGUIRequiresWindows, options.Target, windowsGUIAt)
+	}
+	if options.Mode == ModeKernelModule && options.Target != "linux/amd64" {
+		return parseFail(options, ParseErrModeRequiresLinuxAmd64, options.Target, modeAt)
 	}
 	return options
 }

@@ -69,6 +69,16 @@ func optionDiagnostic(options Options) Diagnostic {
 		code, message = "RENVO-OPTION-012", "missing arena size after -arena-size"
 	case ParseErrInvalidArenaSize:
 		code, message = "RENVO-OPTION-013", "invalid arena size "+options.ErrorArg
+	case ParseErrMissingMode:
+		code, message = "RENVO-OPTION-014", "missing output mode after -mode="
+	case ParseErrUnsupportedMode:
+		code, message = "RENVO-OPTION-015", "unsupported output mode "+options.ErrorArg
+	case ParseErrModeRequiresLinuxAmd64:
+		code, message = "RENVO-OPTION-016", "kernel-module mode requires linux/amd64"
+	case ParseErrInvalidModuleLicense:
+		code, message = "RENVO-OPTION-017", "invalid renvo:module-license directive"
+	case ParseErrConflictingModuleLicense:
+		code, message = "RENVO-OPTION-018", "conflicting renvo:module-license directives"
 	}
 	return Diagnostic{Phase: "options", Code: code, Message: message}
 }

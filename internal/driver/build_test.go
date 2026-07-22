@@ -100,6 +100,21 @@ func TestBuildUnitReportsOptionError(t *testing.T) {
 	}
 }
 
+func TestBuildUnitKernelModuleLicense(t *testing.T) {
+	files := driverTestFiles()
+	files[1].Src = append([]byte("// renvo:module-license Dual MIT/GPL\n"), files[1].Src...)
+	result := BuildUnit([]string{"-mode=kernel-module", "-o", "app.ko", "./cmd/app"}, "/repo/case", "/std", files)
+	if !result.Ok || result.Options.ModuleLicense != "Dual MIT/GPL" {
+		t.Fatalf("kernel module license result = %#v", result)
+	}
+
+	files[2].Src = append([]byte("// renvo:module-license GPL\n"), files[2].Src...)
+	result = BuildUnit([]string{"-mode=kernel-module", "-o", "app.ko", "./cmd/app"}, "/repo/case", "/std", files)
+	if result.Ok || result.Error != BuildErrOptions || result.Options.Error != ParseErrConflictingModuleLicense {
+		t.Fatalf("conflicting license result = %#v", result)
+	}
+}
+
 func TestBuildUnitReportsPipelineError(t *testing.T) {
 	result := BuildUnit([]string{"-o", "app", "./cmd/app"}, "/repo/case", "/std", []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

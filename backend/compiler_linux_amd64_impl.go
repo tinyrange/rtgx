@@ -40,6 +40,10 @@ func compileWindowsAmd64Arena(input []int, output int, arenaSize int) int {
 }
 
 func renvoCompileAmd64(input []int, output int, arenaSize int) int {
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 && !renvoPrepareKernelMetadata() {
+		renvoPrintErr("renvo: kernel metadata unavailable\n")
+		return 1
+	}
 	src := make([]byte, 0, 589824)
 	for i := 0; i < len(input); i++ {
 		src = renvoReadAll(input[i], src)
@@ -118,6 +122,12 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 		g.funcLabels = append(g.funcLabels, label)
 	}
 	renvoInitFuncQueue(g, len(meta.funcs))
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+		if !renvoBeginKernelModuleAmd64(g, appIndex) {
+			return nil
+		}
+		return g
+	}
 	renvoLinearMarkFunc(g, appIndex)
 	if !meta.panicEnabled {
 		renvoAmd64InitRuntimeCheckRegs(g)
@@ -157,10 +167,15 @@ func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
 	var data []byte
 	if targetIsWindows() {
 		data = renvoAsmImageWindowsAmd64(a)
+	} else if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+		data = renvoAsmImageKernelModuleAmd64(a, g.kernelInitLabel, g.kernelExitLabel)
 	} else {
 		data = renvoAsmImageAmd64(a)
 	}
 	var result renvoCompileResult
+	if len(data) == 0 {
+		return result
+	}
 	result.data = data
 	result.ok = true
 	return result
