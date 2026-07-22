@@ -2,6 +2,8 @@ package main
 
 const renvoAbsBssReloc = 1
 const renvoAbsWinImportReloc = 2
+const renvoAbsKernelPrintReloc = 3
+const renvoAbsKernelImportRelocBase = 4
 
 const renvoTargetLinuxAmd64 = 1
 const renvoTargetLinux386 = 2
@@ -11,7 +13,8 @@ const renvoTargetWindowsAmd64 = 5
 const renvoTargetWindows386 = 6
 const renvoTargetWasiWasm32 = 7
 const renvoTargetDarwinArm64 = 8
-const renvoTargetWindowsArm64 = 9
+const renvoTargetLinuxKernelAmd64 = 9
+const renvoTargetWindowsArm64 = 10
 
 const renvoArchAmd64 = 1
 const renvoArch386 = 2
@@ -104,9 +107,9 @@ type renvoTargetProfile struct {
 // The target IDs are dense. Keep the core identity fields in compact tables so
 // profile construction and active compiler state consume the same source of
 // truth without pulling the full machine-profile builder into every compiler.
-const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x02"
-const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x03"
-const renvoTargetIntBitsTable = "\x00\x40\x20\x40\x20\x40\x20\x20\x40\x40"
+const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x01\x02"
+const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x01\x03"
+const renvoTargetIntBitsTable = "\x00\x40\x20\x40\x20\x40\x20\x20\x40\x40\x40"
 
 func renvoProfileForTarget(target int) (renvoTargetProfile, bool) {
 	var p renvoTargetProfile
@@ -195,10 +198,14 @@ var renvoCompilerWindowsSubsystem int = 3
 const renvoArenaSize64BitHosted = 134217728
 const renvoArenaSize32BitHosted = 67108864
 const renvoArenaSizeWasi = 33554432
+const renvoArenaSizeKernelModule = 65536
 const renvoArenaSizeMinimum = 256
 const renvoArenaSizeMaximum = 1073741824
 
 func renvoDefaultArenaSize(target int) int {
+	if target == renvoTargetLinuxKernelAmd64 {
+		return renvoArenaSizeKernelModule
+	}
 	if target == renvoTargetWasiWasm32 {
 		return renvoArenaSizeWasi
 	}
@@ -313,6 +320,8 @@ type renvoAsm struct {
 	darwinImports       []renvoDarwinStaticImport
 	darwinImportLabels  []int
 	darwinImportUsed    []bool
+	kernelImportNames   []byte
+	kernelImportOffsets []int
 	data                []byte
 	objectStrings       *renvoObjectStrings
 	bssSize             int
@@ -1470,6 +1479,9 @@ func renvoAsmPatch(a *renvoAsm) {
 		renvoPut32At(a.code, at, disp)
 	}
 	renvoAsmSetDataOffsets(a)
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+		return
+	}
 	for i := 0; i+2 < len(a.absRelocs); i += 3 {
 		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i)) & 2147483647
 		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1)) & 2147483647
@@ -7897,6 +7909,9 @@ type renvoLinearGen struct {
 	fixedTargetValue         int
 	fixedTargetState         int
 	fixedPrunedReturns       bool
+	kernelInitLabel          int
+	kernelExitLabel          int
+	kernelCallbackLabels     []int
 }
 
 const renvoStringInternSearchBytes = 512
@@ -13017,7 +13032,12 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		wordCount += words
 	}
 	if fn.linkStatic != 0 {
-		if renvoTargetOS == renvoOSDarwin {
+		if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+			if renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {
+				return renvoEmitLinkStaticCall(g, fn, wordCount)
+			}
+			return false
+		} else if renvoTargetOS == renvoOSDarwin {
 			if renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) == '/' {
 				return renvoEmitLinkStaticCall(g, fn, wordCount)
 			}
@@ -14258,6 +14278,9 @@ func renvoEmitPersistentArenaReady(g *renvoLinearGen) {
 
 func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 	renvoNonNil(g, fn)
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+		return renvoAmd64EmitKernelLinkStaticCall(g, fn, wordCount)
+	}
 	if targetIsDarwin() {
 		return renvoDarwinArm64EmitLinkStaticCall(g, fn, wordCount)
 	}
@@ -14574,6 +14597,9 @@ func renvoEmitCallParamArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int
 		}
 		resolved := renvoResolveType(meta, param.typ)
 		renvoNonNil(resolved)
+		if renvoFixedTarget == renvoTargetLinuxKernelAmd64 && resolved.kind == renvoTypeFunc {
+			return renvoAmd64EmitKernelCallbackArgReverse(g, ep, idx, param.typ)
+		}
 		if resolved.kind == renvoTypeInterface {
 			tempOffset := renvoAddUnnamedLocal(g, param.typ)
 			if !renvoEmitInterfaceAssignToLocal(g, ep, idx, tempOffset) {

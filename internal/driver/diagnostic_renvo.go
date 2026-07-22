@@ -50,6 +50,10 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 		d.Phase, d.Code, d.Message = "options", "RENVO-OPTION-001", "invalid command options"
 		if result.Options.Error == ParseErrMixedFileList {
 			d.Code, d.Message = "RENVO-OPTION-011", "explicit source list contains a non-.go argument "+result.Options.ErrorArg
+		} else if result.Options.Error == ParseErrInvalidModuleLicense {
+			d.Code, d.Message = "RENVO-OPTION-017", "invalid renvo:module-license directive"
+		} else if result.Options.Error == ParseErrConflictingModuleLicense {
+			d.Code, d.Message = "RENVO-OPTION-018", "conflicting renvo:module-license directives"
 		}
 		return d
 	}

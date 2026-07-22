@@ -53,6 +53,19 @@ func TestCompileBrowserTargetUsesWASIBackendAndPackagesHTML(t *testing.T) {
 	}
 }
 
+func TestCompileKernelModePassesStructuredBackendOptions(t *testing.T) {
+	backend := &recordingOptionsBackend{binary: []byte("module")}
+	files := driverTestFiles()
+	files[1].Src = append([]byte("// renvo:module-license Dual MIT/GPL\n"), files[1].Src...)
+	result := CompileUnit([]string{"-mode=kernel-module", "-arena-size", "65536", "-o", "hello-world.ko", "./cmd/app"}, "/repo/case", "/std", files, backend)
+	if !result.Ok || !bytes.Equal(result.Binary, backend.binary) {
+		t.Fatalf("kernel compile = %#v", result)
+	}
+	if backend.options.Target != "linux/amd64" || backend.options.Mode != ModeKernelModule || backend.options.Output != "hello-world.ko" || backend.options.ArenaSize != 65536 || backend.options.ModuleLicense != "Dual MIT/GPL" {
+		t.Fatalf("backend options = %#v", backend.options)
+	}
+}
+
 func TestCompileReportsBuildFailure(t *testing.T) {
 	backend := &recordingBackend{binary: []byte("binary")}
 	result := CompileUnit([]string{"-t", "invalid", "-o", "app", "./cmd/app"}, "/repo/case", "/std", driverTestFiles(), backend)
@@ -94,6 +107,23 @@ type recordingBackend struct {
 	strip      bool
 	windowsGUI bool
 	program    unit.Program
+}
+
+type recordingOptionsBackend struct {
+	binary  []byte
+	options BackendCompileOptions
+}
+
+func (b *recordingOptionsBackend) CompileUnit([]byte, string, bool, bool) BackendResult {
+	return BackendResult{}
+}
+
+func (b *recordingOptionsBackend) CompileUnitWithOptions(data []byte, options BackendCompileOptions) BackendResult {
+	b.options = options
+	if _, err := unit.Unmarshal(data); err != nil {
+		return BackendResult{}
+	}
+	return BackendResult{Binary: b.binary, Ok: true}
 }
 
 func (b *recordingBackend) CompileUnit(data []byte, target string, strip bool, windowsGUI bool) BackendResult {

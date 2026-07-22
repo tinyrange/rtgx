@@ -9,6 +9,10 @@ func compileTarget(input []int, output int, target int, arenaSize int) int {
 	// Keep that dispatch expressed in terms of the specialization global so the
 	// fixed-target branch pruner can remove every unrelated backend call.
 	if renvoFixedTarget != 0 {
+		if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+			renvoFixedTarget = renvoTargetLinuxKernelAmd64
+			return compileLinuxAmd64Arena(input, output, arenaSize)
+		}
 		if renvoFixedTarget == renvoTargetWindowsAmd64 {
 			renvoFixedTarget = renvoTargetWindowsAmd64
 			return compileWindowsAmd64Arena(input, output, arenaSize)
@@ -45,6 +49,9 @@ func compileTarget(input []int, output int, target int, arenaSize int) int {
 		return compileLinuxAmd64Arena(input, output, arenaSize)
 	}
 	renvoFixedTarget = target
+	if target == renvoTargetLinuxKernelAmd64 {
+		return compileLinuxAmd64Arena(input, output, arenaSize)
+	}
 	if target == renvoTargetWindowsAmd64 {
 		return compileWindowsAmd64Arena(input, output, arenaSize)
 	}
@@ -84,22 +91,25 @@ func RenvoCompileSourceToBytesStrip(source []byte, targetName string, stripSymbo
 }
 
 type RenvoCompileOptions struct {
-	ArenaSize    int
-	StripSymbols bool
-	WindowsGUI   bool
+	ArenaSize     int
+	StripSymbols  bool
+	WindowsGUI    bool
+	ModuleLicense string
 }
 
 // RenvoInitializeObjectCache reserves the bounded in-process object store when
 // the requested target has object reuse enabled. Embedded callers invoke it
 // before taking their transient frontend arena mark.
 func RenvoInitializeObjectCache(targetName string) {
+	renvoConfigureTargetMode(targetName, "renvo")
 	target := renvoParseTargetArg(targetName)
-	if target != 0 && target != renvoTargetWasiWasm32 {
+	if target != 0 && target != renvoTargetWasiWasm32 && target != renvoTargetLinuxKernelAmd64 {
 		renvoInitializeObjectCache()
 	}
 }
 
 func RenvoDefaultArenaSize(targetName string) (int, bool) {
+	renvoConfigureTargetMode(targetName, "renvo")
 	target := renvoParseTargetArg(targetName)
 	if target == 0 {
 		return 0, false
@@ -115,6 +125,8 @@ func renvoCompileOptionsValid(target int, options RenvoCompileOptions) bool {
 }
 
 func RenvoCompileSourceToBytesWithOptions(source []byte, targetName string, options RenvoCompileOptions) ([]byte, bool) {
+	renvoConfigureTargetMode(targetName, "renvo")
+	renvoSetKernelLicense(options.ModuleLicense)
 	target := renvoParseTargetArg(targetName)
 	if target == 0 || !renvoCompileOptionsValid(target, options) {
 		return nil, false
@@ -139,6 +151,8 @@ func RenvoCompileSourceToOutputStrip(source []byte, targetName string, outputPat
 }
 
 func RenvoCompileSourceToOutputWithOptions(source []byte, targetName string, outputPath string, options RenvoCompileOptions) bool {
+	renvoConfigureTargetMode(targetName, outputPath)
+	renvoSetKernelLicense(options.ModuleLicense)
 	target := renvoParseTargetArg(targetName)
 	if target == 0 || !renvoCompileOptionsValid(target, options) {
 		return false
@@ -179,6 +193,8 @@ func RenvoCompileUnitToOutputStripWindowsGUI(unit []byte, targetName string, out
 }
 
 func RenvoCompileUnitToOutputWithOptions(unit []byte, targetName string, outputPath string, options RenvoCompileOptions) bool {
+	renvoConfigureTargetMode(targetName, outputPath)
+	renvoSetKernelLicense(options.ModuleLicense)
 	target := renvoParseTargetArg(targetName)
 	if target == 0 || !renvoCompileOptionsValid(target, options) {
 		return false
@@ -243,6 +259,8 @@ func (s *RenvoCompileSession) Step() bool {
 		return true
 	}
 	if s.stage == 0 {
+		renvoConfigureTargetMode(s.targetName, s.outputPath)
+		renvoSetKernelLicense(s.options.ModuleLicense)
 		s.target = renvoParseTargetArg(s.targetName)
 		if s.target == 0 || !renvoCompileOptionsValid(s.target, s.options) {
 			s.done = true
@@ -264,6 +282,10 @@ func (s *RenvoCompileSession) Step() bool {
 		return false
 	}
 	if s.stage == 1 {
+		if renvoFixedTarget == renvoTargetLinuxKernelAmd64 && !renvoPrepareKernelMetadata() {
+			s.done = true
+			return true
+		}
 		s.meta = new(renvoMeta)
 		renvoBuildMetaInto(s.prog, s.meta)
 		if !s.meta.ok {
@@ -314,6 +336,9 @@ func renvoCompileParsedProgramArena(prog *renvoProgram, target int, arenaSize in
 	if !prog.ok {
 		return result
 	}
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 && !renvoPrepareKernelMetadata() {
+		return result
+	}
 	var meta renvoMeta
 	renvoBuildMetaInto(prog, &meta)
 	if !meta.ok {
@@ -340,6 +365,9 @@ func renvoCompileProgramWithMetaScratch(prog *renvoProgram, meta *renvoMeta, tar
 }
 
 func renvoCompileProgramWithMeta(prog *renvoProgram, meta *renvoMeta, target int) renvoCompileResult {
+	if target == renvoTargetLinuxKernelAmd64 {
+		return renvoTryCompileScalarProgramAmd64Scratch(prog, meta)
+	}
 	if target == renvoTargetLinux386 || target == renvoTargetWindows386 {
 		return renvoTryCompileScalarProgram386Cached(prog, meta)
 	}
@@ -370,4 +398,23 @@ func renvoCString(s string) string {
 	}
 	out = append(out, 0)
 	return string(out)
+}
+
+func renvoConfigureTargetMode(targetName string, outputPath string) {
+	renvoKernelRelease = ""
+	renvoKernelBTF = nil
+	renvoKernelSymvers = nil
+	renvoKernelVersion = ""
+	renvoKernelModuleSize = 0
+	renvoKernelModuleNameOff = -1
+	renvoKernelModuleInitOff = -1
+	renvoKernelModuleExitOff = -1
+	renvoKernelModuleName = renvoKernelNameFromOutput(outputPath)
+	renvoKernelLicense = "Proprietary"
+}
+
+func renvoSetKernelLicense(license string) {
+	if license != "" {
+		renvoKernelLicense = license
+	}
 }

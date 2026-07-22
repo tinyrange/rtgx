@@ -10,6 +10,13 @@ func backendTarget(target string) string {
 	return target
 }
 
+func backendTargetForOptions(target string, mode string) string {
+	if mode == ModeKernelModule {
+		return "linux-kernel/amd64"
+	}
+	return backendTarget(target)
+}
+
 func backendArenaSize(target string, tags []string, requested int) int {
 	if requested != 0 {
 		return requested

@@ -20,6 +20,14 @@ func (b CommandBackend) CompileUnit(unit []byte, target string, strip bool, wind
 }
 
 func (b CommandBackend) CompileUnitWithArena(unit []byte, target string, strip bool, windowsGUI bool, arenaSize int) BackendResult {
+	return b.compileUnit(unit, target, "", strip, windowsGUI, arenaSize, "")
+}
+
+func (b CommandBackend) CompileUnitWithOptions(unit []byte, options BackendCompileOptions) BackendResult {
+	return b.compileUnit(unit, backendTargetForOptions(options.Target, options.Mode), options.Output, options.Strip, options.WindowsGUI, options.ArenaSize, options.ModuleLicense)
+}
+
+func (b CommandBackend) compileUnit(unit []byte, target string, output string, strip bool, windowsGUI bool, arenaSize int, moduleLicense string) BackendResult {
 	if b.Path == "" || target == "" || len(unit) == 0 {
 		return BackendResult{Diagnostic: Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-002", Message: "backend command is not configured"}}
 	}
@@ -34,6 +42,12 @@ func (b CommandBackend) CompileUnitWithArena(unit []byte, target string, strip b
 	}
 	if arenaSize > 0 {
 		args = append(args, "-arena-size", arenaSizeDecimal(arenaSize))
+	}
+	if output != "" {
+		args = append(args, "-module-name", output)
+	}
+	if moduleLicense != "" {
+		args = append(args, "-module-license", moduleLicense)
 	}
 	args = append(args, "-o", "-", "-")
 	cmd := exec.Command(b.Path, args...)
