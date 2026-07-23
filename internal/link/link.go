@@ -150,6 +150,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	appendOK := true
 	actionOffset = 0
 	for i := 0; i < len(programs); i++ {
+		packageActionStart := actionStart + actionOffset*4
 		info := -1
 		if includePackageInfo {
 			pkg := build.PackageUnit{ImportPath: programs[i].ImportPath, Name: programs[i].Package}
@@ -167,6 +168,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 			break
 		}
 		if transient {
+			arena.Discard(packageActionStart, actionStart+actionOffset*4)
 			arena.Discard(units[i].ArenaStart, units[i].ArenaEnd)
 		}
 		if includePackageInfo {
