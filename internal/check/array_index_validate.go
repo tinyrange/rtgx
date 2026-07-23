@@ -106,17 +106,18 @@ func constantIndexInt(context constantIndexContext, start int, end int, before i
 func constantIndexOperator(file syntax.File, start int, end int, precedence int) int {
 	parenDepth, bracketDepth, braceDepth := 0, 0, 0
 	for i := end - 1; i >= start; i-- {
-		if tokCharIs(&file, i, ')') {
+		ch := file.Tokens[i].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
+		if ch == int(')') {
 			parenDepth++
-		} else if tokCharIs(&file, i, '(') {
+		} else if ch == int('(') {
 			parenDepth--
-		} else if tokCharIs(&file, i, ']') {
+		} else if ch == int(']') {
 			bracketDepth++
-		} else if tokCharIs(&file, i, '[') {
+		} else if ch == int('[') {
 			bracketDepth--
-		} else if tokCharIs(&file, i, '}') {
+		} else if ch == int('}') {
 			braceDepth++
-		} else if tokCharIs(&file, i, '{') {
+		} else if ch == int('{') {
 			braceDepth--
 		}
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && constantIndexPrecedence(tokenString(&file, i)) == precedence && i > start && constantIndexPrecedence(tokenString(&file, i-1)) == 0 {

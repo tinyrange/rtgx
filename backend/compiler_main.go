@@ -99,7 +99,7 @@ func renvoPrintIntErr(v int) {
 }
 
 func renvoPrintUsage() {
-	renvoPrintErr("usage: renvo [options] -o <output|-> <input.go|->...\n")
+	renvoPrintErr("usage: renvo [options] [-emit-image] -o <output|-> <input.go|->...\n")
 }
 
 func renvoParsePositiveDecimal(value string) (int, bool) {
@@ -188,10 +188,34 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
 	discardStart := 0
 	nextDiscard := 65536
 	for i := 0; i < count; i++ {
-		kind := renvoUnitReadVar(&r)
-		delta := renvoUnitReadVar(&r)
-		size := renvoUnitReadVar(&r)
-		lineDelta := renvoUnitReadVar(&r)
+		kind := 0
+		delta := 0
+		size := 0
+		lineDelta := 0
+		if r.ok && r.pos < r.end && r.src[r.pos] < 128 {
+			kind = int(r.src[r.pos])
+			r.pos++
+		} else {
+			kind = renvoUnitReadVar(&r)
+		}
+		if r.ok && r.pos < r.end && r.src[r.pos] < 128 {
+			delta = int(r.src[r.pos])
+			r.pos++
+		} else {
+			delta = renvoUnitReadVar(&r)
+		}
+		if r.ok && r.pos < r.end && r.src[r.pos] < 128 {
+			size = int(r.src[r.pos])
+			r.pos++
+		} else {
+			size = renvoUnitReadVar(&r)
+		}
+		if r.ok && r.pos < r.end && r.src[r.pos] < 128 {
+			lineDelta = int(r.src[r.pos])
+			r.pos++
+		} else {
+			lineDelta = renvoUnitReadVar(&r)
+		}
 		if !r.ok {
 			return nil, false
 		}
@@ -466,6 +490,8 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 			if !packageReader.ok || pathLength <= 0 || packageReader.pos+pathLength > packageReader.end {
 				return false
 			}
+			pathStart := packageReader.pos
+			pathKeyA, pathKeyB := renvoObjectHashRange(1879, 3761, packageReader.src, pathStart, pathStart+pathLength)
 			packageReader.pos += pathLength
 			if packageReader.pos+16 > packageReader.end {
 				return false
@@ -475,6 +501,8 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 			item.graphKeyB = renvoUnitRead32(packageReader.src, packageReader.pos+4)
 			item.sourceKeyA = renvoUnitRead32(packageReader.src, packageReader.pos+8)
 			item.sourceKeyB = renvoUnitRead32(packageReader.src, packageReader.pos+12)
+			item.pathKeyA = pathKeyA
+			item.pathKeyB = pathKeyB
 			packageReader.pos += 16
 			textLength := 0
 			tokenLength := 0
@@ -523,7 +551,6 @@ func renvoUnitValidTokenRange(limit int, start int, end int) bool {
 
 func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, arenaSize int) int {
 	renvoNonNil(prog)
-	renvoFixedTarget = target
 	renvoSetTarget(target)
 	if !prog.ok {
 		renvoPrintErr("renvo: parse failed\n")
@@ -563,7 +590,7 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 		result = renvoTryCompileScalarProgramAmd64Cached(prog, &meta)
 	}
 	if result.ok {
-		write(output, result.data, -1)
+		write(output, renvoCompileOutputData(result.data, target), -1)
 		return 0
 	}
 	renvoPrintErr("renvo: compilation failed\n")
@@ -618,6 +645,7 @@ func appMain(args []string, env []string) int {
 	target := renvoDefaultTarget
 	arenaSize := 0
 	renvoCompilerStripSymbols = false
+	renvoCompilerEmitImage = false
 	renvoCompilerWindowsSubsystem = 3
 	if len(args) == 0 {
 		renvoPrintErr("renvo: missing output path (-o)\n")
@@ -629,6 +657,11 @@ func appMain(args []string, env []string) int {
 		arg := args[i]
 		if len(arg) == 2 && arg[0] == '-' && arg[1] == 's' {
 			renvoCompilerStripSymbols = true
+			i++
+			continue
+		}
+		if arg == "-emit-image" {
+			renvoCompilerEmitImage = true
 			i++
 			continue
 		}

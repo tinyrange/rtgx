@@ -48,7 +48,6 @@ func compileTarget(input []int, output int, target int, arenaSize int) int {
 		renvoFixedTarget = renvoTargetLinuxAmd64
 		return compileLinuxAmd64Arena(input, output, arenaSize)
 	}
-	renvoFixedTarget = target
 	if target == renvoTargetLinuxKernelAmd64 {
 		return compileLinuxAmd64Arena(input, output, arenaSize)
 	}
@@ -94,6 +93,7 @@ type RenvoCompileOptions struct {
 	ArenaSize     int
 	StripSymbols  bool
 	WindowsGUI    bool
+	EmitImage     bool
 	ModuleLicense string
 }
 
@@ -132,6 +132,7 @@ func RenvoCompileSourceToBytesWithOptions(source []byte, targetName string, opti
 		return nil, false
 	}
 	renvoSetStripSymbols(options.StripSymbols)
+	renvoCompilerEmitImage = options.EmitImage
 	renvoCompilerWindowsSubsystem = 3
 	if options.WindowsGUI {
 		renvoCompilerWindowsSubsystem = 2
@@ -143,7 +144,7 @@ func RenvoCompileSourceToBytesWithOptions(source []byte, targetName string, opti
 	if !result.ok {
 		return nil, false
 	}
-	return result.data, true
+	return renvoCompileOutputData(result.data, target), true
 }
 
 func RenvoCompileSourceToOutputStrip(source []byte, targetName string, outputPath string, stripSymbols bool) bool {
@@ -158,6 +159,7 @@ func RenvoCompileSourceToOutputWithOptions(source []byte, targetName string, out
 		return false
 	}
 	renvoSetStripSymbols(options.StripSymbols)
+	renvoCompilerEmitImage = options.EmitImage
 	renvoCompilerWindowsSubsystem = 3
 	if options.WindowsGUI {
 		renvoCompilerWindowsSubsystem = 2
@@ -176,7 +178,7 @@ func RenvoCompileSourceToOutputWithOptions(source []byte, targetName string, out
 			return false
 		}
 	}
-	write(output, result.data, -1)
+	write(output, renvoCompileOutputData(result.data, target), -1)
 	if outputPath != "-" {
 		chmod(output, 493)
 		close(output)
@@ -200,6 +202,7 @@ func RenvoCompileUnitToOutputWithOptions(unit []byte, targetName string, outputP
 		return false
 	}
 	renvoSetStripSymbols(options.StripSymbols)
+	renvoCompilerEmitImage = options.EmitImage
 	renvoCompilerWindowsSubsystem = 3
 	if options.WindowsGUI {
 		renvoCompilerWindowsSubsystem = 2
@@ -213,6 +216,34 @@ func RenvoCompileUnitToOutputWithOptions(unit []byte, targetName string, outputP
 	return renvoWriteCompileResult(result, outputPath)
 }
 
+// RenvoCompileUnitToBytesWithOptions exposes the same linked result without
+// routing it through a filesystem descriptor. The bundled frontend uses this
+// path for script execution so the RNVI transport can remain in memory.
+func RenvoCompileUnitToBytesWithOptions(unit []byte, targetName string, options RenvoCompileOptions) ([]byte, bool) {
+	renvoConfigureTargetMode(targetName, "renvo")
+	renvoSetKernelLicense(options.ModuleLicense)
+	target := renvoParseTargetArg(targetName)
+	if target == 0 || !renvoCompileOptionsValid(target, options) {
+		return nil, false
+	}
+	renvoSetStripSymbols(options.StripSymbols)
+	renvoCompilerEmitImage = options.EmitImage
+	renvoCompilerWindowsSubsystem = 3
+	if options.WindowsGUI {
+		renvoCompilerWindowsSubsystem = 2
+	}
+	renvoSetTarget(target)
+	prog, isUnit, ok := renvoDecodeUnitProgram(unit)
+	if !isUnit || !ok {
+		return nil, false
+	}
+	result := renvoCompileParsedProgramArena(&prog, target, options.ArenaSize)
+	if !result.ok {
+		return nil, false
+	}
+	return renvoCompileOutputData(result.data, target), true
+}
+
 func renvoWriteCompileResult(result renvoCompileResult, outputPath string) bool {
 	if !result.ok {
 		return false
@@ -224,7 +255,7 @@ func renvoWriteCompileResult(result renvoCompileResult, outputPath string) bool 
 			return false
 		}
 	}
-	write(output, result.data, -1)
+	write(output, renvoCompileOutputData(result.data, renvoTarget), -1)
 	if outputPath != "-" {
 		chmod(output, 493)
 		close(output)
@@ -267,6 +298,7 @@ func (s *RenvoCompileSession) Step() bool {
 			return true
 		}
 		renvoSetStripSymbols(s.options.StripSymbols)
+		renvoCompilerEmitImage = s.options.EmitImage
 		renvoCompilerWindowsSubsystem = 3
 		if s.options.WindowsGUI {
 			renvoCompilerWindowsSubsystem = 2

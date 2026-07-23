@@ -86,25 +86,26 @@ func returnValueList(file syntax.File, returnTok int, limit int) (int, int, int)
 		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && syntax.TokenLine(file.Tokens[i]) > syntax.TokenLine(file.Tokens[i-1]) && !returnLineContinues(file, i-1) {
 			break
 		}
+		ch := file.Tokens[i].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 {
-			if tokCharIs(&file, i, ';') || tokCharIs(&file, i, '}') {
+			if ch == int(';') || ch == int('}') {
 				break
 			}
-			if tokCharIs(&file, i, ',') {
+			if ch == int(',') {
 				count++
 			}
 		}
-		if tokCharIs(&file, i, '(') {
+		if ch == int('(') {
 			parenDepth++
-		} else if tokCharIs(&file, i, ')') && parenDepth > 0 {
+		} else if ch == int(')') && parenDepth > 0 {
 			parenDepth--
-		} else if tokCharIs(&file, i, '[') {
+		} else if ch == int('[') {
 			bracketDepth++
-		} else if tokCharIs(&file, i, ']') && bracketDepth > 0 {
+		} else if ch == int(']') && bracketDepth > 0 {
 			bracketDepth--
-		} else if tokCharIs(&file, i, '{') {
+		} else if ch == int('{') {
 			braceDepth++
-		} else if tokCharIs(&file, i, '}') && braceDepth > 0 {
+		} else if ch == int('}') && braceDepth > 0 {
 			braceDepth--
 		}
 		end = i + 1

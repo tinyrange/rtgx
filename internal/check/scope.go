@@ -284,7 +284,7 @@ func addScopeName(scope *FuncScope, name string, kind int, tok int, rejectDup bo
 }
 
 func tokCharIs(file *syntax.File, tok int, c byte) bool {
-	if tok < 0 || tok >= len(file.Tokens) {
+	if uint(tok) >= uint(len(file.Tokens)) {
 		return false
 	}
 	packed := file.Tokens[tok].KindLine

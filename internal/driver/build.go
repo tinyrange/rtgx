@@ -48,6 +48,7 @@ func BuildUnit(args []string, workDir string, stdRoot string, files []load.Sourc
 		result.Sources = SourceResult{Error: sourceError, ErrorPath: errorPath}
 		return buildFail(result, BuildErrSource, "", errorPath, -1, -1, -1, -1)
 	}
+	filtered = transformScriptFiles(filtered, workDir, options)
 	options = resolveModuleLicense(options, filtered)
 	result.Options = options
 	if !options.Ok {
@@ -93,6 +94,7 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 	if !options.Ok {
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
 	}
+	fs = sourceFSForOptions(fs, workDir, options)
 	sourcesStart := arena.Mark()
 	var sources SourceResult
 	if len(options.Files) > 0 {
@@ -145,6 +147,7 @@ func buildFromFS(args []string, workDir string, stdRoot string, moduleCache stri
 	if !options.Ok {
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
 	}
+	fs = sourceFSForOptions(fs, workDir, options)
 	sourcesStart := arena.Mark()
 	var sources SourceResult
 	if len(options.Files) > 0 {

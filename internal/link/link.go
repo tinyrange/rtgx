@@ -117,8 +117,12 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		actionCount += len(programs[i].Tokens)
 	}
 	actionStart := arena.Mark()
-	actions := make([]int, actionCount)
+	actions := make([]tokenAction, actionCount)
 	actionEnd := arena.Mark()
+	// Arena allocations may align the backing array after actionStart. Derive
+	// its real address from the post-allocation mark so package-at-a-time page
+	// retirement never reaches into the next package's actions.
+	actionDataStart := actionEnd - cap(actions)*4
 	actionsOK := true
 	finalEOF := 0
 	actionOffset := 0
@@ -150,6 +154,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	appendOK := true
 	actionOffset = 0
 	for i := 0; i < len(programs); i++ {
+		packageActionStart := actionDataStart + actionOffset*4
 		info := -1
 		if includePackageInfo {
 			pkg := build.PackageUnit{ImportPath: programs[i].ImportPath, Name: programs[i].Package}
@@ -167,6 +172,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 			break
 		}
 		if transient {
+			arena.Discard(packageActionStart, actionDataStart+actionOffset*4)
 			arena.Discard(units[i].ArenaStart, units[i].ArenaEnd)
 		}
 		if includePackageInfo {
@@ -496,7 +502,7 @@ func appendRootEntrypointTailCore(src *unit.Program, initNames []string, line in
 	return mainTok, eof
 }
 
-func appendProgramCore(dst *unit.Program, src unit.Program, actions []int, finalEOF int, line int, aliases []string, hasNext bool) (bool, int) {
+func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenAction, finalEOF int, line int, aliases []string, hasNext bool) (bool, int) {
 	if src.Package == "" || len(src.Text) == 0 || len(src.Tokens) == 0 || len(actions) != len(src.Tokens) {
 		return false, line
 	}
@@ -650,7 +656,7 @@ func appendCoreQuotedString(out []byte, value string) []byte {
 	return append(out, '"')
 }
 
-func linkedTokenActions(program *unit.Program, aliases *[]string, symbolOffsets []int, actions []int, plusReplacement int) bool {
+func linkedTokenActions(program *unit.Program, aliases *[]string, symbolOffsets []int, actions []tokenAction, plusReplacement int) bool {
 	if len(actions) != len(program.Tokens) {
 		return false
 	}
@@ -710,7 +716,7 @@ func linkedTokenActions(program *unit.Program, aliases *[]string, symbolOffsets 
 	return true
 }
 
-func markCoreImportDeclTokens(program *unit.Program, actions []int, imp unit.Import) {
+func markCoreImportDeclTokens(program *unit.Program, actions []tokenAction, imp unit.Import) {
 	if imp.PathTok < 0 || imp.PathTok >= len(program.Tokens) {
 		return
 	}
@@ -731,28 +737,28 @@ func markCoreImportDeclTokens(program *unit.Program, actions []int, imp unit.Imp
 	}
 }
 
-func markCoreRedirectToken(actions []int, tok int, target int) {
+func markCoreRedirectToken(actions []tokenAction, tok int, target int) {
 	if tok < 0 || tok >= len(actions) || target < 0 || target >= len(actions) {
 		return
 	}
-	actions[tok] = -target - 2
+	actions[tok] = tokenAction(-target - 2)
 }
 
-func markReplacementToken(actions []int, tok int, replacement int) {
+func markReplacementToken(actions []tokenAction, tok int, replacement int) {
 	if tok < 0 || tok >= len(actions) || replacement < 0 || actions[tok] < 0 {
 		return
 	}
-	actions[tok] = replacement + 1
+	actions[tok] = tokenAction(replacement + 1)
 }
 
-func markCoreSkipToken(actions []int, tok int) {
+func markCoreSkipToken(actions []tokenAction, tok int) {
 	if tok < 0 || tok >= len(actions) {
 		return
 	}
 	actions[tok] = -1
 }
 
-func markCoreUnsafePointerCallTokens(program *unit.Program, actions []int) {
+func markCoreUnsafePointerCallTokens(program *unit.Program, actions []tokenAction) {
 	for i := 0; i < len(program.Selectors); i++ {
 		selector := program.Selectors[i]
 		if selector.BaseKind != unit.RefImport || !coreTokenTextEquals(program, selector.BaseTok, "unsafe") || !coreTokenTextEquals(program, selector.NameTok, "Pointer") {
@@ -772,7 +778,7 @@ func markCoreUnsafePointerCallTokens(program *unit.Program, actions []int) {
 	}
 }
 
-func markCoreUnsafeSizeofTokens(program *unit.Program, actions []int) {
+func markCoreUnsafeSizeofTokens(program *unit.Program, actions []tokenAction) {
 	for i := 0; i < len(program.Imports); i++ {
 		imp := program.Imports[i]
 		if !coreTokenTextEquals(program, imp.PathTok, "\"unsafe\"") && !coreTokenTextEquals(program, imp.PathTok, "`unsafe`") {
@@ -794,7 +800,7 @@ func markCoreUnsafeSizeofTokens(program *unit.Program, actions []int) {
 	}
 }
 
-func markCoreUnsafePointerConversionTokens(program *unit.Program, actions []int) {
+func markCoreUnsafePointerConversionTokens(program *unit.Program, actions []tokenAction) {
 	for i := 0; i+4 < len(program.Tokens); i++ {
 		if !coreTokenTextEquals(program, i, "(") || !coreTokenTextEquals(program, i+1, "*") {
 			continue
@@ -816,7 +822,7 @@ func markCoreUnsafePointerConversionTokens(program *unit.Program, actions []int)
 	}
 }
 
-func markCoreEndianSelectorTokens(program *unit.Program, actions []int) {
+func markCoreEndianSelectorTokens(program *unit.Program, actions []tokenAction) {
 	for i := 0; i+2 < len(program.Tokens); i++ {
 		if (coreTokenTextEquals(program, i, "LittleEndian") || coreTokenTextEquals(program, i, "BigEndian")) && coreTokenTextEquals(program, i+1, ".") {
 			markCoreRedirectToken(actions, i, i+2)
@@ -913,20 +919,22 @@ func coreReplacementTokenIsString(text string) bool {
 	return len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"'
 }
 
-func tokenActionSkips(action int) bool {
+type tokenAction int32
+
+func tokenActionSkips(action tokenAction) bool {
 	return action < 0
 }
 
-func tokenActionRedirect(action int) int {
+func tokenActionRedirect(action tokenAction) int {
 	if action <= -2 {
-		return -action - 2
+		return int(-action - 2)
 	}
 	return -1
 }
 
-func tokenActionReplacement(action int) int {
+func tokenActionReplacement(action tokenAction) int {
 	if action > 0 {
-		return action - 1
+		return int(action - 1)
 	}
 	return -1
 }
@@ -993,6 +1001,9 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 func coreCompilerIntrinsicAlias(importPath string, name string) string {
 	if importPath == "fmt" && name == "Println" {
 		return "renvo_runtime_FmtPrintln"
+	}
+	if (importPath == "os" || importPath == "renvo.dev/std/os") && name == "syscall" {
+		return "renvo_runtime_Syscall"
 	}
 	return ""
 }

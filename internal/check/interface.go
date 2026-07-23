@@ -76,24 +76,25 @@ func nextInterfaceElementEnd(file syntax.File, start int, end int) int {
 		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && syntax.TokenLine(file.Tokens[i]) != syntax.TokenLine(file.Tokens[i-1]) {
 			return i
 		}
-		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokCharIs(&file, i, ';') {
+		ch := file.Tokens[i].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
+		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && ch == int(';') {
 			return i
 		}
-		if tokCharIs(&file, i, '(') {
+		if ch == int('(') {
 			parenDepth++
-		} else if tokCharIs(&file, i, ')') {
+		} else if ch == int(')') {
 			if parenDepth > 0 {
 				parenDepth--
 			}
-		} else if tokCharIs(&file, i, '[') {
+		} else if ch == int('[') {
 			bracketDepth++
-		} else if tokCharIs(&file, i, ']') {
+		} else if ch == int(']') {
 			if bracketDepth > 0 {
 				bracketDepth--
 			}
-		} else if tokCharIs(&file, i, '{') {
+		} else if ch == int('{') {
 			braceDepth++
-		} else if tokCharIs(&file, i, '}') {
+		} else if ch == int('}') {
 			if braceDepth > 0 {
 				braceDepth--
 			}

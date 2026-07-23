@@ -4,6 +4,7 @@ import (
 	"renvo.dev/ide"
 	"renvo.dev/internal/arena"
 	"renvo.dev/internal/driver"
+	"renvo.dev/internal/intellisense"
 	"renvo.dev/internal/load"
 )
 
@@ -63,16 +64,16 @@ func (f *MainForm) runEditorAnalysis() {
 	f.editor.SetDiagnostics([]ide.Diagnostic{{Start: diagnostic.Start, End: diagnostic.End, Message: diagnostic.Message, Error: true}})
 }
 
-func (f *MainForm) analyzeEditorSource(source []byte) (driver.AnalysisResult, bool) {
+func (f *MainForm) analyzeEditorSource(source []byte) (intellisense.AnalysisResult, bool) {
 	if f == nil || f.currentPath == "" || f.root == "" {
-		return driver.AnalysisResult{}, false
+		return intellisense.AnalysisResult{}, false
 	}
 	path := load.CleanPath(f.currentPath)
 	files := f.collectEditorAnalysisFiles(path, source)
 	if len(files) == 0 {
-		return driver.AnalysisResult{}, false
+		return intellisense.AnalysisResult{}, false
 	}
-	result := driver.AnalyzeWorkspace(f.root, completionStdRoot(f.env), ".", files)
+	result := intellisense.AnalyzeWorkspace(f.root, completionStdRoot(f.env), ".", files)
 	return result, true
 }
 

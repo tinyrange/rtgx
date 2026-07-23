@@ -14,7 +14,7 @@ func TestTokenCompactLayout(t *testing.T) {
 		t.Fatalf("token size = %d, want %d", got, want)
 	}
 	nonOperator := MakeToken(TokenIdent, 0, 1, int('+'))
-	if tokCharIs(nil, []Token{nonOperator}, 0, '+') {
+	if tokCharIs([]Token{nonOperator}, 0, '+') {
 		t.Fatal("non-operator source line leaked into the packed operator field")
 	}
 }
@@ -25,13 +25,13 @@ func TestOperatorTokenPacking(t *testing.T) {
 	if len(toks) != 4 {
 		t.Fatalf("token count = %d, want 4", len(toks))
 	}
-	if TokenLine(toks[0]) != 3 || !tokCharIs(src, toks, 0, '{') || tokCharIs(src, toks, 0, '}') {
+	if TokenLine(toks[0]) != 3 || !tokCharIs(toks, 0, '{') || tokCharIs(toks, 0, '}') {
 		t.Fatalf("opening operator token was not packed correctly: %#v", toks[0])
 	}
-	if TokenLine(toks[1]) != 3 || !tokCharIs(src, toks, 1, '}') {
+	if TokenLine(toks[1]) != 3 || !tokCharIs(toks, 1, '}') {
 		t.Fatalf("closing operator token was not packed correctly: %#v", toks[1])
 	}
-	if TokenLine(toks[2]) != 3 || tokCharIs(src, toks, 2, '+') {
+	if TokenLine(toks[2]) != 3 || tokCharIs(toks, 2, '+') {
 		t.Fatalf("multi-byte operator token was not packed correctly: %#v", toks[2])
 	}
 	limit := MakeToken(TokenOperator, 0, 1, TokenLineLimit)

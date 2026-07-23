@@ -44,7 +44,11 @@ func compileLinuxArmArena(input []int, output int, arenaSize int) int {
 	var result renvoCompileResult
 	result = renvoTryCompileScalarProgramArmScratch(&prog, &meta)
 	if result.ok {
-		write(output, result.data, -1)
+		data := result.data
+		if renvoFixedTarget == 0 {
+			data = renvoCompileOutputData(data, renvoTarget)
+		}
+		write(output, data, -1)
 		return 0
 	}
 	renvoPrintErr("renvo: compilation failed\n")
@@ -96,21 +100,70 @@ func renvoBeginScalarProgramArm(p *renvoProgram, meta *renvoMeta) *renvoLinearGe
 	}
 	renvoInitFuncQueue(g, len(meta.funcs))
 	renvoLinearMarkFunc(g, appIndex)
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		renvoArmAsmEmit(a, 0xe92d4800)
+		renvoArmAsmMovRegReg(a, renvoArmRegFp, renvoArmRegSp)
+		renvoArmAsmAddRegImm(a, renvoArmRegSp, renvoArmRegSp, -16)
+		renvoArmAsmStoreRegMem(a, 0, renvoArmRegSp, 0, 4)
+		renvoArmAsmStoreRegMem(a, 1, renvoArmRegSp, 4, 4)
+		renvoArmAsmStoreRegMem(a, 2, renvoArmRegSp, 8, 4)
+		renvoArmAsmStoreRegMem(a, 3, renvoArmRegSp, 12, 4)
+	}
 	renvoEmitPersistentArenaReady(g)
 	if !renvoLinearInitGlobals(g) {
 		return nil
 	}
-	if !renvoEmitProgramEntryArgsArm(g, appIndex) {
+	entryOK := false
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		entryOK = renvoEmitImageEntryArgsArm(g, appIndex)
+	} else {
+		entryOK = renvoEmitProgramEntryArgsArm(g, appIndex)
+	}
+	if !entryOK {
 		return nil
 	}
 	renvoAsmCallLabel(a, g.funcLabels[appIndex])
 	if !renvoEmitProgramPanicCheck(g) {
 		return nil
 	}
-	renvoAsmCopyPrimaryToCallWord0(a)
-	renvoAsmPrimaryImm(a, 1)
-	renvoAsmSyscall(a)
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		renvoAsmLeave(a)
+		renvoAsmRet(a)
+	} else {
+		renvoAsmCopyPrimaryToCallWord0(a)
+		renvoAsmPrimaryImm(a, 1)
+		renvoAsmSyscall(a)
+	}
 	return g
+}
+
+func renvoEmitImageEntryArgsArm(g *renvoLinearGen, appIndex int) bool {
+	app := &g.meta.funcs[appIndex]
+	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
+		return false
+	}
+	renvoArmAsmLoadRegMem(&g.asm, 0, renvoArmRegSp, 0, 4)
+	renvoArmAsmLoadRegMem(&g.asm, 1, renvoArmRegSp, 4, 4)
+	renvoArmAsmLoadRegMem(&g.asm, 2, renvoArmRegSp, 8, 4)
+	renvoArmAsmLoadRegMem(&g.asm, 3, renvoArmRegSp, 12, 4)
+	if app.paramCount == 0 {
+		return true
+	}
+	if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) {
+		return false
+	}
+	// Native entry ABI: R0=argsData, R1=argsLen, R2=envData,
+	// R3=envLen. Renvo slice words use R3/R4/R1 and R2/R5/R6.
+	if app.paramCount == 2 {
+		if !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) {
+			return false
+		}
+		renvoArmAsmMovRegReg(&g.asm, renvoArmRegR8, 3)
+		renvoArmAsmMovRegReg(&g.asm, renvoArmRegR9, 3)
+	}
+	renvoArmAsmMovRegReg(&g.asm, renvoArmRegRdi, 0)
+	renvoArmAsmMovRegReg(&g.asm, renvoArmRegRsi, 1)
+	return true
 }
 
 func renvoFinishScalarProgramArm(g *renvoLinearGen) renvoCompileResult {
@@ -178,6 +231,9 @@ func renvoAsmImageArm(a *renvoAsm) []byte {
 		for i := 0; i < len(a.data); i++ {
 			out = append(out, a.data[i])
 		}
+		if renvoFixedTarget == 0 {
+			return renvoAppendReplLinkTable(out, a)
+		}
 		return out
 	}
 	var sec renvoElfSymbolSections
@@ -204,6 +260,9 @@ func renvoAsmImageArm(a *renvoAsm) []byte {
 	}
 	out = renvoAppendUntil(out, sec.shoff)
 	out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
+	if renvoFixedTarget == 0 {
+		return renvoAppendReplLinkTable(out, a)
+	}
 	return out
 }
 

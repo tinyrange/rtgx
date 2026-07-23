@@ -83,14 +83,14 @@ func ParseFuncBodyStatements(file File, fn FuncDecl) Body {
 
 func parseFuncBody(body Body, file *File, fn FuncDecl) Body {
 	closeTok := fn.BodyEnd - 1
-	if fn.BodyStart < 0 || closeTok <= fn.BodyStart || !tokCharIs(file.Src, file.Tokens, fn.BodyStart, '{') || !tokCharIs(file.Src, file.Tokens, closeTok, '}') {
+	if fn.BodyStart < 0 || closeTok <= fn.BodyStart || !tokCharIs(file.Tokens, fn.BodyStart, '{') || !tokCharIs(file.Tokens, closeTok, '}') {
 		return bodyFail(body, BodyErrFunc, fn.BodyStart)
 	}
 	return parseBlockInto(body, file, fn.BodyStart, closeTok)
 }
 
 func parseBlockInto(body Body, file *File, openTok int, closeTok int) Body {
-	if !tokCharIs(file.Src, file.Tokens, openTok, '{') || !tokCharIs(file.Src, file.Tokens, closeTok, '}') {
+	if !tokCharIs(file.Tokens, openTok, '{') || !tokCharIs(file.Tokens, closeTok, '}') {
 		return bodyFail(body, BodyErrBlock, openTok)
 	}
 	body.Stmts = append(body.Stmts, Stmt{
@@ -198,7 +198,7 @@ func parseStmt(body Body, file *File, start int, limit int) (int, Body) {
 		body = appendStmtExpr(body, file, stmt)
 		return end, body
 	}
-	if tokCharIs(file.Src, file.Tokens, start, '{') {
+	if tokCharIs(file.Tokens, start, '{') {
 		closeTok := skipBalanced(file, start, '{', '}') - 1
 		if closeTok < start || closeTok >= limit {
 			return start, bodyFail(body, BodyErrBlock, start)
@@ -206,7 +206,7 @@ func parseStmt(body Body, file *File, start int, limit int) (int, Body) {
 		body = parseBlockInto(body, file, start, closeTok)
 		return closeTok + 1, body
 	}
-	if file.Tokens[start].KindLine&255 == TokenIdent && tokCharIs(file.Src, file.Tokens, start+1, ':') {
+	if file.Tokens[start].KindLine&255 == TokenIdent && tokCharIs(file.Tokens, start+1, ':') {
 		stmt := newStmt(StmtLabel, start, start+2)
 		body.Stmts = append(body.Stmts, stmt)
 		return start + 2, body
@@ -255,7 +255,7 @@ func parseBlockStmt(body Body, file *File, start int, limit int, stmtKind int) (
 				elseIfStart = next + 1
 				stmt.ElseEnd = elseEnd
 				stmt.EndTok = elseEnd
-			} else if tokCharIs(file.Src, file.Tokens, next+1, '{') {
+			} else if tokCharIs(file.Tokens, next+1, '{') {
 				closeTok := skipBalanced(file, next+1, '{', '}') - 1
 				if closeTok <= next || closeTok >= limit {
 					return start, bodyFail(body, BodyErrBlock, next+1)
@@ -297,7 +297,7 @@ func findIfEnd(file *File, start int, limit int) int {
 		if next+1 < limit && file.Tokens[next+1].KindLine&255 == TokenIf {
 			return findIfEnd(file, next+1, limit)
 		}
-		if tokCharIs(file.Src, file.Tokens, next+1, '{') {
+		if tokCharIs(file.Tokens, next+1, '{') {
 			closeTok := skipBalanced(file, next+1, '{', '}') - 1
 			if closeTok <= next || closeTok >= limit {
 				return -1
@@ -341,10 +341,7 @@ func findStmtBlockStart(file *File, start int, limit int) int {
 	bracketDepth := 0
 	for i < limit {
 		tok := file.Tokens[i]
-		c := byte(0)
-		if tok.KindLine&255 == TokenOperator && tok.End == tok.Start+1 {
-			c = file.Src[tok.Start]
-		}
+		c := byte(tok.KindLine >> TokenOperatorCharShift & TokenOperatorCharMask)
 		if c == '(' {
 			parenDepth++
 		} else if c == ')' {
@@ -376,10 +373,7 @@ func findStmtEnd(file *File, start int, limit int) int {
 	prev := start - 1
 	for i < limit {
 		tok := file.Tokens[i]
-		c := byte(0)
-		if tok.KindLine&255 == TokenOperator && tok.End == tok.Start+1 {
-			c = file.Src[tok.Start]
-		}
+		c := byte(tok.KindLine >> TokenOperatorCharShift & TokenOperatorCharMask)
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 {
 			if c == ';' {
 				return i + 1
@@ -417,7 +411,7 @@ func findStmtEnd(file *File, start int, limit int) int {
 func findCaseHeaderEnd(file *File, start int, limit int) int {
 	i := start
 	for i < limit {
-		if tokCharIs(file.Src, file.Tokens, i, ':') {
+		if file.Tokens[i].KindLine>>TokenOperatorCharShift&TokenOperatorCharMask == int(':') {
 			return i + 1
 		}
 		i++
@@ -432,10 +426,7 @@ func findTopLevelChar(file *File, start int, limit int, c byte) int {
 	braceDepth := 0
 	for i < limit {
 		tok := file.Tokens[i]
-		tokChar := byte(0)
-		if tok.KindLine&255 == TokenOperator && tok.End == tok.Start+1 {
-			tokChar = file.Src[tok.Start]
-		}
+		tokChar := byte(tok.KindLine >> TokenOperatorCharShift & TokenOperatorCharMask)
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokChar == c {
 			return i
 		}
@@ -612,7 +603,7 @@ func isUnaryExpr(file *File, start int) bool {
 
 func spanHasCall(file *File, start int, end int) bool {
 	for i := start + 1; i < end; i++ {
-		if tokCharIs(file.Src, file.Tokens, i, '(') {
+		if file.Tokens[i].KindLine>>TokenOperatorCharShift&TokenOperatorCharMask == int('(') {
 			return true
 		}
 	}
@@ -621,7 +612,7 @@ func spanHasCall(file *File, start int, end int) bool {
 
 func spanHasChar(file *File, start int, end int, c byte) bool {
 	for i := start; i < end; i++ {
-		if tokCharIs(file.Src, file.Tokens, i, c) {
+		if file.Tokens[i].KindLine>>TokenOperatorCharShift&TokenOperatorCharMask == int(c) {
 			return true
 		}
 	}
@@ -629,17 +620,17 @@ func spanHasChar(file *File, start int, end int, c byte) bool {
 }
 
 func trimSpan(file *File, start int, end int) (int, int) {
-	for start < end && tokCharIs(file.Src, file.Tokens, start, ';') {
+	for start < end && tokCharIs(file.Tokens, start, ';') {
 		start++
 	}
-	for end > start && tokCharIs(file.Src, file.Tokens, end-1, ';') {
+	for end > start && tokCharIs(file.Tokens, end-1, ';') {
 		end--
 	}
 	return start, end
 }
 
 func skipStmtSeparators(file *File, start int) int {
-	for start < len(file.Tokens) && tokCharIs(file.Src, file.Tokens, start, ';') {
+	for start < len(file.Tokens) && tokCharIs(file.Tokens, start, ';') {
 		start++
 	}
 	return start
@@ -652,7 +643,7 @@ func lineContinues(file *File, prev int, next int) bool {
 	if isBinaryOp(file, prev) || tokenTextIs(file.Src, file.Tokens[prev], ",") || tokenTextIs(file.Src, file.Tokens[prev], ".") {
 		return true
 	}
-	if tokCharIs(file.Src, file.Tokens, next, '.') || tokCharIs(file.Src, file.Tokens, next, ',') {
+	if tokCharIs(file.Tokens, next, '.') || tokCharIs(file.Tokens, next, ',') {
 		return true
 	}
 	return false

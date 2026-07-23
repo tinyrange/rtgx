@@ -265,10 +265,18 @@ func assignKind(file syntax.File, tok int) int {
 }
 
 func trimExprSpan(file syntax.File, start int, end int) (int, int) {
-	for start < end && (tokCharIs(&file, start, ';') || tokCharIs(&file, start, ',')) {
+	for start < end {
+		ch := file.Tokens[start].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
+		if ch != int(';') && ch != int(',') {
+			break
+		}
 		start++
 	}
-	for end > start && (tokCharIs(&file, end-1, ';') || tokCharIs(&file, end-1, ',')) {
+	for end > start {
+		ch := file.Tokens[end-1].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
+		if ch != int(';') && ch != int(',') {
+			break
+		}
 		end--
 	}
 	return start, end

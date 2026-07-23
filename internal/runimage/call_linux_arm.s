@@ -1,0 +1,37 @@
+//go:build !renvo && linux && arm
+
+#include "textflag.h"
+
+TEXT ·callJIT(SB),NOSPLIT,$32-28
+	MOVW R4, 0(R13)
+	MOVW R5, 4(R13)
+	MOVW R6, 8(R13)
+	MOVW R7, 12(R13)
+	MOVW R8, 16(R13)
+	MOVW R9, 20(R13)
+	MOVW g, 24(R13)
+	MOVW R11, 28(R13)
+	MOVW entry+0(FP), R9
+	MOVW stackTop+4(FP), R8
+	MOVW argsData+8(FP), R0
+	MOVW argsLen+12(FP), R1
+	MOVW envData+16(FP), R2
+	MOVW envLen+20(FP), R3
+	MOVW R13, R12
+	MOVW R8, R13
+	SUB $16, R13
+	MOVW R12, 12(R13)
+	BL (R9)
+	MOVW R0, R12
+	MOVW 12(R13), R9
+	MOVW R9, R13
+	MOVW 0(R13), R4
+	MOVW 4(R13), R5
+	MOVW 8(R13), R6
+	MOVW 12(R13), R7
+	MOVW 16(R13), R8
+	MOVW 20(R13), R9
+	MOVW 24(R13), g
+	MOVW 28(R13), R11
+	MOVW R12, ret+24(FP)
+	RET

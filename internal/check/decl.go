@@ -293,21 +293,22 @@ func findDeclAssign(file syntax.File, start int, end int) int {
 	bracketDepth := 0
 	braceDepth := 0
 	for i := start; i < end; i++ {
-		if tokCharIs(&file, i, '(') {
+		ch := file.Tokens[i].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
+		if ch == int('(') {
 			parenDepth++
-		} else if tokCharIs(&file, i, ')') {
+		} else if ch == int(')') {
 			if parenDepth > 0 {
 				parenDepth--
 			}
-		} else if tokCharIs(&file, i, '[') {
+		} else if ch == int('[') {
 			bracketDepth++
-		} else if tokCharIs(&file, i, ']') {
+		} else if ch == int(']') {
 			if bracketDepth > 0 {
 				bracketDepth--
 			}
-		} else if tokCharIs(&file, i, '{') {
+		} else if ch == int('{') {
 			braceDepth++
-		} else if tokCharIs(&file, i, '}') {
+		} else if ch == int('}') {
 			if braceDepth > 0 {
 				braceDepth--
 			}

@@ -1004,7 +1004,7 @@ func renvo386EmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 					if fnIndex < 0 {
 						return false
 					}
-					renvoAsmPrimaryImm(a, fnIndex+1)
+					renvoAsmPrimaryImm(a, renvoFunctionValueTag(g, fnIndex))
 					return true
 				}
 				renvoAsmLoadPrimaryBss(a, globalOffset)
@@ -1043,7 +1043,10 @@ func renvo386EmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 			return renvoEmitRuntimeTruncateSlice(g, ep, e)
 		}
 		callee := renvoExprIdentCode(p, ep, e.left)
-		if callee != renvoIdentSyscall && (renvoFunctionValueCalleeType(g, ep, e.left) != 0 || renvoFuncInfoFromCall(g, ep, e.left) >= 0) {
+		if callee == renvoIdentSyscall || renvoExprIsIdentText(p, ep, e.left, "renvo_runtime_Syscall") {
+			return renvoEmitArbitrarySyscall(g, ep, idx)
+		}
+		if renvoFunctionValueCalleeType(g, ep, e.left) != 0 || renvoFuncInfoFromCall(g, ep, e.left) >= 0 {
 			return renvoEmitUserCall(g, ep, idx)
 		}
 		if e.argCount == 1 && renvoExprIsIdentText(p, ep, e.left, "Sizeof") {
@@ -1052,9 +1055,6 @@ func renvo386EmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		}
 		if callee == renvoIdentPanic {
 			return renvoEmitBuiltinPanic(g, ep, idx)
-		}
-		if callee == renvoIdentSyscall {
-			return renvoEmitArbitrarySyscall(g, ep, idx)
 		}
 		if callee == renvoIdentNew {
 			return renvoEmitBuiltinNew(g, ep, idx)

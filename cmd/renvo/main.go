@@ -14,6 +14,31 @@ func main() {
 }
 
 func run(args []string, env []string) int {
+	if driver.ScriptCommandRequested(args) {
+		if len(args) == 3 && (args[2] == "--help" || args[2] == "-h") {
+			fmt.Fprint(os.Stdout, driver.RunHelpText)
+			return 0
+		}
+		result := driver.RunScriptCommand(args, env, nil, os.Stdin, os.Stdout, os.Stderr)
+		if result.Ok {
+			return result.ExitCode
+		}
+		switch result.Error {
+		case driver.RunErrCompile:
+			printCompileError(result.Compile)
+		case driver.RunErrBackend:
+			fmt.Fprintf(os.Stderr, "renvo run: backend unavailable; set %s\n", driver.BackendEnv)
+		case driver.RunErrArguments:
+			fmt.Fprintf(os.Stderr, "renvo run: invalid arguments: %s\n%s", result.ErrorArg, driver.RunHelpText)
+		case driver.RunErrImage:
+			fmt.Fprintln(os.Stderr, "renvo run: backend returned an invalid linked image")
+		case driver.RunErrExecute:
+			fmt.Fprintf(os.Stderr, "renvo run: execution failed: %s\n", result.ErrorArg)
+		default:
+			fmt.Fprintln(os.Stderr, "renvo run: failed")
+		}
+		return result.ExitCode
+	}
 	if driver.CommandHelpRequested(args) {
 		fmt.Fprint(os.Stdout, driver.HelpText)
 		return 0
@@ -99,6 +124,12 @@ func printOptionError(options driver.Options) {
 		fmt.Fprintln(os.Stderr, "renvo: missing arena size after -arena-size")
 	case driver.ParseErrInvalidArenaSize:
 		fmt.Fprintf(os.Stderr, "renvo: invalid arena size: %s\n", options.ErrorArg)
+	case driver.ParseErrScriptRequiresFile:
+		fmt.Fprintln(os.Stderr, "renvo: -script requires one explicit .go file")
+	case driver.ParseErrScriptFileCount:
+		fmt.Fprintln(os.Stderr, "renvo: -script accepts exactly one .go file")
+	case driver.ParseErrConflictingEmit:
+		fmt.Fprintln(os.Stderr, "renvo: -emit-unit and -emit-image cannot be used together")
 	default:
 		fmt.Fprintf(os.Stderr, "renvo: option parse failed with error %d\n", options.Error)
 	}

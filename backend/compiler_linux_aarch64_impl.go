@@ -48,7 +48,11 @@ func renvoCompileAarch64(input []int, output int, arenaSize int) int {
 	var result renvoCompileResult
 	result = renvoTryCompileScalarProgramAarch64Scratch(&prog, &meta)
 	if result.ok {
-		write(output, result.data, -1)
+		data := result.data
+		if renvoFixedTarget == 0 {
+			data = renvoCompileOutputData(data, renvoTarget)
+		}
+		write(output, data, -1)
 		return 0
 	}
 	renvoPrintErr("renvo: compilation failed\n")
@@ -110,12 +114,14 @@ func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarc
 	}
 	if targetIsDarwin() {
 		a.codeOffset = renvoDarwinArm64CodeOffset
-		g.darwinEntryOff = a.bssSize
-		a.bssSize += 24
-		renvoAarch64AsmMovRegAbs(a, 9, g.darwinEntryOff, renvoAbsBssReloc)
-		renvoAarch64AsmStoreRegMem(a, 0, 9, 0, 8)
-		renvoAarch64AsmStoreRegMem(a, 1, 9, 8, 8)
-		renvoAarch64AsmStoreRegMem(a, 2, 9, 16, 8)
+		if !(renvoFixedTarget == 0 && renvoCompilerEmitImage) {
+			g.darwinEntryOff = a.bssSize
+			a.bssSize += 24
+			renvoAarch64AsmMovRegAbs(a, 9, g.darwinEntryOff, renvoAbsBssReloc)
+			renvoAarch64AsmStoreRegMem(a, 0, 9, 0, 8)
+			renvoAarch64AsmStoreRegMem(a, 1, 9, 8, 8)
+			renvoAarch64AsmStoreRegMem(a, 2, 9, 16, 8)
+		}
 	}
 	if renvoFixedTarget != 0 {
 		g.funcLabels = make([]int, 0, len(meta.funcs))
@@ -126,12 +132,25 @@ func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarc
 	}
 	renvoInitFuncQueue(g, len(meta.funcs))
 	renvoLinearMarkFunc(g, appIndex)
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		// Give the callable image entry a normal frame and preserve its four
+		// ABI words across runtime/global initialization.
+		renvoAarch64AsmEmit(a, 0xa9bf7bfd)
+		renvoAarch64AsmEmit(a, 0x910003fd)
+		renvoAarch64AsmAddRegImm(a, 31, 31, -32)
+		renvoAarch64AsmStoreRegMem(a, 0, 31, 0, 8)
+		renvoAarch64AsmStoreRegMem(a, 1, 31, 8, 8)
+		renvoAarch64AsmStoreRegMem(a, 2, 31, 16, 8)
+		renvoAarch64AsmStoreRegMem(a, 3, 31, 24, 8)
+	}
 	renvoEmitPersistentArenaReady(g)
 	if !renvoLinearInitGlobals(g) {
 		return nil
 	}
 	entryOK := false
-	if targetIsWindows() {
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		entryOK = renvoEmitImageEntryArgsAarch64(g, appIndex)
+	} else if targetIsWindows() {
 		entryOK = renvoEmitProgramEntryArgsWindowsArm64(g, appIndex)
 	} else if targetIsDarwin() {
 		entryOK = renvoEmitProgramEntryArgsDarwinArm64(g, appIndex)
@@ -145,7 +164,10 @@ func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarc
 	if !renvoEmitProgramPanicCheck(g) {
 		return nil
 	}
-	if targetIsWindows() {
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		renvoAsmLeave(a)
+		renvoAsmRet(a)
+	} else if targetIsWindows() {
 		renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
 		renvoWinArm64CallImport(a, renvoWinImportExitProcess)
 		renvoAsmRet(a)
@@ -159,6 +181,35 @@ func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarc
 		renvoAsmSyscall(a)
 	}
 	return session
+}
+
+func renvoEmitImageEntryArgsAarch64(g *renvoLinearGen, appIndex int) bool {
+	app := &g.meta.funcs[appIndex]
+	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
+		return false
+	}
+	renvoAarch64AsmLoadRegMem(&g.asm, 0, 31, 0, 8)
+	renvoAarch64AsmLoadRegMem(&g.asm, 1, 31, 8, 8)
+	renvoAarch64AsmLoadRegMem(&g.asm, 2, 31, 16, 8)
+	renvoAarch64AsmLoadRegMem(&g.asm, 3, 31, 24, 8)
+	if app.paramCount == 0 {
+		return true
+	}
+	if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) {
+		return false
+	}
+	// Native entry ABI: X0=argsData, X1=argsLen, X2=envData,
+	// X3=envLen. Renvo slice words use X3/X4/X1 and X2/X5/X6.
+	if app.paramCount == 2 {
+		if !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) {
+			return false
+		}
+		renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegR8, 3)
+		renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegR9, 3)
+	}
+	renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegRdi, 0)
+	renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegRsi, 1)
+	return true
 }
 
 func (s *renvoAarch64ProgramSession) step(functionLimit int) bool {
@@ -346,6 +397,9 @@ func renvoAsmImageAarch64(a *renvoAsm) []byte {
 		for i := 0; i < len(a.data); i++ {
 			out = append(out, a.data[i])
 		}
+		if renvoFixedTarget == 0 {
+			return renvoAppendReplLinkTable(out, a)
+		}
 		return out
 	}
 	var sec renvoElfSymbolSections
@@ -372,6 +426,9 @@ func renvoAsmImageAarch64(a *renvoAsm) []byte {
 	}
 	out = renvoAppendUntil(out, sec.shoff)
 	out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
+	if renvoFixedTarget == 0 {
+		return renvoAppendReplLinkTable(out, a)
+	}
 	return out
 }
 

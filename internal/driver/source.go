@@ -813,6 +813,16 @@ func isGoSourceName(name string) bool {
 	return stringHasSuffix(name, ".go") && name[0] != '.' && name[0] != '_' && !stringHasSuffix(name, "_test.go")
 }
 
+// SourceFileEnabled reports whether a source filename and its build constraints
+// select the file for a target. Interactive tooling uses the same selection
+// rules as compilation when discovering importable packages.
+func SourceFileEnabled(name string, src []byte, target string, tags []string) (bool, bool) {
+	if !isGoSourceName(name) || !sourceFilenameEnabled(name, target) {
+		return false, true
+	}
+	return sourceConstraintsEnabled(src, target, tags)
+}
+
 func filterSourcesForTargetTags(files []load.SourceFile, target string, tags []string) ([]load.SourceFile, string, bool) {
 	out := make([]load.SourceFile, 0, len(files))
 	for i := 0; i < len(files); i++ {

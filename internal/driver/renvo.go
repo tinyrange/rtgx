@@ -36,6 +36,9 @@ func RunRenvoCommandCapture(args []string, env []string) (int, string) {
 }
 
 func runRenvoCommand(args []string, env []string) (int, string) {
+	if len(args) > 1 && args[1] == "run" {
+		return runRenvoScript(args, env)
+	}
 	if CommandHelpRequested(args) {
 		return 0, HelpText
 	}
@@ -85,8 +88,8 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 	}
 	virtualTarget := target
 	target = backendTargetForOptions(target, built.Options.Mode)
-	ok := backendbridge.CompileUnitToOutputStripEnv(unit, target, output, built.Options.Strip, built.Options.WindowsGUI, arenaSize, built.Options.ModuleLicense, args, env)
-	if ok && virtualTarget == "browser/wasm32" {
+	ok := backendbridge.CompileUnitToOutputStripEnv(unit, target, output, built.Options.Strip, built.Options.WindowsGUI, built.Options.EmitImage, arenaSize, built.Options.ModuleLicense, args, env)
+	if ok && virtualTarget == "browser/wasm32" && !built.Options.EmitImage {
 		wasm, readErr := os.ReadFile(output)
 		if readErr != nil || os.WriteFile(output, PackageBrowserHTML(wasm), 0644) != nil {
 			ok = false
@@ -224,6 +227,11 @@ func (fs RenvoFS) ReadFile(path string) ([]byte, bool) {
 		if used == len(out) {
 			next := make([]byte, len(out)*2)
 			copy(next, out)
+			// Arena allocation does not garbage-collect superseded growth
+			// buffers. Release their complete pages as soon as the copy is
+			// finished so one unusually large compiler source file does not
+			// determine the frontend's peak resident memory.
+			arena.DiscardBytes(out)
 			out = next
 		}
 		n := read(fd, out[used:], -1)
@@ -237,6 +245,10 @@ func (fs RenvoFS) ReadFile(path string) ([]byte, bool) {
 		used += n
 	}
 	close(fd)
+	// The returned source is immutable. Release complete pages in the unused
+	// tail now instead of carrying every file's read-capacity slack through
+	// parsing and checking.
+	arena.DiscardBytes(out[used:])
 	return out[:used], true
 }
 
