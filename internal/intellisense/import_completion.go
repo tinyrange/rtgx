@@ -1,7 +1,8 @@
-package driver
+package intellisense
 
 import (
 	"renvo.dev/internal/arena"
+	"renvo.dev/internal/driver"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/syntax"
 )
@@ -155,7 +156,7 @@ func importQuoteClosed(source []byte, caret int, quote byte) bool {
 
 // CompleteStandardImportPaths returns target-enabled packages present in the
 // configured standard-library tree.
-func CompleteStandardImportPaths(stdRoot string, target string, tags []string, prefix string, fs SourceFS) []string {
+func CompleteStandardImportPaths(stdRoot string, target string, tags []string, prefix string, fs driver.SourceFS) []string {
 	stdRoot = load.CleanPath(stdRoot)
 	var out []string
 	completeImportDirectory(stdRoot, "", target, tags, prefix, fs, &out)
@@ -163,7 +164,7 @@ func CompleteStandardImportPaths(stdRoot string, target string, tags []string, p
 	return out
 }
 
-func completeImportDirectory(dir string, importPath string, target string, tags []string, prefix string, fs SourceFS, out *[]string) {
+func completeImportDirectory(dir string, importPath string, target string, tags []string, prefix string, fs driver.SourceFS, out *[]string) {
 	entries, ok := fs.ReadDir(dir)
 	if !ok {
 		return
@@ -171,15 +172,14 @@ func completeImportDirectory(dir string, importPath string, target string, tags 
 	sortDirEntries(entries)
 	packageEnabled := false
 	for i := 0; i < len(entries); i++ {
-		if entries[i].IsDir || !isGoSourceName(entries[i].Name) ||
-			!sourceFilenameEnabled(entries[i].Name, target) {
+		if entries[i].IsDir {
 			continue
 		}
 		mark := arena.Mark()
 		source, readOK := fs.ReadFile(load.JoinPath(dir, entries[i].Name))
 		enabled := false
 		if readOK {
-			enabled, _ = sourceConstraintsEnabled(source, target, tags)
+			enabled, _ = driver.SourceFileEnabled(entries[i].Name, source, target, tags)
 		}
 		arena.Discard(mark, arena.Mark())
 		if enabled {
@@ -200,6 +200,18 @@ func completeImportDirectory(dir string, importPath string, target string, tags 
 			childPath = importPath + "/" + entries[i].Name
 		}
 		completeImportDirectory(load.JoinPath(dir, entries[i].Name), childPath, target, tags, prefix, fs, out)
+	}
+}
+
+func sortDirEntries(entries []driver.DirEntry) {
+	for i := 1; i < len(entries); i++ {
+		item := entries[i]
+		j := i - 1
+		for j >= 0 && entries[j].Name > item.Name {
+			entries[j+1] = entries[j]
+			j--
+		}
+		entries[j+1] = item
 	}
 }
 

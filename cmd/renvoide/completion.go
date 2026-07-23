@@ -5,6 +5,7 @@ import (
 	"renvo.dev/internal/arena"
 	"renvo.dev/internal/check"
 	"renvo.dev/internal/driver"
+	"renvo.dev/internal/intellisense"
 	"renvo.dev/internal/load"
 )
 
@@ -31,9 +32,9 @@ func (fs completionOverlayFS) PathExists(path string) bool {
 
 func (f *MainForm) completeEditor(source []byte, caret int) []ide.Completion {
 	mark := arena.Mark()
-	importContext := driver.ImportPathAt(source, caret)
+	importContext := intellisense.ImportPathAt(source, caret)
 	if importContext.Ok {
-		paths := driver.CompleteStandardImportPaths(
+		paths := intellisense.CompleteStandardImportPaths(
 			completionStdRoot(f.env), f.selectedTarget, nil,
 			importContext.Prefix, completionOverlayFS{path: load.CleanPath(f.currentPath), data: source},
 		)

@@ -1,9 +1,11 @@
-package driver
+package intellisense
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"renvo.dev/internal/driver"
 )
 
 func TestImportPathAtDirectGroupedAndClosedImports(t *testing.T) {
@@ -42,11 +44,11 @@ func TestCompleteStandardImportPathsUsesBundledSourceLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdRoot := filepath.Join(filepath.Clean(filepath.Join(wd, "..", "..")), "std")
-	got := CompleteStandardImportPaths(stdRoot, "linux/amd64", nil, "enc", OSFS{})
+	got := CompleteStandardImportPaths(stdRoot, "linux/amd64", nil, "enc", driver.OSFS{})
 	if !containsImportPath(got, "encoding/binary") {
 		t.Fatalf("encoding completion = %#v", got)
 	}
-	all := CompleteStandardImportPaths(stdRoot, "linux/amd64", nil, "", OSFS{})
+	all := CompleteStandardImportPaths(stdRoot, "linux/amd64", nil, "", driver.OSFS{})
 	for _, want := range []string{"fmt", "strings", "unicode/utf8"} {
 		if !containsImportPath(all, want) {
 			t.Fatalf("standard import completion missing %q: %#v", want, all)

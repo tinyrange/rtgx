@@ -1,10 +1,13 @@
-package driver
+package intellisense
 
 import (
 	"renvo.dev/internal/check"
+	"renvo.dev/internal/driver"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/syntax"
 )
+
+type Diagnostic = driver.Diagnostic
 
 // AnalysisResult is the frontend-only result used by interactive tools. It
 // stops after checking and therefore never lowers, links, or invokes a backend.

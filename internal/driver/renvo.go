@@ -227,6 +227,11 @@ func (fs RenvoFS) ReadFile(path string) ([]byte, bool) {
 		if used == len(out) {
 			next := make([]byte, len(out)*2)
 			copy(next, out)
+			// Arena allocation does not garbage-collect superseded growth
+			// buffers. Release their complete pages as soon as the copy is
+			// finished so one unusually large compiler source file does not
+			// determine the frontend's peak resident memory.
+			arena.DiscardBytes(out)
 			out = next
 		}
 		n := read(fd, out[used:], -1)
