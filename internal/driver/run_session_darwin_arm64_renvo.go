@@ -77,15 +77,15 @@ func (s *LinkedImageSession) Prepare() {
 
 func (s *LinkedImageSession) Run(native []byte, script string, args []string, env []string) int {
 	if renvoRunJITCall == nil {
-		return -1
+		return renvoRunDarwinFailure("JIT entry bridge is unavailable")
 	}
 	entry, memorySize, segments, imports, libraries, ok := linkedimage.DarwinLayout(native)
 	if !ok {
-		return -1
+		return renvoRunDarwinFailure("invalid Mach-O layout")
 	}
 	linkSymbols, ok := linkedimage.PersistentSymbols(native, memorySize)
 	if !ok {
-		return -1
+		return renvoRunDarwinFailure("invalid persistent-symbol trailer")
 	}
 	newSymbols := 0
 	for i := 0; i < len(linkSymbols); i++ {
@@ -94,10 +94,10 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 		}
 	}
 	if len(s.mappings) >= cap(s.mappings) || len(s.symbols)+newSymbols > cap(s.symbols) {
-		return -1
+		return renvoRunDarwinFailure("session capacity exhausted")
 	}
 	if len(s.libraryHandles)+len(libraries) > cap(s.libraryHandles) {
-		return -1
+		return renvoRunDarwinFailure("library capacity exhausted")
 	}
 	memorySize = renvoRunDarwinPageAlign(memorySize)
 	// Reserve one contiguous address range so the image's relative references
@@ -111,7 +111,7 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 		-1, 0,
 	)
 	if base == -1 || base == 0 {
-		return -1
+		return renvoRunDarwinFailure("address-space reservation failed")
 	}
 	jitWritable := false
 	for i := 0; i < len(segments); i++ {
@@ -137,7 +137,7 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 				renvoRunDarwinJITWriteProtect(1)
 			}
 			renvoRunDarwinMunmap(base, memorySize)
-			return -1
+			return renvoRunDarwinFailure("segment mapping failed")
 		}
 	}
 	for i := 0; i < len(segments); i++ {
@@ -155,7 +155,7 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 				renvoRunDarwinJITWriteProtect(1)
 			}
 			renvoRunDarwinMunmap(base, memorySize)
-			return -1
+			return renvoRunDarwinFailure("dynamic library load failed")
 		}
 		s.libraryHandles = append(s.libraryHandles, handles[i])
 	}
@@ -173,7 +173,7 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 				renvoRunDarwinJITWriteProtect(1)
 			}
 			renvoRunDarwinMunmap(base, memorySize)
-			return -1
+			return renvoRunDarwinFailure("dynamic library resolution failed")
 		}
 		name := item.Name
 		if len(name) > 0 && name[0] == '_' {
@@ -186,7 +186,7 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 				renvoRunDarwinJITWriteProtect(1)
 			}
 			renvoRunDarwinMunmap(base, memorySize)
-			return -1
+			return renvoRunDarwinFailure("dynamic symbol resolution failed")
 		}
 		renvoRunDarwinStoreWord(base+item.Address, address)
 	}
@@ -232,7 +232,7 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 				renvoRunDarwinJITWriteProtect(1)
 			}
 			renvoRunDarwinMunmap(base, memorySize)
-			return -1
+			return renvoRunDarwinFailure("segment protection failed")
 		}
 	}
 	renvoRunDarwinInvalidateInstructionCache(base, memorySize)
@@ -250,7 +250,7 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 	if s.stack == -1 || s.stack == 0 {
 		renvoRunDarwinMunmap(base, memorySize)
 		s.stack = 0
-		return -1
+		return renvoRunDarwinFailure("JIT stack allocation failed")
 	}
 	programArgs := make([]string, 1, len(args)+1)
 	programArgs[0] = script
@@ -283,6 +283,13 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 		}
 	}
 	return 0
+}
+
+func renvoRunDarwinFailure(message string) int {
+	print("renvo: Darwin linked-image loader: ")
+	print(message)
+	print("\n")
+	return -1
 }
 
 func (s *LinkedImageSession) findSymbol(id int) int {

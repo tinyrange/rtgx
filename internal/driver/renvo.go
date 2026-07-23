@@ -245,6 +245,10 @@ func (fs RenvoFS) ReadFile(path string) ([]byte, bool) {
 		used += n
 	}
 	close(fd)
+	// The returned source is immutable. Release complete pages in the unused
+	// tail now instead of carrying every file's read-capacity slack through
+	// parsing and checking.
+	arena.DiscardBytes(out[used:])
 	return out[:used], true
 }
 

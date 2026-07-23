@@ -364,6 +364,7 @@ func TestBundledFrontendNativeREPLSession(t *testing.T) {
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "PWD="+root)
 	if out, err := cmd.CombinedOutput(); err != nil {
+		logNativeFrontendCrash(t, cmd, stage1)
 		t.Fatalf("native pure Renvo REPL build failed: %v\n%s", err, out)
 	}
 	cmd = exec.Command(replBinary)
@@ -400,6 +401,28 @@ func TestBundledFrontendNativeREPLSession(t *testing.T) {
 			t.Fatalf("native REPL output missing %q:\n%s", want, text)
 		}
 	}
+}
+
+func logNativeFrontendCrash(t *testing.T, failed *exec.Cmd, executable string) {
+	t.Helper()
+	if runtime.GOOS != "windows" || os.Getenv("RENVO_WINDOWS_GDB") == "" {
+		return
+	}
+	args := []string{
+		"--batch",
+		"-ex=run",
+		"-ex=info registers",
+		"-ex=bt",
+		"-ex=x/24i $pc-32",
+		"--args",
+		executable,
+	}
+	args = append(args, failed.Args[1:]...)
+	debugger := exec.Command("gdb", args...)
+	debugger.Dir = failed.Dir
+	debugger.Env = failed.Env
+	out, err := debugger.CombinedOutput()
+	t.Logf("native frontend crash diagnostics: %v\n%s", err, out)
 }
 
 func bundleHasNativeImport(imports []linkedimage.NativeImport, name string) bool {
