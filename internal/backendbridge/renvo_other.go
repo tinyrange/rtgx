@@ -17,8 +17,12 @@ func (s *CompileSession) Result() bool {
 	return s != nil && s.inner != nil && s.inner.Result()
 }
 
-func CompileUnitToOutputStripEnv(unit []byte, targetName string, outputPath string, stripSymbols bool, windowsGUI bool, arenaSize int, moduleLicense string, args []string, env []string) bool {
+func CompileUnitToOutputStripEnv(unit []byte, targetName string, outputPath string, stripSymbols bool, windowsGUI bool, emitImage bool, arenaSize int, moduleLicense string, args []string, env []string) bool {
 	_ = args
 	_ = env
-	return renvo.RenvoCompileUnitToOutputWithOptions(unit, targetName, outputPath, renvo.RenvoCompileOptions{ArenaSize: arenaSize, StripSymbols: stripSymbols, WindowsGUI: windowsGUI, ModuleLicense: moduleLicense})
+	return renvo.RenvoCompileUnitToOutputWithOptions(unit, targetName, outputPath, renvo.RenvoCompileOptions{ArenaSize: arenaSize, StripSymbols: stripSymbols, WindowsGUI: windowsGUI, EmitImage: emitImage, ModuleLicense: moduleLicense})
+}
+
+func CompileUnitToImage(unit []byte, targetName string, stripSymbols bool, arenaSize int, moduleLicense string) ([]byte, bool) {
+	return renvo.RenvoCompileUnitToBytesWithOptions(unit, targetName, renvo.RenvoCompileOptions{ArenaSize: arenaSize, StripSymbols: stripSymbols, EmitImage: true, ModuleLicense: moduleLicense})
 }

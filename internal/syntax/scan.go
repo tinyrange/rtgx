@@ -70,13 +70,13 @@ func scanTokens(src []byte) ([]Token, bool) {
 			if size >= 2 && size <= 9 || size == 11 {
 				kind = keywordKind(src, start, i, c)
 			}
-			tokens = append(tokens, MakeToken(kind, start, i, line))
+			tokens = append(tokens, Token{KindLine: kind | line<<TokenOperatorLineShift, Start: start, End: i})
 			continue
 		}
 		if c >= '0' && c <= '9' {
 			start := i
 			i = scanNumberEnd(src, i)
-			tokens = append(tokens, MakeToken(TokenNumber, start, i, line))
+			tokens = append(tokens, Token{KindLine: TokenNumber | line<<TokenOperatorLineShift, Start: start, End: i})
 			continue
 		}
 		if c == '"' {
@@ -111,7 +111,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 				break
 			}
 			i++
-			tokens = append(tokens, MakeToken(TokenString, start, i, line))
+			tokens = append(tokens, Token{KindLine: TokenString | line<<TokenOperatorLineShift, Start: start, End: i})
 			continue
 		}
 		if c == '`' {
@@ -129,7 +129,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 				break
 			}
 			i++
-			tokens = append(tokens, MakeToken(TokenString, start, i, tokenLine))
+			tokens = append(tokens, Token{KindLine: TokenString | tokenLine<<TokenOperatorLineShift, Start: start, End: i})
 			continue
 		}
 		if c == '\'' {
@@ -150,7 +150,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 				break
 			}
 			i++
-			tokens = append(tokens, MakeToken(TokenChar, start, i, line))
+			tokens = append(tokens, Token{KindLine: TokenChar | line<<TokenOperatorLineShift, Start: start, End: i})
 			continue
 		}
 		start := i
@@ -177,7 +177,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 				}
 			}
 		}
-		tok := MakeToken(TokenOperator, start, i, line)
+		tok := Token{KindLine: TokenOperator | line<<TokenOperatorLineShift, Start: start, End: i}
 		if i == start+1 && c <= TokenOperatorCharMask {
 			tok.KindLine = tok.KindLine | int(c)<<TokenOperatorCharShift
 		}
@@ -186,7 +186,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 	if line > TokenLineLimit {
 		ok = false
 	}
-	tokens = append(tokens, MakeToken(TokenEOF, len(src), len(src), line))
+	tokens = append(tokens, Token{KindLine: TokenEOF | line<<TokenOperatorLineShift, Start: len(src), End: len(src)})
 	return tokens, ok
 }
 

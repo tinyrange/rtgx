@@ -123,8 +123,8 @@ func renvoDarwinArm64EmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wo
 	if renvoTargetArch != renvoArchAarch64 {
 		return false
 	}
-	dylib := renvo_runtime_ArenaPersistString(renvoStringFromBytes(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd))
-	name := renvo_runtime_ArenaPersistString(renvoStringFromBytes(g.prog.src, fn.linkMethodStart, fn.linkMethodEnd))
+	dylib := renvoStringFromBytes(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd)
+	name := renvoStringFromBytes(g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
 	importIndex := renvoAsmAddDarwinStaticImport(&g.asm, dylib, name)
 	a := &g.asm
 	intReg := 0
@@ -764,6 +764,9 @@ func renvoAsmImageDarwinArm64(a *renvoAsm) []byte {
 	sig := renvoDarwinCodeSignature(out, "renvo", textFileSize)
 	for i := 0; i < len(sig); i++ {
 		out = append(out, sig[i])
+	}
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		return renvoAppendReplLinkTable(out, a)
 	}
 	return out
 }

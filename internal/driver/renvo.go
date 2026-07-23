@@ -36,6 +36,9 @@ func RunRenvoCommandCapture(args []string, env []string) (int, string) {
 }
 
 func runRenvoCommand(args []string, env []string) (int, string) {
+	if len(args) > 1 && args[1] == "run" {
+		return runRenvoScript(args, env)
+	}
 	if CommandHelpRequested(args) {
 		return 0, HelpText
 	}
@@ -85,8 +88,8 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 	}
 	virtualTarget := target
 	target = backendTargetForOptions(target, built.Options.Mode)
-	ok := backendbridge.CompileUnitToOutputStripEnv(unit, target, output, built.Options.Strip, built.Options.WindowsGUI, arenaSize, built.Options.ModuleLicense, args, env)
-	if ok && virtualTarget == "browser/wasm32" {
+	ok := backendbridge.CompileUnitToOutputStripEnv(unit, target, output, built.Options.Strip, built.Options.WindowsGUI, built.Options.EmitImage, arenaSize, built.Options.ModuleLicense, args, env)
+	if ok && virtualTarget == "browser/wasm32" && !built.Options.EmitImage {
 		wasm, readErr := os.ReadFile(output)
 		if readErr != nil || os.WriteFile(output, PackageBrowserHTML(wasm), 0644) != nil {
 			ok = false

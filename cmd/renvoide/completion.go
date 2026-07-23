@@ -31,6 +31,30 @@ func (fs completionOverlayFS) PathExists(path string) bool {
 
 func (f *MainForm) completeEditor(source []byte, caret int) []ide.Completion {
 	mark := arena.Mark()
+	importContext := driver.ImportPathAt(source, caret)
+	if importContext.Ok {
+		paths := driver.CompleteStandardImportPaths(
+			completionStdRoot(f.env), f.selectedTarget, nil,
+			importContext.Prefix, completionOverlayFS{path: load.CleanPath(f.currentPath), data: source},
+		)
+		items := make([]check.CompletionItem, 0, len(paths))
+		slash := completionLastSlash(importContext.Prefix)
+		for i := 0; i < len(paths); i++ {
+			name := paths[i]
+			if slash >= 0 && slash+1 < len(name) {
+				name = name[slash+1:]
+			}
+			if !importContext.Closed {
+				nameBytes := []byte(name)
+				nameBytes = append(nameBytes, importContext.Quote)
+				name = string(nameBytes)
+			}
+			items = append(items, check.CompletionItem{Name: name, Detail: paths[i], Kind: check.CompletionPackage})
+		}
+		staged := arena.PersistBytes(stageCompletionItems(items))
+		arena.Reset(mark)
+		return restoreCompletionItems(staged)
+	}
 	result, ok := f.analyzeEditorSource(source)
 	if !ok || !result.Workspace.Ok {
 		arena.Reset(mark)
@@ -47,6 +71,16 @@ func (f *MainForm) completeEditor(source []byte, caret int) []ide.Completion {
 	staged := arena.PersistBytes(stageCompletionItems(semantic))
 	arena.Reset(mark)
 	return restoreCompletionItems(staged)
+}
+
+func completionLastSlash(value string) int {
+	last := -1
+	for i := 0; i < len(value); i++ {
+		if value[i] == '/' {
+			last = i
+		}
+	}
+	return last
 }
 
 func completionQueryStart(source []byte, caret int) int {

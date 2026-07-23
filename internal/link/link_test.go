@@ -284,6 +284,67 @@ func Println(values ...interface{}) (int, error) { return 0, nil }
 	}
 }
 
+func TestLinkUnitsMarksOSSyscallAsCompilerIntrinsic(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "os"
+
+func syscall(number int, value int) int { return value }
+
+func appMain() int {
+	return os.ReadDirent() + syscall(1, 2)
+}
+`)},
+		{Path: "/std/os/os.go", Src: []byte(`package os
+
+func syscall(number int, value int) int { return 0 }
+func ReadDirent() int { return syscall(217, 3) }
+`)},
+	})
+	program, ok := LinkUnitsCore(result.Units, result.Root)
+	if !ok {
+		t.Fatal("LinkUnits failed")
+	}
+	if findLinkedFunc(program, "renvo_runtime_Syscall") < 0 {
+		t.Fatalf("os.syscall intrinsic alias missing:\n%s", program.Text)
+	}
+	if findLinkedFunc(program, "syscall") < 0 {
+		t.Fatalf("root syscall declaration was renamed:\n%s", program.Text)
+	}
+	if !bytes.Contains(program.Text, []byte("renvo_runtime_Syscall(217, 3)")) {
+		t.Fatalf("os.syscall call was not marked:\n%s", program.Text)
+	}
+	if !bytes.Contains(program.Text, []byte("syscall(1, 2)")) {
+		t.Fatalf("root syscall call was marked as os.syscall:\n%s", program.Text)
+	}
+}
+
+func TestLinkUnitsMarksBundledOSSyscallAsCompilerIntrinsic(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module renvo.dev\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import renvoos "renvo.dev/std/os"
+
+func appMain() int { return renvoos.ReadDirent() }
+`)},
+		{Path: "/repo/case/std/os/os.go", Src: []byte(`package os
+
+func syscall(number int, value int) int { return 0 }
+func ReadDirent() int { return syscall(217, 3) }
+`)},
+	})
+	program, ok := LinkUnitsCore(result.Units, result.Root)
+	if !ok {
+		t.Fatal("LinkUnits failed")
+	}
+	if !bytes.Contains(program.Text, []byte("renvo_runtime_Syscall(217, 3)")) {
+		t.Fatalf("bundled os.syscall call was not marked:\n%s", program.Text)
+	}
+}
+
 func TestLinkUnitsPreservesWhitespaceBeforeImportedTypeSelector(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

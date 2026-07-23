@@ -457,5 +457,8 @@ func renvoAsmImageWindowsArm64(a *renvoAsm) []byte {
 		out = append(out, a.data[i])
 	}
 	out = renvoAppendUntil(out, renvoWinHeadersSize+textRawSize+dataRawSize)
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		return renvoAppendReplLinkTable(out, a)
+	}
 	return out
 }

@@ -1,4 +1,4 @@
-//go:build renvo && !windows
+//go:build renvo && !windows && !linux
 
 package os
 

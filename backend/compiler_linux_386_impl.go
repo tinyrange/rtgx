@@ -47,7 +47,11 @@ func compileLinux386Arena(input []int, output int, arenaSize int) int {
 	var result renvoCompileResult
 	result = renvoTryCompileScalarProgram386Scratch(&prog, &meta)
 	if result.ok {
-		write(output, result.data, -1)
+		data := result.data
+		if renvoFixedTarget == 0 {
+			data = renvoCompileOutputData(data, renvoTarget)
+		}
+		write(output, data, -1)
 		return 0
 	}
 	renvoPrintErr("renvo: compilation failed\n")
@@ -79,7 +83,11 @@ func compileWindows386Arena(input []int, output int, arenaSize int) int {
 	var result renvoCompileResult
 	result = renvoTryCompileScalarProgram386Scratch(&prog, &meta)
 	if result.ok {
-		write(output, result.data, -1)
+		data := result.data
+		if renvoFixedTarget == 0 {
+			data = renvoCompileOutputData(data, renvoTarget)
+		}
+		write(output, data, -1)
 		return 0
 	}
 	renvoPrintErr("renvo: compilation failed\n")
@@ -138,14 +146,22 @@ func renvoBeginScalarProgram386(p *renvoProgram, meta *renvoMeta) *renvoLinearGe
 	if !renvoLinearInitGlobals(g) {
 		return nil
 	}
-	if !renvoEmitProgramEntryArgs386(g, appIndex) {
+	entryOK := false
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		entryOK = renvoEmitImageEntryArgs386(g, appIndex)
+	} else {
+		entryOK = renvoEmitProgramEntryArgs386(g, appIndex)
+	}
+	if !entryOK {
 		return nil
 	}
 	renvoAsmCallLabel(a, g.funcLabels[appIndex])
 	if !renvoEmitProgramPanicCheck(g) {
 		return nil
 	}
-	if targetIsWindows() {
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		renvoAsmRet(a)
+	} else if targetIsWindows() {
 		renvoAsmPushPrimary(a)
 		renvoWin386CallImport(a, renvoWinImportExitProcess)
 		renvoAsmRet(a)
@@ -155,6 +171,30 @@ func renvoBeginScalarProgram386(p *renvoProgram, meta *renvoMeta) *renvoLinearGe
 		renvoAsmSyscall(a)
 	}
 	return g
+}
+
+func renvoEmitImageEntryArgs386(g *renvoLinearGen, appIndex int) bool {
+	app := &g.meta.funcs[appIndex]
+	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
+		return false
+	}
+	if app.paramCount == 0 {
+		return true
+	}
+	if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) {
+		return false
+	}
+	// cdecl entry stack -> EBX/ESI/EDX, the first Renvo slice.
+	renvoAsmEmitText(&g.asm, "\x8b\x5c\x24\x04\x8b\x74\x24\x08\x89\xf2")
+	if app.paramCount == 1 {
+		return true
+	}
+	if !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) {
+		return false
+	}
+	// ECX/EAX/EDI, the second Renvo slice.
+	renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x0c\x8b\x44\x24\x10\x89\xc7")
+	return true
 }
 
 func renvoFinishScalarProgram386(g *renvoLinearGen) renvoCompileResult {
@@ -299,6 +339,9 @@ func renvoAsmImage386(a *renvoAsm) []byte {
 		for i := 0; i < len(a.data); i++ {
 			out = append(out, a.data[i])
 		}
+		if renvoFixedTarget == 0 {
+			return renvoAppendReplLinkTable(out, a)
+		}
 		return out
 	}
 	var sec renvoElfSymbolSections
@@ -325,6 +368,9 @@ func renvoAsmImage386(a *renvoAsm) []byte {
 	}
 	out = renvoAppendUntil(out, sec.shoff)
 	out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
+	if renvoFixedTarget == 0 {
+		return renvoAppendReplLinkTable(out, a)
+	}
 	return out
 }
 
@@ -417,5 +463,14 @@ func renvoAsmImageWindows386(a *renvoAsm) []byte {
 		out = append(out, a.data[i])
 	}
 	out = renvoAppendUntil(out, renvoWinHeadersSize+textRawSize+dataRawSize)
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		for i := 0; i+2 < len(a.absRelocs); i += 3 {
+			at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i)) & 2147483647
+			out = renvoAppend32(out, a.codeOffset+at)
+		}
+		out = renvoAppend32(out, len(a.absRelocs)/3)
+		out = append(out, 'R', 'B', 'R', '1')
+		return renvoAppendReplLinkTable(out, a)
+	}
 	return out
 }

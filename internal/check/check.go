@@ -378,7 +378,21 @@ func insertSymbolHash(symbols []Symbol, buckets []int, index int) {
 
 func hashCheckString(value string) int {
 	hash := 5381
-	for i := 0; i < len(value); i++ {
+	size := len(value)
+	if size <= 12 {
+		for i := 0; i < size; i++ {
+			hash = ((hash << 5) + hash + int(value[i])) & 2147483647
+		}
+		return hash
+	}
+	for i := 0; i < 4; i++ {
+		hash = ((hash << 5) + hash + int(value[i])) & 2147483647
+	}
+	middle := size/2 - 2
+	for i := middle; i < middle+4; i++ {
+		hash = ((hash << 5) + hash + int(value[i])) & 2147483647
+	}
+	for i := size - 4; i < size; i++ {
 		hash = ((hash << 5) + hash + int(value[i])) & 2147483647
 	}
 	return hash

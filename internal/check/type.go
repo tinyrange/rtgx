@@ -236,24 +236,25 @@ func nextStructFieldEnd(file syntax.File, start int, end int) int {
 		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && syntax.TokenLine(file.Tokens[i]) != syntax.TokenLine(file.Tokens[i-1]) {
 			return i
 		}
-		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokCharIs(&file, i, ';') {
+		ch := file.Tokens[i].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
+		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && ch == int(';') {
 			return i
 		}
-		if tokCharIs(&file, i, '(') {
+		if ch == int('(') {
 			parenDepth++
-		} else if tokCharIs(&file, i, ')') {
+		} else if ch == int(')') {
 			if parenDepth > 0 {
 				parenDepth--
 			}
-		} else if tokCharIs(&file, i, '[') {
+		} else if ch == int('[') {
 			bracketDepth++
-		} else if tokCharIs(&file, i, ']') {
+		} else if ch == int(']') {
 			if bracketDepth > 0 {
 				bracketDepth--
 			}
-		} else if tokCharIs(&file, i, '{') {
+		} else if ch == int('{') {
 			braceDepth++
-		} else if tokCharIs(&file, i, '}') {
+		} else if ch == int('}') {
 			if braceDepth > 0 {
 				braceDepth--
 			}
@@ -267,18 +268,19 @@ func findTypeTopLevelChar(file syntax.File, start int, end int, c byte) int {
 	parenDepth := 0
 	bracketDepth := 0
 	for i := start; i < end; i++ {
-		if parenDepth == 0 && bracketDepth == 0 && tokCharIs(&file, i, c) {
+		ch := file.Tokens[i].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
+		if parenDepth == 0 && bracketDepth == 0 && ch == int(c) {
 			return i
 		}
-		if tokCharIs(&file, i, '(') {
+		if ch == int('(') {
 			parenDepth++
-		} else if tokCharIs(&file, i, ')') {
+		} else if ch == int(')') {
 			if parenDepth > 0 {
 				parenDepth--
 			}
-		} else if tokCharIs(&file, i, '[') {
+		} else if ch == int('[') {
 			bracketDepth++
-		} else if tokCharIs(&file, i, ']') {
+		} else if ch == int(']') {
 			if bracketDepth > 0 {
 				bracketDepth--
 			}
@@ -293,9 +295,10 @@ func findTypeMatching(file syntax.File, open int, left byte, right byte) int {
 	}
 	depth := 0
 	for i := open; i < len(file.Tokens); i++ {
-		if tokCharIs(&file, i, left) {
+		ch := file.Tokens[i].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
+		if ch == int(left) {
 			depth++
-		} else if tokCharIs(&file, i, right) {
+		} else if ch == int(right) {
 			depth--
 			if depth == 0 {
 				return i + 1

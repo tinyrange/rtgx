@@ -179,11 +179,12 @@ func appendExprComposites(composites []CompositeExpr, file syntax.File, start in
 func exprOperandStartBefore(file syntax.File, start int, before int) int {
 	depth := 0
 	for i := before - 1; i >= start; i-- {
-		if tokCharIs(&file, i, ']') || tokCharIs(&file, i, ')') || tokCharIs(&file, i, '}') {
+		ch := file.Tokens[i].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
+		if ch == int(']') || ch == int(')') || ch == int('}') {
 			depth++
 			continue
 		}
-		if tokCharIs(&file, i, '[') || tokCharIs(&file, i, '(') || tokCharIs(&file, i, '{') {
+		if ch == int('[') || ch == int('(') || ch == int('{') {
 			if depth > 0 {
 				depth--
 				continue

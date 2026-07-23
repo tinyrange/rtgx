@@ -90,17 +90,18 @@ func definiteBuiltinExprTypeName(pkg *load.Package, info *PackageInfo, fileIndex
 	}
 	paren, bracket, brace := 0, 0, 0
 	for i := start; i < end; i++ {
-		if tokCharIs(file, i, '(') {
+		ch := file.Tokens[i].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
+		if ch == int('(') {
 			paren++
-		} else if tokCharIs(file, i, ')') {
+		} else if ch == int(')') {
 			paren--
-		} else if tokCharIs(file, i, '[') {
+		} else if ch == int('[') {
 			bracket++
-		} else if tokCharIs(file, i, ']') {
+		} else if ch == int(']') {
 			bracket--
-		} else if tokCharIs(file, i, '{') {
+		} else if ch == int('{') {
 			brace++
-		} else if tokCharIs(file, i, '}') {
+		} else if ch == int('}') {
 			brace--
 		} else if paren == 0 && bracket == 0 && brace == 0 && isExprBinaryOp(*file, i) {
 			left := definiteBuiltinExprTypeName(pkg, info, fileIndex, signature, locals, ExprSpan{StartTok: start, EndTok: i}, before, depth+1)

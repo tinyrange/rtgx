@@ -745,7 +745,20 @@ func buildCoreSymbolHash(symbols []Symbol) []int {
 
 func hashCoreToken(src []byte, start int, size int) int {
 	hash := 5381
-	for i := 0; i < size; i++ {
+	if size <= 12 {
+		for i := 0; i < size; i++ {
+			hash = ((hash << 5) + hash + int(src[start+i])) & 2147483647
+		}
+		return hash
+	}
+	for i := 0; i < 4; i++ {
+		hash = ((hash << 5) + hash + int(src[start+i])) & 2147483647
+	}
+	middle := size/2 - 2
+	for i := middle; i < middle+4; i++ {
+		hash = ((hash << 5) + hash + int(src[start+i])) & 2147483647
+	}
+	for i := size - 4; i < size; i++ {
 		hash = ((hash << 5) + hash + int(src[start+i])) & 2147483647
 	}
 	return hash

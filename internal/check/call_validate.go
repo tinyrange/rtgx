@@ -46,7 +46,7 @@ func invalidDefiniteCallArgumentType(pkg *load.Package, info *PackageInfo, fileI
 		ref := refs[refIndex]
 		calleeTok := ref.Token
 		open := calleeTok + 1
-		if open >= caller.BodyEnd || !tokCharIs(file, open, '(') {
+		if open >= caller.BodyEnd || file.Tokens[open].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask != int('(') {
 			continue
 		}
 		if ref.Index < 0 || ref.Index >= len(info.Symbols) || ref.Index >= len(targets) {
@@ -146,7 +146,7 @@ func nextDefiniteCallComma(file *syntax.File, start int, end int) int {
 
 func definiteSignatureHasPointer(file *syntax.File, fn syntax.FuncDecl) bool {
 	for i := fn.ParamsStart; i < fn.ParamsEnd; i++ {
-		if tokCharIs(file, i, '*') {
+		if file.Tokens[i].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask == int('*') {
 			return true
 		}
 	}
@@ -170,7 +170,8 @@ func definitePointerParams(pkg *load.Package, info *PackageInfo, fileIndex int, 
 			start = segmentEnd + 1
 			continue
 		}
-		if file.Tokens[first].KindLine&255 == syntax.TokenIdent && first+1 < last && !tokCharIs(file, first+1, '.') {
+		if file.Tokens[first].KindLine&255 == syntax.TokenIdent && first+1 < last &&
+			file.Tokens[first+1].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask != int('.') {
 			pointer := definiteTypeKind(pkg, info, fileIndex, first+1, last, 0) == definiteTypePointer
 			for i := 0; i <= pending; i++ {
 				params = append(params, pointer)
@@ -227,16 +228,24 @@ func findDefinitePackageFunc(pkg *load.Package, info *PackageInfo, callerFile *s
 
 func definiteArgumentTypeKind(pkg *load.Package, info *PackageInfo, fileIndex int, caller *syntax.FuncDecl, signature *FuncSignature, localTypes *[]definiteLocalTypeSpan, localTypesReady *bool, start int, end int, before int) int {
 	file := &pkg.Files[fileIndex].File
-	for start < end && (tokCharIs(file, start, ';') || tokCharIs(file, start, ',')) {
+	for start < end {
+		ch := file.Tokens[start].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
+		if ch != int(';') && ch != int(',') {
+			break
+		}
 		start++
 	}
-	for end > start && (tokCharIs(file, end-1, ';') || tokCharIs(file, end-1, ',')) {
+	for end > start {
+		ch := file.Tokens[end-1].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
+		if ch != int(';') && ch != int(',') {
+			break
+		}
 		end--
 	}
 	if start < 0 || end <= start {
 		return definiteTypeUnknown
 	}
-	if tokCharIs(file, start, '&') {
+	if file.Tokens[start].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask == int('&') {
 		return definiteTypePointer
 	}
 	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
@@ -305,7 +314,7 @@ func collectDefiniteLocalTypes(file syntax.File, caller syntax.FuncDecl) []defin
 			continue
 		}
 		specStart := i + 1
-		if specStart < caller.BodyEnd && tokCharIs(&file, specStart, '(') {
+		if specStart < caller.BodyEnd && file.Tokens[specStart].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask == int('(') {
 			close := findTypeMatching(file, specStart, '(', ')')
 			if close <= specStart || close > caller.BodyEnd {
 				continue
@@ -362,13 +371,13 @@ func definiteTypeKind(pkg *load.Package, info *PackageInfo, fileIndex int, start
 	if start >= end {
 		return definiteTypeUnknown
 	}
-	if tokCharIs(&file, start, '*') {
+	if file.Tokens[start].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask == int('*') {
 		return definiteTypePointer
 	}
 	if file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return definiteTypeNonPointer
 	}
-	if start+1 < end && tokCharIs(&file, start+1, '.') {
+	if start+1 < end && file.Tokens[start+1].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask == int('.') {
 		return definiteTypeUnknown
 	}
 	symbolIndex := lookupPackageSymbolTextCore(info, &file, start)

@@ -63,7 +63,11 @@ func renvoCompileAmd64(input []int, output int, arenaSize int) int {
 	var result renvoCompileResult
 	result = renvoTryCompileScalarProgramAmd64Scratch(&prog, &meta)
 	if result.ok {
-		write(output, result.data, -1)
+		data := result.data
+		if renvoFixedTarget == 0 {
+			data = renvoCompileOutputData(data, renvoTarget)
+		}
+		write(output, data, -1)
 		return 0
 	}
 	renvoPrintErr("renvo: compilation failed\n")
@@ -129,6 +133,11 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 		return g
 	}
 	renvoLinearMarkFunc(g, appIndex)
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		// Preserve the four linked-image ABI words while global
+		// initialization freely uses the ordinary call registers.
+		renvoAsmEmitText(a, "\x57\x56\x52\x51")
+	}
 	if !meta.panicEnabled {
 		renvoAmd64InitRuntimeCheckRegs(g)
 	}
@@ -136,19 +145,27 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 	if !renvoLinearInitGlobals(g) {
 		return nil
 	}
-	if !renvoEmitProgramEntryArgsAmd64(g, appIndex) {
-		return nil
-	}
-	// Entry argument setup uses R12 as scratch, so restore all reserved runtime
-	// check registers after it has consumed the process stack.
-	if !meta.panicEnabled {
-		renvoAmd64InitRuntimeCheckRegs(g)
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		if !renvoEmitImageEntryArgsAmd64(g, appIndex) {
+			return nil
+		}
+	} else {
+		if !renvoEmitProgramEntryArgsAmd64(g, appIndex) {
+			return nil
+		}
+		// Entry argument setup uses R12 as scratch, so restore all reserved
+		// runtime check registers after it has consumed the process stack.
+		if !meta.panicEnabled {
+			renvoAmd64InitRuntimeCheckRegs(g)
+		}
 	}
 	renvoAsmCallLabel(a, g.funcLabels[appIndex])
 	if !renvoEmitProgramPanicCheck(g) {
 		return nil
 	}
-	if targetIsWindows() {
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		renvoAsmRet(a)
+	} else if targetIsWindows() {
 		renvoAsmCopyPrimaryToTertiary(a)
 		renvoWinAmd64CallImport(a, renvoWinImportExitProcess, 40)
 		renvoAsmRet(a)
@@ -158,6 +175,45 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 		renvoAsmSyscall(a)
 	}
 	return g
+}
+
+// A Linux linked image is entered as
+//
+//	entry(argsData, argsLen, envData, envLen) int
+//
+// where argsData and envData address Renvo []string backing arrays. The SysV
+// register order already matches the compiler calling convention for the first
+// two slice words; only the capacities and second slice need reshuffling.
+func renvoEmitImageEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
+	renvoNonNil(g)
+	app := &g.meta.funcs[appIndex]
+	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
+		return false
+	}
+	// Restore argsData, argsLen, envData, envLen.
+	renvoAsmEmitText(&g.asm, "\x59\x5a\x5e\x5f")
+	if app.paramCount == 0 {
+		return true
+	}
+	if app.paramCount > 2 {
+		return false
+	}
+	first := &g.meta.params[app.firstParam]
+	if !renvoTypeIsStringSlice(g.meta, first.typ) {
+		return false
+	}
+	if app.paramCount == 1 {
+		// RDX = args capacity = args length.
+		renvoAsmEmitText(&g.asm, "\x48\x89\xf2")
+		return true
+	}
+	second := &g.meta.params[app.firstParam+1]
+	if !renvoTypeIsStringSlice(g.meta, second.typ) {
+		return false
+	}
+	// R9=envLen, RCX=envData, RDX=argsLen, R8=envLen.
+	renvoAsmEmitText(&g.asm, "\x4c\x89\xc9\x48\x89\xd1\x48\x89\xf2\x4d\x89\xc8")
+	return true
 }
 
 func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
@@ -281,6 +337,9 @@ func renvoAsmImageAmd64(a *renvoAsm) []byte {
 		for i := 0; i < len(a.data); i++ {
 			out[pos+i] = a.data[i]
 		}
+		if renvoFixedTarget == 0 {
+			return renvoAppendReplLinkTable(out, a)
+		}
 		return out
 	}
 	var sec renvoElfSymbolSections
@@ -309,6 +368,9 @@ func renvoAsmImageAmd64(a *renvoAsm) []byte {
 	}
 	out = renvoAppendUntil(out, sec.shoff)
 	out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
+	if renvoFixedTarget == 0 {
+		return renvoAppendReplLinkTable(out, a)
+	}
 	return out
 }
 
@@ -367,5 +429,8 @@ func renvoAsmImageWindowsAmd64(a *renvoAsm) []byte {
 		out = append(out, a.data[i])
 	}
 	out = renvoAppendUntil(out, renvoWinHeadersSize+textRawSize+dataRawSize)
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		return renvoAppendReplLinkTable(out, a)
+	}
 	return out
 }

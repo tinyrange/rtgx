@@ -107,11 +107,25 @@ func appendEncodedTokensCore(out []byte, tokens []Token, transient bool) []byte 
 	prevLine := 0
 	for i := 0; i < len(tokens); i++ {
 		tok := tokens[i]
-		out = appendVarint(out, tok.KindLine&255)
-		out = appendVarint(out, tok.Start-prevStart)
-		out = appendVarint(out, tok.Size)
+		out = append(out, byte(tok.KindLine))
+		value := tok.Start - prevStart
+		if value < 128 {
+			out = append(out, byte(value))
+		} else {
+			out = appendVarint(out, value)
+		}
+		if tok.Size < 128 {
+			out = append(out, byte(tok.Size))
+		} else {
+			out = appendVarint(out, tok.Size)
+		}
 		line := tok.KindLine >> 8
-		out = appendVarint(out, line-prevLine)
+		value = line - prevLine
+		if value < 128 {
+			out = append(out, byte(value))
+		} else {
+			out = appendVarint(out, value)
+		}
 		prevStart = tok.Start
 		prevLine = line
 		if transient && (i+1)%transientMarshalChunk == 0 {

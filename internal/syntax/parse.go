@@ -456,7 +456,7 @@ func isImportName(src []byte, toks []Token, i int) bool {
 }
 
 func tokCharIs(_ []byte, toks []Token, i int, c byte) bool {
-	if i < 0 || i >= len(toks) {
+	if uint(i) >= uint(len(toks)) {
 		return false
 	}
 	packed := toks[i].KindLine

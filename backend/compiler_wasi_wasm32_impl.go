@@ -25,7 +25,11 @@ func compileWasiWasm32Arena(input []int, output int, arenaSize int) int {
 	var result renvoCompileResult
 	result = renvoTryCompileScalarProgramWasm32(&prog, &meta)
 	if result.ok {
-		write(output, result.data, -1)
+		data := result.data
+		if renvoFixedTarget == 0 {
+			data = renvoCompileOutputData(data, renvoTarget)
+		}
+		write(output, data, -1)
 		return 0
 	}
 	renvoPrintErr("renvo: wasm32 compilation failed\n")

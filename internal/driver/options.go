@@ -19,6 +19,9 @@ const (
 	ParseErrModeRequiresLinuxAmd64
 	ParseErrInvalidModuleLicense
 	ParseErrConflictingModuleLicense
+	ParseErrScriptRequiresFile
+	ParseErrScriptFileCount
+	ParseErrConflictingEmit
 )
 
 const DefaultTarget = "linux/amd64"
@@ -26,7 +29,9 @@ const ModeExecutable = "executable"
 const ModeKernelModule = "kernel-module"
 const DefaultModuleLicense = "Proprietary"
 
-const HelpText = "Usage: renvo -o <file> [-t <target>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-windows-gui] <package | file.go...>\nOptions:\n  -arena-size  set the generated program arena limit in bytes (256..1073741824)\n  -emit-unit   write the canonical linked Renvo unit without invoking a backend\n  -mode        select executable (default) or kernel-module output\n  -windows-gui select the Windows GUI subsystem instead of the console subsystem\nSource files:\n  Explicit .go files must share one directory and package. Exactly the named files are used;\n  build constraints and OS/architecture suffixes are ignored, while _test.go files are skipped.\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32 browser/wasm32\nUnsupported language/toolchain features:\n  generics, goroutines, channels, select, cgo\n"
+const HelpText = "Usage: renvo -o <file> [-t <target>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-emit-image] [-windows-gui] <package | file.go...>\n       renvo run [build options] <script.go> [-- script arguments...]\nOptions:\n  -arena-size  set the generated program arena limit in bytes (256..1073741824)\n  -emit-unit   write the canonical linked Renvo unit without invoking a backend\n  -emit-image  write a format-neutral linked image instead of an executable\n  -mode        select executable (default) or kernel-module output\n  -script      compile one file whose top-level statements form func main\n  -windows-gui select the Windows GUI subsystem instead of the console subsystem\nSource files:\n  Explicit .go files must share one directory and package. Exactly the named files are used;\n  build constraints and OS/architecture suffixes are ignored, while _test.go files are skipped.\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32 browser/wasm32\nUnsupported language/toolchain features:\n  generics, goroutines, channels, select, cgo\n"
+
+const RunHelpText = "Usage: renvo run [-s] [-tags <list>] [-arena-size <bytes>] <script.go> [-- arguments...]\nTop-level statements form func main. The script is compiled for and executed on the host target.\n"
 
 type Options struct {
 	Target        string
@@ -35,6 +40,8 @@ type Options struct {
 	Files         []string
 	Strip         bool
 	EmitUnit      bool
+	EmitImage     bool
+	Script        bool
 	WindowsGUI    bool
 	Mode          string
 	ModuleLicense string
@@ -71,6 +78,16 @@ func ParseOptions(args []string) Options {
 		}
 		if arg == "-emit-unit" {
 			options.EmitUnit = true
+			i++
+			continue
+		}
+		if arg == "-emit-image" {
+			options.EmitImage = true
+			i++
+			continue
+		}
+		if arg == "-script" {
+			options.Script = true
 			i++
 			continue
 		}
@@ -166,6 +183,15 @@ func ParseOptions(args []string) Options {
 	}
 	if options.Package == "" {
 		return parseFail(options, ParseErrMissingPackage, "", len(args))
+	}
+	if options.EmitUnit && options.EmitImage {
+		return parseFail(options, ParseErrConflictingEmit, "-emit-unit", len(args))
+	}
+	if options.Script && len(options.Files) == 0 {
+		return parseFail(options, ParseErrScriptRequiresFile, options.Package, len(args))
+	}
+	if options.Script && len(options.Files) != 1 {
+		return parseFail(options, ParseErrScriptFileCount, options.Package, len(args))
 	}
 	if options.WindowsGUI && options.Target != "windows/amd64" && options.Target != "windows/386" && options.Target != "windows/arm64" {
 		return parseFail(options, ParseErrWindowsGUIRequiresWindows, options.Target, windowsGUIAt)

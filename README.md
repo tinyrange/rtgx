@@ -69,6 +69,48 @@ RENVO_BACKEND="$PWD/renvo-backend" ./renvo \
 Running `renvo` with no arguments or with `--help` prints the complete command
 reference and target list.
 
+For small scripts, the opt-in `run` command supplies `package main` and
+`func main()` automatically:
+
+```go
+import "os"
+
+print("hello ")
+print(os.Args[1])
+print("\n")
+```
+
+```sh
+renvo run hello.go -- world
+```
+
+On Linux, `run` maps the linked image into the compiler process, applies
+read/write/execute protections per segment, and calls its entry point on an
+isolated native stack. It does not write an executable or launch a child
+process. Windows and macOS use their native process APIs for the current
+implementation.
+
+An experimental REPL is implemented as a pure Renvo application on top of that
+linked-image entry point:
+
+```sh
+./renvo-standalone -tags renvo_bundle -t linux/amd64 -s \
+  -o renvorepl ./cmd/renvorepl
+./renvorepl
+```
+
+The REPL accepts multiline expressions, statements, imports, and declarations.
+Expressions are printed automatically. Successful imports, declarations, and
+assignments become successive in-process linked-image generations.
+Stable symbol cells preserve variables, pointers, and closures while earlier
+statements are never executed again. `:history`, `:source`, `:reset`, and
+`:quit` inspect or control the live linker session.
+
+`-emit-image` exposes the same versioned `RNVI` linked-image transport without
+executing it. The transport identifies the target and native format, validates
+the payload, and presents code/data segments plus a relative entry point to
+loaders.
+
 To turn that bootstrap build into a fully standalone Renvo executable:
 
 ```sh
@@ -96,6 +138,7 @@ module `vendor` directory, or populate `RENVO_MODCACHE` beforehand.
 
 ```text
 cmd/renvo/          command-line compiler
+cmd/renvorepl/      experimental pure-Renvo interactive compiler
 cmd/renvoide/       beta graphical development environment
 internal/           parser, checker, loader, lowering, linker, and driver
 std/                Renvo's target standard library

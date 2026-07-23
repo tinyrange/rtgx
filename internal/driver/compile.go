@@ -24,6 +24,7 @@ type BackendCompileOptions struct {
 	Output        string
 	Strip         bool
 	WindowsGUI    bool
+	EmitImage     bool
 	ArenaSize     int
 	ModuleLicense string
 }
@@ -84,8 +85,8 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 	optionsBackend, acceptsOptions := backend.(OptionsBackend)
 	arenaBackend, acceptsArena := backend.(ArenaBackend)
 	arenaSize := backendArenaSize(built.Options.Target, built.Options.Tags, built.Options.ArenaSize)
-	if built.Options.Mode != ModeExecutable && acceptsOptions {
-		backendResult = optionsBackend.CompileUnitWithOptions(built.Unit, BackendCompileOptions{Target: built.Options.Target, Mode: built.Options.Mode, Output: built.Options.Output, Strip: built.Options.Strip, WindowsGUI: built.Options.WindowsGUI, ArenaSize: arenaSize, ModuleLicense: built.Options.ModuleLicense})
+	if acceptsOptions && (built.Options.Mode != ModeExecutable || built.Options.EmitImage) {
+		backendResult = optionsBackend.CompileUnitWithOptions(built.Unit, BackendCompileOptions{Target: built.Options.Target, Mode: built.Options.Mode, Output: built.Options.Output, Strip: built.Options.Strip, WindowsGUI: built.Options.WindowsGUI, EmitImage: built.Options.EmitImage, ArenaSize: arenaSize, ModuleLicense: built.Options.ModuleLicense})
 	} else if built.Options.Mode != ModeExecutable {
 		backendResult.Diagnostic = Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-006", Message: "backend does not accept output modes"}
 	} else if acceptsArena {
@@ -103,7 +104,7 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 		return compileFail(result, CompileErrBackend)
 	}
 	result.Binary = backendResult.Binary
-	if built.Options.Target == "browser/wasm32" {
+	if built.Options.Target == "browser/wasm32" && !built.Options.EmitImage {
 		result.Binary = PackageBrowserHTML(result.Binary)
 	}
 	return result

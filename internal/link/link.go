@@ -994,6 +994,9 @@ func coreCompilerIntrinsicAlias(importPath string, name string) string {
 	if importPath == "fmt" && name == "Println" {
 		return "renvo_runtime_FmtPrintln"
 	}
+	if (importPath == "os" || importPath == "renvo.dev/std/os") && name == "syscall" {
+		return "renvo_runtime_Syscall"
+	}
 	return ""
 }
 
