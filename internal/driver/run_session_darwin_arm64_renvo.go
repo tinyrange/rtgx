@@ -125,7 +125,17 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 		flags := renvoRunDarwinMapPrivate | renvoRunDarwinMapAnon | renvoRunDarwinMapFixed
 		if segment.Permissions&1 != 0 {
 			protection |= renvoRunDarwinProtExec
-			flags |= renvoRunDarwinMapJIT
+			// macOS rejects MAP_FIXED together with MAP_JIT. Punch the code
+			// segment out of the reservation, then request that now-free address
+			// as a non-fixed JIT mapping. The reservation keeps neighboring
+			// image addresses unavailable, so a matching return preserves all
+			// relative references without asking the kernel to overwrite a JIT
+			// mapping.
+			if renvoRunDarwinMunmap(base+start, end-start) != 0 {
+				renvoRunDarwinMunmap(base, memorySize)
+				return renvoRunDarwinFailure("code reservation release failed")
+			}
+			flags = renvoRunDarwinMapPrivate | renvoRunDarwinMapAnon | renvoRunDarwinMapJIT
 			if !jitWritable {
 				renvoRunDarwinJITWriteProtect(0)
 				jitWritable = true
@@ -133,6 +143,9 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 		}
 		mapped := renvoRunDarwinMmap(base+start, end-start, protection, flags, -1, 0)
 		if mapped != base+start {
+			if mapped != -1 && mapped != 0 {
+				renvoRunDarwinMunmap(mapped, end-start)
+			}
 			if jitWritable {
 				renvoRunDarwinJITWriteProtect(1)
 			}

@@ -161,6 +161,7 @@ jobs:
       - name: Run native linked-image REPL session
         env:
           RENVO_FRONTEND_BUNDLE_TESTS: "1"
+          RENVO_WINDOWS_GDB: "1"
         run: go test -count=1 -timeout 15m -run '^TestBundledFrontendNativeREPLSession$' ./frontend_tests
 
   package-tests:

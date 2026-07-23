@@ -119,6 +119,10 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	actionStart := arena.Mark()
 	actions := make([]tokenAction, actionCount)
 	actionEnd := arena.Mark()
+	// Arena allocations may align the backing array after actionStart. Derive
+	// its real address from the post-allocation mark so package-at-a-time page
+	// retirement never reaches into the next package's actions.
+	actionDataStart := actionEnd - cap(actions)*4
 	actionsOK := true
 	finalEOF := 0
 	actionOffset := 0
@@ -150,7 +154,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	appendOK := true
 	actionOffset = 0
 	for i := 0; i < len(programs); i++ {
-		packageActionStart := actionStart + actionOffset*4
+		packageActionStart := actionDataStart + actionOffset*4
 		info := -1
 		if includePackageInfo {
 			pkg := build.PackageUnit{ImportPath: programs[i].ImportPath, Name: programs[i].Package}
@@ -168,7 +172,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 			break
 		}
 		if transient {
-			arena.Discard(packageActionStart, actionStart+actionOffset*4)
+			arena.Discard(packageActionStart, actionDataStart+actionOffset*4)
 			arena.Discard(units[i].ArenaStart, units[i].ArenaEnd)
 		}
 		if includePackageInfo {
