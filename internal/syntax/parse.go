@@ -144,11 +144,11 @@ func parseFail(file File, err int, tok int) File {
 
 func parseImportDecl(file *File, start int) (int, bool) {
 	i := start + 1
-	if tokCharIs(file.Src, file.Tokens, i, '(') {
+	if tokCharIs(file.Tokens, i, '(') {
 		i++
 		for i < len(file.Tokens) && file.Tokens[i].KindLine&255 != TokenEOF {
 			i = skipImportSeparators(file, i)
-			if tokCharIs(file.Src, file.Tokens, i, ')') {
+			if tokCharIs(file.Tokens, i, ')') {
 				return i + 1, true
 			}
 			next, ok := parseImportSpec(file, i, true)
@@ -173,7 +173,7 @@ func parseImportSpec(file *File, start int, grouped bool) (int, bool) {
 		return start, false
 	}
 	if file.Tokens[pathTok].KindLine&255 != TokenString {
-		if isImportName(file.Src, file.Tokens, pathTok) {
+		if isImportName(file.Tokens, pathTok) {
 			nameTok = pathTok
 			pathTok++
 		}
@@ -184,11 +184,11 @@ func parseImportSpec(file *File, start int, grouped bool) (int, bool) {
 	end := pathTok + 1
 	next := end
 	for next < len(file.Tokens) && file.Tokens[next].KindLine&255 != TokenEOF {
-		if tokCharIs(file.Src, file.Tokens, next, ';') {
+		if tokCharIs(file.Tokens, next, ';') {
 			next++
 			break
 		}
-		if grouped && tokCharIs(file.Src, file.Tokens, next, ')') {
+		if grouped && tokCharIs(file.Tokens, next, ')') {
 			break
 		}
 		if TokenLine(file.Tokens[next]) != TokenLine(file.Tokens[pathTok]) {
@@ -208,11 +208,11 @@ func parseImportSpec(file *File, start int, grouped bool) (int, bool) {
 func parseTopDecl(file *File, start int) (int, bool) {
 	kind := file.Tokens[start].KindLine & 255
 	i := start + 1
-	if tokCharIs(file.Src, file.Tokens, i, '(') {
+	if tokCharIs(file.Tokens, i, '(') {
 		i++
 		for i < len(file.Tokens) && file.Tokens[i].KindLine&255 != TokenEOF {
 			i = skipDeclSeparators(file, i)
-			if tokCharIs(file.Src, file.Tokens, i, ')') {
+			if tokCharIs(file.Tokens, i, ')') {
 				return i + 1, true
 			}
 			next, ok := parseDeclSpec(file, kind, i, true)
@@ -244,7 +244,7 @@ func parseDeclSpec(file *File, kind int, start int, grouped bool) (int, bool) {
 	}
 	file.Decls = append(file.Decls, TopDecl{Kind: kind, NameTok: start, StartTok: start, EndTok: end})
 	i := start + 1
-	for tokCharIs(file.Src, file.Tokens, i, ',') {
+	for tokCharIs(file.Tokens, i, ',') {
 		i++
 		if i >= len(file.Tokens) || file.Tokens[i].KindLine&255 != TokenIdent || i >= end {
 			return start, false
@@ -270,7 +270,7 @@ func parseFuncDecl(file *File, start int) (FuncDecl, bool) {
 		BodyEnd:       -1,
 	}
 	i := start + 1
-	if tokCharIs(file.Src, file.Tokens, i, '(') {
+	if tokCharIs(file.Tokens, i, '(') {
 		receiverEnd := skipBalanced(file, i, '(', ')')
 		if receiverEnd <= i {
 			return fn, false
@@ -284,7 +284,7 @@ func parseFuncDecl(file *File, start int) (FuncDecl, bool) {
 	}
 	fn.NameTok = i
 	i++
-	if !tokCharIs(file.Src, file.Tokens, i, '(') {
+	if !tokCharIs(file.Tokens, i, '(') {
 		return fn, false
 	}
 	fn.ParamsStart = i
@@ -313,7 +313,7 @@ func parseFuncDecl(file *File, start int) (FuncDecl, bool) {
 func findFuncBody(file *File, start int) int {
 	i := start
 	for i < len(file.Tokens) && file.Tokens[i].KindLine&255 != TokenEOF {
-		if tokCharIs(file.Src, file.Tokens, i, '(') {
+		if tokCharIs(file.Tokens, i, '(') {
 			next := skipBalanced(file, i, '(', ')')
 			if next <= i {
 				return -1
@@ -321,7 +321,7 @@ func findFuncBody(file *File, start int) int {
 			i = next
 			continue
 		}
-		if tokCharIs(file.Src, file.Tokens, i, '[') {
+		if tokCharIs(file.Tokens, i, '[') {
 			next := skipBalanced(file, i, '[', ']')
 			if next <= i {
 				return -1
@@ -329,7 +329,7 @@ func findFuncBody(file *File, start int) int {
 			i = next
 			continue
 		}
-		if tokCharIs(file.Src, file.Tokens, i, '{') {
+		if tokCharIs(file.Tokens, i, '{') {
 			if i > 0 && (file.Tokens[i-1].KindLine&255 == TokenStruct || file.Tokens[i-1].KindLine&255 == TokenInterface) {
 				next := skipBalanced(file, i, '{', '}')
 				if next <= i {
@@ -352,20 +352,21 @@ func skipDeclSpec(file *File, start int, grouped bool) (int, int, bool) {
 	bracketDepth := 0
 	braceDepth := 0
 	for i < len(file.Tokens) && file.Tokens[i].KindLine&255 != TokenEOF {
+		c := byte(file.Tokens[i].KindLine >> TokenOperatorCharShift & TokenOperatorCharMask)
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 {
-			if grouped && tokCharIs(file.Src, file.Tokens, i, ')') {
+			if grouped && c == ')' {
 				return i, i, true
 			}
-			if tokCharIs(file.Src, file.Tokens, i, ';') {
+			if c == ';' {
 				return i, i + 1, true
 			}
 			if i > start && TokenLine(file.Tokens[i]) != line {
 				return i, i, true
 			}
 		}
-		if tokCharIs(file.Src, file.Tokens, i, '(') {
+		if c == '(' {
 			parenDepth++
-		} else if tokCharIs(file.Src, file.Tokens, i, ')') {
+		} else if c == ')' {
 			if parenDepth == 0 {
 				if grouped && bracketDepth == 0 && braceDepth == 0 {
 					return i, i, true
@@ -373,16 +374,16 @@ func skipDeclSpec(file *File, start int, grouped bool) (int, int, bool) {
 				return start, start, false
 			}
 			parenDepth--
-		} else if tokCharIs(file.Src, file.Tokens, i, '[') {
+		} else if c == '[' {
 			bracketDepth++
-		} else if tokCharIs(file.Src, file.Tokens, i, ']') {
+		} else if c == ']' {
 			if bracketDepth == 0 {
 				return start, start, false
 			}
 			bracketDepth--
-		} else if tokCharIs(file.Src, file.Tokens, i, '{') {
+		} else if c == '{' {
 			braceDepth++
-		} else if tokCharIs(file.Src, file.Tokens, i, '}') {
+		} else if c == '}' {
 			if braceDepth == 0 {
 				return start, start, false
 			}
@@ -397,7 +398,7 @@ func skipDeclSpec(file *File, start int, grouped bool) (int, int, bool) {
 }
 
 func skipBalanced(file *File, start int, open byte, close byte) int {
-	if !tokCharIs(file.Src, file.Tokens, start, open) {
+	if !tokCharIs(file.Tokens, start, open) {
 		return start
 	}
 	depth := 1
@@ -407,10 +408,7 @@ func skipBalanced(file *File, start int, open byte, close byte) int {
 		if tok.KindLine&255 == TokenEOF {
 			break
 		}
-		c := byte(0)
-		if tok.KindLine&255 == TokenOperator && tok.End == tok.Start+1 {
-			c = file.Src[tok.Start]
-		}
+		c := byte(tok.KindLine >> TokenOperatorCharShift & TokenOperatorCharMask)
 		if c == open {
 			depth++
 		} else if c == close {
@@ -425,37 +423,37 @@ func skipBalanced(file *File, start int, open byte, close byte) int {
 }
 
 func skipTopSeparators(file *File, start int) int {
-	for start < len(file.Tokens) && tokCharIs(file.Src, file.Tokens, start, ';') {
+	for start < len(file.Tokens) && tokCharIs(file.Tokens, start, ';') {
 		start++
 	}
 	return start
 }
 
 func skipImportSeparators(file *File, start int) int {
-	for start < len(file.Tokens) && tokCharIs(file.Src, file.Tokens, start, ';') {
+	for start < len(file.Tokens) && tokCharIs(file.Tokens, start, ';') {
 		start++
 	}
 	return start
 }
 
 func skipDeclSeparators(file *File, start int) int {
-	for start < len(file.Tokens) && tokCharIs(file.Src, file.Tokens, start, ';') {
+	for start < len(file.Tokens) && tokCharIs(file.Tokens, start, ';') {
 		start++
 	}
 	return start
 }
 
-func isImportName(src []byte, toks []Token, i int) bool {
+func isImportName(toks []Token, i int) bool {
 	if i < 0 || i >= len(toks) {
 		return false
 	}
 	if toks[i].KindLine&255 == TokenIdent {
 		return true
 	}
-	return tokCharIs(src, toks, i, '.')
+	return tokCharIs(toks, i, '.')
 }
 
-func tokCharIs(_ []byte, toks []Token, i int, c byte) bool {
+func tokCharIs(toks []Token, i int, c byte) bool {
 	if uint(i) >= uint(len(toks)) {
 		return false
 	}

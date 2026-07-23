@@ -4552,29 +4552,34 @@ func renvoStatementLineEnd(p *renvoProgram, start int, end int) int {
 	if start >= end {
 		return end
 	}
+	data := p.toks.data
 	line := renvoTokLine(p, start)
 	i := start
 	paren := 0
 	brack := 0
 	brace := 0
 	for i < end {
-		c := renvoTokSingleChar(p, i)
+		base := i * renvoTokenStride
+		packed := int(renvo_runtime_UnsafeInt32At(data, base))
+		kind := packed & 255
+		c := byte(packed >> 24)
+		tokLine := packed>>8&65535 | int(renvo_runtime_UnsafeInt32At(data, base+1))>>8&0xff0000
 		if i > start && paren == 0 && brack == 0 && brace == 0 {
-			if renvoTokIsKind(p, i, renvoTokEOF) {
+			if kind == renvoTokEOF {
 				return i
 			}
 			if c == ';' {
 				return i
 			}
-			if renvoTokLine(p, i) != line {
+			if tokLine != line {
 				if c == '{' {
 					return i
 				}
-				if renvoTokIsKind(p, i, renvoTokReturn) || renvoTokIsKind(p, i, renvoTokIf) || renvoTokIsKind(p, i, renvoTokFor) || renvoTokIsKind(p, i, renvoTokSwitch) || renvoTokIsKind(p, i, renvoTokCase) || renvoTokIsKind(p, i, renvoTokDefault) || renvoTokIsKind(p, i, renvoTokVar) || renvoTokIsKind(p, i, renvoTokConst) || renvoTokIsKind(p, i, renvoTokBreak) || renvoTokIsKind(p, i, renvoTokContinue) || renvoTokIsKind(p, i, renvoTokGoto) {
+				if kind == renvoTokReturn || kind == renvoTokIf || kind == renvoTokFor || kind == renvoTokSwitch || kind == renvoTokCase || kind == renvoTokDefault || kind == renvoTokVar || kind == renvoTokConst || kind == renvoTokBreak || kind == renvoTokContinue || kind == renvoTokGoto {
 					return i
 				}
 				if renvoLineContinuesAfterPrevToken(p, i) {
-					line = renvoTokLine(p, i)
+					line = tokLine
 				} else {
 					return i
 				}
@@ -4600,18 +4605,18 @@ func renvoStatementLineEnd(p *renvoProgram, start int, end int) int {
 			brace--
 			closed = true
 		}
-		if i > start && renvoTokLine(p, i) != line && paren == 0 && brack == 0 && brace == 0 {
+		if i > start && tokLine != line && paren == 0 && brack == 0 && brace == 0 {
 			if renvoLineContinuesAfterPrevToken(p, i) {
-				line = renvoTokLine(p, i)
+				line = tokLine
 			} else {
 				if closed {
-					if c == '}' && renvoTokLine(p, i+1) == renvoTokLine(p, i) && (renvoTokCharIs(p, i+1, '(') || renvoTokCharIs(p, i+1, '.') || renvoTokCharIs(p, i+1, '[')) {
-						line = renvoTokLine(p, i)
+					if c == '}' && renvoTokLine(p, i+1) == tokLine && (renvoTokCharIs(p, i+1, '(') || renvoTokCharIs(p, i+1, '.') || renvoTokCharIs(p, i+1, '[')) {
+						line = tokLine
 						i++
 						continue
 					}
-					if c == '}' && renvoTokSingleChar(p, i+1) == '{' && renvoTokLine(p, i+1) == renvoTokLine(p, i) {
-						line = renvoTokLine(p, i)
+					if c == '}' && renvoTokSingleChar(p, i+1) == '{' && renvoTokLine(p, i+1) == tokLine {
+						line = tokLine
 						i++
 						continue
 					}
@@ -4730,11 +4735,12 @@ func renvoFindMatchingBrace(p *renvoProgram, openTok int, end int) int {
 
 func renvoFindAssignmentToken(p *renvoProgram, start int, end int) int {
 	renvoNonNil(p)
+	data := p.toks.data
 	i := start
 	paren := 0
 	brack := 0
 	for i < end {
-		c := renvoTokSingleChar(p, i)
+		c := byte(int(renvo_runtime_UnsafeInt32At(data, i*renvoTokenStride)) >> 24)
 		if c == '(' {
 			paren++
 		} else if c == ')' {
@@ -4997,7 +5003,11 @@ func renvoResolveGlobalInitTypes(m *renvoMeta) {
 		changed = false
 		for i := 0; i < len(m.globals); i++ {
 			global := &m.globals[i]
-			if global.typ != 0 || global.initStart >= global.initEnd {
+			// Constants retain their untyped representation until they are
+			// materialized in an expression context. Inferring float64 here
+			// would reinterpret the constant evaluator's scaled integer value
+			// without applying the required conversion.
+			if global.kind != renvoTokVar || global.typ != 0 || global.initStart >= global.initEnd {
 				continue
 			}
 			ep := renvoNewExprParse()

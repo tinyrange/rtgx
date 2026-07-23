@@ -11,6 +11,8 @@ const (
 	renvoRunDarwinProtWrite  = 2
 	renvoRunDarwinProtExec   = 4
 	renvoRunDarwinMapPrivate = 2
+	renvoRunDarwinMapFixed   = 0x10
+	renvoRunDarwinMapJIT     = 0x800
 	renvoRunDarwinMapAnon    = 0x1000
 	renvoRunDarwinRTLDNow    = 2
 )
@@ -37,6 +39,9 @@ func renvoRunDarwinDlclose(handle int) int { return -1 }
 
 // renvo:linkstatic /usr/lib/libSystem.B.dylib,sys_icache_invalidate
 func renvoRunDarwinInvalidateInstructionCache(address int, size int) {}
+
+// renvo:linkstatic /usr/lib/libSystem.B.dylib,pthread_jit_write_protect_np
+func renvoRunDarwinJITWriteProtect(enabled int) {}
 
 type renvoRunMapping struct {
 	base int
@@ -95,14 +100,45 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 		return -1
 	}
 	memorySize = renvoRunDarwinPageAlign(memorySize)
+	// Reserve one contiguous address range so the image's relative references
+	// remain valid, then replace each segment with its own mapping. Executable
+	// pages use MAP_JIT as required on Apple silicon; data and the arena remain
+	// ordinary writable mappings instead of becoming read-only when JIT write
+	// protection is enabled.
 	base := renvoRunDarwinMmap(
-		0, memorySize,
-		renvoRunDarwinProtRead|renvoRunDarwinProtWrite,
+		0, memorySize, 0,
 		renvoRunDarwinMapPrivate|renvoRunDarwinMapAnon,
 		-1, 0,
 	)
 	if base == -1 || base == 0 {
 		return -1
+	}
+	jitWritable := false
+	for i := 0; i < len(segments); i++ {
+		segment := segments[i]
+		if segment.MemorySize == 0 {
+			continue
+		}
+		start := renvoRunDarwinPageFloor(segment.Address)
+		end := renvoRunDarwinPageAlign(segment.Address + segment.MemorySize)
+		protection := renvoRunDarwinProtRead | renvoRunDarwinProtWrite
+		flags := renvoRunDarwinMapPrivate | renvoRunDarwinMapAnon | renvoRunDarwinMapFixed
+		if segment.Permissions&1 != 0 {
+			protection |= renvoRunDarwinProtExec
+			flags |= renvoRunDarwinMapJIT
+			if !jitWritable {
+				renvoRunDarwinJITWriteProtect(0)
+				jitWritable = true
+			}
+		}
+		mapped := renvoRunDarwinMmap(base+start, end-start, protection, flags, -1, 0)
+		if mapped != base+start {
+			if jitWritable {
+				renvoRunDarwinJITWriteProtect(1)
+			}
+			renvoRunDarwinMunmap(base, memorySize)
+			return -1
+		}
 	}
 	for i := 0; i < len(segments); i++ {
 		segment := segments[i]
@@ -115,6 +151,9 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 		path := renvoRunDarwinCString(libraries[i])
 		handles[i] = renvoRunDarwinDlopen(&path[0], renvoRunDarwinRTLDNow)
 		if handles[i] == 0 {
+			if jitWritable {
+				renvoRunDarwinJITWriteProtect(1)
+			}
 			renvoRunDarwinMunmap(base, memorySize)
 			return -1
 		}
@@ -130,6 +169,9 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 			}
 		}
 		if handle == 0 {
+			if jitWritable {
+				renvoRunDarwinJITWriteProtect(1)
+			}
 			renvoRunDarwinMunmap(base, memorySize)
 			return -1
 		}
@@ -140,6 +182,9 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 		symbolName := renvoRunDarwinCString(name)
 		address := renvoRunDarwinDlsym(handle, &symbolName[0])
 		if address == 0 {
+			if jitWritable {
+				renvoRunDarwinJITWriteProtect(1)
+			}
 			renvoRunDarwinMunmap(base, memorySize)
 			return -1
 		}
@@ -176,11 +221,17 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 		start := renvoRunDarwinPageFloor(segment.Address)
 		end := renvoRunDarwinPageAlign(segment.Address + segment.MemorySize)
 		if renvoRunDarwinMprotect(base+start, end-start, protection) != 0 {
+			if jitWritable {
+				renvoRunDarwinJITWriteProtect(1)
+			}
 			renvoRunDarwinMunmap(base, memorySize)
 			return -1
 		}
 	}
 	renvoRunDarwinInvalidateInstructionCache(base, memorySize)
+	if jitWritable {
+		renvoRunDarwinJITWriteProtect(1)
+	}
 	if s.stack == 0 {
 		s.stack = renvoRunDarwinMmap(
 			0, renvoRunJITStackSize,
